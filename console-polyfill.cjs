@@ -2,7 +2,6 @@
 // that ship without `globalThis.Console` and without `node:console`.Console.
 // Vitest / tinypool do `new Console({ stdout, stderr })` internally, so we
 // provide a constructor that delegates every method to the global `console`.
-/* eslint-disable no-undef */
 if (typeof globalThis.Console === "undefined") {
   const base = globalThis.console || {};
   const METHODS = [

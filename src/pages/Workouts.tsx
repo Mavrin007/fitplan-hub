@@ -51,7 +51,6 @@ import { todayKey, shortDate, prettyDate } from "@/lib/dates";
 import {
   ArrowUpDown,
   Bike,
-  Check,
   ChevronDown,
   Dumbbell,
   Flame,
@@ -575,7 +574,7 @@ export default function Workouts() {
                   {/* Упражнения — чипы в стиле приёмов пищи */}
                   <div className="p-4">
                     <ul className="space-y-2">
-                      {day.exercises.map((ex, i) => {
+                      {day.exercises.map((ex) => {
                         const tipKey = `${day.day}-${ex.name}`;
                         const tip = EXERCISE_TIPS[ex.name];
                         const tipOpen = !!tipsOpen[tipKey];

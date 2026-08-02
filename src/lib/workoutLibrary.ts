@@ -18,7 +18,6 @@ import {
   ACTIVITY_LABELS,
   EXPERIENCE_LABELS,
   GENDER_LABELS,
-  GOAL_LABELS,
   LIMITATION_LABELS,
 } from "./nutrition";
 

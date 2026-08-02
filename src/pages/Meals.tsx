@@ -60,9 +60,6 @@ function kcalPerServing(calories: number, servingGrams: number): number {
   return Math.round((calories * servingGrams) / 100);
 }
 
-/** Плавный «рост» бара от 0 до цели — как линии на графиках Прогресса. */
-const growTransition = { duration: 0.7, ease: "easeOut" as const };
-
 /** Допустимые в числовом поле символы: цифры, запятая, точка. */
 const DECIMAL_INPUT = (v: string) => v.replace(/[^\d.,]/g, "");
 
