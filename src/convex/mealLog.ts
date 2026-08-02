@@ -12,7 +12,7 @@ const MAX_CALORIES = 20000;
 const MAX_MACRO_G = 2000;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): ConvexError {
+function authError(): ConvexError<{ message: string }> {
   return new ConvexError({ message: "Сессия истекла — войдите заново." });
 }
 

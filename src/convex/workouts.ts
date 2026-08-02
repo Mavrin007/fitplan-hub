@@ -17,7 +17,7 @@ const MAX_NAME_LEN = 120;
 const MAX_SIGNATURE_LEN = 200;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): ConvexError {
+function authError(): ConvexError<{ message: string }> {
   return new ConvexError({ message: "Сессия истекла — войдите заново." });
 }
 

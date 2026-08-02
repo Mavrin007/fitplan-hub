@@ -8,7 +8,7 @@ const MIN_WEIGHT_KG = 20;
 const MAX_WEIGHT_KG = 500;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): ConvexError {
+function authError(): ConvexError<{ message: string }> {
   return new ConvexError({ message: "Сессия истекла — войдите заново." });
 }
 

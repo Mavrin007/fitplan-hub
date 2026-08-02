@@ -11,7 +11,7 @@ const MAX_MACRO_G = 2000;
 const DEFAULT_LIMIT = 300;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): ConvexError {
+function authError(): ConvexError<{ message: string }> {
   return new ConvexError({ message: "Сессия истекла — войдите заново." });
 }
 
