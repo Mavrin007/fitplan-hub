@@ -1016,6 +1016,359 @@ function buildAdaptedFor(
         : profile.targetWeightKg > profile.weightKg
           ? "профицит"
           : "удержание";
-    parts.push(`цель: ${profile
+    parts.push(`цель: ${profile.targetWeightKg} кг (${direction})`);
+  }
 
-[FILE_TOO_LARGE]: The combined read_files output exceeded the 100 000 character hard limit. This file was truncated after 33 619 characters. Read it separately or use code_search for the relevant section.
+  parts.push("стартовые веса рассчитаны по профилю");
+  // Штанговые упражнения: вес указан общим (гриф 20 кг включён).
+  parts.push("штанга — общий вес с грифом 20 кг");
+  if (profile.age >= 50) parts.push("щадящий режим с возрастом (+30 с отдыха)");
+  if (limitations.length > 0) {
+    parts.push(
+      `учтены ограничения: ${limitations.map((l) => LIMITATION_LABELS[l].toLowerCase()).join(", ")}`,
+    );
+  }
+  if (substitutions > 0) parts.push(`${substitutions} замен под профиль`);
+
+  const equipment = normalizeEquipment(profile.equipment);
+  parts.push(
+    equipment.length > 0
+      ? `инвентарь: ${equipmentSummary(profile.equipment)}`
+      : "инвентарь не выбран (полный зал)",
+  );
+
+  return parts.join(" · ");
+}
+
+/** Генерирует план тренировок с учётом полного профиля (пол, возраст, рост,
+ *  вес, активность, цель, опыт, инвентарь, ограничения, предпочитаемые дни):
+ *  заменяет рискованные для пользователя упражнения и те, что не подходят под
+ *  доступное оборудование, помечает приоритетные, назначает стартовые рабочие
+ *  веса и темп, добавляет разминку и объясняет изменения в заметках. */
+export function generateWorkoutTemplate(
+  profile: TrainingProfile,
+): WorkoutTemplate {
+  const { splitType, pool } = buildSessionPool(
+    profile.fitnessGoal,
+    profile.experienceLevel,
+  );
+  const sessions = Math.min(
+    6,
+    Math.max(
+      1,
+      profile.preferredTrainingDays ??
+        defaultSessions(profile.fitnessGoal, profile.experienceLevel),
+    ),
+  );
+  const name = `${splitType} — ${EXPERIENCE_LABELS[profile.experienceLevel].toLowerCase()}`;
+
+  // Дни распределяются равномерно по неделе.
+  const baseDays: WorkoutDay[] = Array.from({ length: sessions }, (_, i) => {
+    const seed = pool[i % pool.length];
+    const day = sessions === 1 ? 1 : Math.min(6, Math.floor((i * 7) / sessions));
+    return { day, focus: seed.name, exercises: seed.exercises };
+  });
+
+  const base: WorkoutTemplate = {
+    name,
+    splitType,
+    sessionsPerWeek: sessions,
+    durationWeeks: PLAN_WEEKS,
+    days: baseDays,
+  };
+
+  if (profile.heightCm <= 0 || profile.weightKg <= 0) {
+    return {
+      ...base,
+      howCalculated: buildHowCalculated(
+        profile,
+        {
+          build: "average",
+          heavy: false,
+          bmi: 0,
+          female: profile.gender === "female",
+          senior: profile.age >= 50,
+          mid: profile.age > 30 && profile.age < 50,
+          underweight: false,
+        },
+        normalizeLimitations(profile.limitations),
+        sessions,
+      ),
+    };
+  }
+
+  const { build, heavy, bmi } = classifyProfile(profile);
+  const limitations = normalizeLimitations(profile.limitations);
+  const ctx = {
+    build,
+    heavy,
+    bmi,
+    female: profile.gender === "female",
+    senior: profile.age >= 50,
+    mid: profile.age > 30 && profile.age < 50,
+    underweight: bmi < 18.5,
+  };
+  const availableEquipment = new Set(normalizeEquipment(profile.equipment));
+
+  let substitutions = 0;
+  const days = baseDays.map((d) => {
+    // Сначала антропометрия, потом ограничения, потом инвентарь — замены
+    // применяются к итоговым именам.
+    const anthrop = adaptDay(d, ctx);
+    const injured = adaptForInjuries(anthrop.day, limitations);
+    const equipped = adaptForEquipment(injured.day, availableEquipment);
+    substitutions += injured.notes.length + equipped.notes.length;
+    const notes = [...anthrop.notes, ...injured.notes, ...equipped.notes];
+
+    const withWeights: WorkoutDay = {
+      ...equipped.day,
+      warmup: buildWarmup(profile, ctx, limitations),
+      exercises: equipped.day.exercises.map((exercise) => ({
+        ...exercise,
+        weightKg: computeStartWeight(exercise, profile),
+        // Темп только для отягощённых упражнений.
+        tempo: REFERENCE_WEIGHTS[exercise.name] !== undefined
+          ? TEMPO_BY_GOAL[profile.fitnessGoal]
+          : undefined,
+      })),
+    };
+    return notes.length > 0 ? { ...withWeights, notes } : withWeights;
+  });
+
+  return {
+    name,
+    adaptedFor: buildAdaptedFor(profile, substitutions, limitations),
+    splitType,
+    sessionsPerWeek: sessions,
+    durationWeeks: PLAN_WEEKS,
+    howCalculated: buildHowCalculated(profile, ctx, limitations, sessions),
+    days,
+  };
+}
+
+/** Слепок профиля — по нему определяется, устарел ли сохранённый план. */
+export function profileSignature(profile: TrainingProfile): string {
+  return [
+    profile.gender,
+    profile.age,
+    profile.heightCm,
+    profile.weightKg,
+    profile.targetWeightKg ?? 0,
+    profile.activityLevel,
+    profile.fitnessGoal,
+    profile.experienceLevel,
+    normalizeEquipment(profile.equipment).slice().sort().join(","),
+    normalizeLimitations(profile.limitations).slice().sort().join(","),
+    profile.preferredTrainingDays ?? "",
+  ].join("|");
+}
+
+/* ------------------------------------------------------------------ */
+/* Техника выполнения и разминка                                       */
+/* ------------------------------------------------------------------ */
+
+/** Короткие подсказки по технике для каждого упражнения каталога и замен. */
+export const EXERCISE_TIPS: Record<string, string> = {
+  "Жим лёжа": "Лопатки сведены, стопы в пол. Опускайте штангу до касания груди, локти под углом ~45° — не растаскивайте их в стороны.",
+  "Жим стоя": "Корпус напряжён, ягодицы сжаты, не прогибайтесь в пояснице. Штанга движется вертикально вдоль лица.",
+  "Жим гантелей под наклоном": "Спина прижата к скамье. Опускайте гантели до уровня груди, не сводя локти внутрь.",
+  "Махи в стороны": "Локти чуть согнуты, поднимайте гантели до уровня плеч. Без рывков корпусом — вес не должен «летать».",
+  "Разгибание рук на блоке": "Локти прижаты к корпусу. Разгибайте руки до конца, не наклоняясь вперёд всем телом.",
+  "Становая тяга": "Спина прямая, штанга скользит по ногам. Подъём начинайте ногами, вверху не отклоняйтесь назад.",
+  "Подтягивания": "Не раскачивайтесь. Подтягивайтесь до подбородка над перекладиной, опускайтесь полностью — без «половинок».",
+  "Тяга штанги в наклоне": "Корпус в наклоне ~45°, спина прямая. Тяните штангу к животу, локти вдоль корпуса.",
+  "Тяга к лицу": "Тяните трос к лицу, разводя локти в стороны и сводя лопатки. Работают задние дельты, а не бицепс.",
+  "Сгибания рук со штангой": "Локти прижаты к корпусу, без раскачивания. Поднимайте штангу до конца, опускайте медленно.",
+  "Приседания со штангой": "Стопы на ширине плеч, колени в сторону носков. Грудь вперёд, приседайте до параллели бедра полу.",
+  "Румынская тяга": "Спина прямая, лёгкий сгиб в коленях. Опускайте штангу вдоль ног до натяжения задней поверхности бедра.",
+  "Жим ногами": "Спина и таз прижаты к сиденью. Не выпрямляйте колени до щелчка — оставляйте лёгкий сгиб вверху.",
+  "Выпады в ходьбе": "Шаг шире обычного, корпус вертикально. Колено задней ноги почти касается пола, отталкивайтесь пяткой.",
+  "Подъёмы на носки": "Медленно вниз до растяжения икры, резко вверх с паузой на секунду. Полная амплитуда обязательна.",
+  "Тяга верхнего блока": "Тяните к верху груди, а не за голову. Локти вниз, лопатки сводите в конечной точке.",
+  "Тяга горизонтального блока": "Спина прямая, не раскачивайтесь. Тяните рукоять к животу, сводя лопатки.",
+  "Гоблет-приседания": "Гантель у груди, локти вниз. Приседайте глубоко, держите пятки на полу и спину прямой.",
+  "Махи гирей": "Движение от таза, а не от рук: резкий толчок бёдрами вперёд, гиря летит до уровня груди.",
+  "Степ-ап с весом": "Полная стопа на платформе. Подъём за счёт ноги на платформе, без отталкивания задней ногой.",
+  "Запрыгивания на тумбу": "Приземляйтесь мягко на полную стопу, колени слегка согнуты. Начинайте с невысокой тумбы.",
+  "Приседания": "Вес на пятки, колени в сторону носков. Спина прямая, глубина комфортная, без округления поясницы.",
+  "Отжимания": "Корпус — прямая линия от головы до пяток. Опускайтесь, пока грудь не коснётся пола, без прогиба в пояснице.",
+  "Планка": "Прямая линия тела, пресс и ягодицы напряжены. Не проваливайте поясницу и не поднимайте таз.",
+  "Скалолаз": "Плечи над ладонями, корпус в планке. Поочерёдно подтягивайте колени к груди в быстром темпе.",
+  "Приседания без веса": "Вес на пятки, спина прямая. Приседайте до комфортной глубины, колени не заваливайте внутрь.",
+  "Подъём коленей в висе": "Не раскачивайтесь. Поднимайте колени до уровня таза, опускайте медленно, без рывков.",
+  "Скручивания «велосипед»": "Поясница прижата к полу. Вращайте корпус, подтягивая локоть к противоположному колену.",
+  "Джампинг-джек": "Мягкое приземление на переднюю часть стопы. Руки и ноги движутся синхронно, темп средний.",
+  "Бёрпи": "Из упора лёжа подтяните ноги прыжком, затем выпрыгните вверх. Держите спину прямой в упоре.",
+  "Марш с подъёмом коленей": "Колени поднимайте до уровня таза, спина прямая. Работайте руками в такт.",
+  "Ходьба / бег": "Держите ровный темп, в котором можете говорить. Шаг лёгкий, приземление на середину стопы.",
+  "Спринт-интервалы": "20 секунд максимального ускорения, затем полное восстановление. Не форсируйте старт — разогрейтесь.",
+  "Птица-собака": "Стоя на четвереньках, вытяните противоположные руку и ногу. Спина прямая, не прогибайтесь.",
+  "Тяга гантели в наклоне": "Опора на скамью или колено. Спина параллельна полу, тяните гантель к поясу, локти вдоль корпуса.",
+  "Французский жим с гантелью": "Локти смотрят вверх и не расходятся. Опускайте гантель за голову, разгибайте руки до конца.",
+  "Разведение гантелей в наклоне": "Корпус в наклоне, спина прямая. Разводите гантели в стороны, сводя лопатки вверху.",
+  "Сгибания с гантелями": "Локти прижаты к корпусу, без раскачивания. Поднимайте до конца, опускайте медленно.",
+  "Ягодичный мостик": "Стопы у таза, поднимайте таз до прямой линии тела. Вверху сожмите ягодицы на секунду.",
+};
+
+/** Разминочные подходы: нарастающий процент от рабочего веса. */
+export interface WarmUpSet {
+  weightKg: number;
+  reps: string;
+}
+
+/** Строит разминочную лестницу от рабочего веса: 40% → 60% → 80%,
+ *  округлённую до блинов по 2.5 кг. `minKg` — нижняя граница веса
+ *  (для штанговых упражнений — вес грифа 20 кг: разминочный подход на
+ *  штанге не может быть легче пустого грифа). Без веса (собственный
+ *  вес/кардио) возвращает пустой список — разминка не нужна. */
+export function warmUpSets(
+  weightKg: number | undefined,
+  minKg = 0,
+): WarmUpSet[] {
+  if (weightKg === undefined || !Number.isFinite(weightKg) || weightKg <= 0) {
+    return [];
+  }
+  const steps = [
+    { factor: 0.4, reps: "8–10" },
+    { factor: 0.6, reps: "6–8" },
+    { factor: 0.8, reps: "4–6" },
+  ];
+  return steps.map((s) => ({
+    weightKg: Math.min(weightKg, roundToPlate(weightKg * s.factor, minKg)),
+    reps: s.reps,
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/* Прогрессия нагрузки: 4-недельный цикл                               */
+/* ------------------------------------------------------------------ */
+
+type ExerciseKind = "weighted" | "bodyweight" | "timed" | "cardio";
+
+function classifyExercise(ex: Exercise): ExerciseKind {
+  if (ex.reps.includes("мин")) return "cardio";
+  if (ex.reps.includes("с")) return "timed";
+  if (BODYWEIGHT_NAMES.has(ex.name)) return "bodyweight";
+  return "weighted";
+}
+
+/** Сдвигает диапазон повторений на delta: «6–8» → «7–9», «5» → «5–6»,
+ *  «10–12 / нога» → «11–13 / нога». Строки без чисел возвращает как есть. */
+function shiftReps(reps: string, delta: number): string {
+  const range = reps.match(/^(\d+)\s*[–—-]\s*(\d+)(.*)$/);
+  if (range) {
+    return `${parseInt(range[1], 10) + delta}–${parseInt(range[2], 10) + delta}${range[3]}`;
+  }
+  const single = reps.match(/^(\d+)(.*)$/);
+  if (single) {
+    return `${parseInt(single[1], 10)}–${parseInt(single[1], 10) + delta}${single[2]}`;
+  }
+  return reps;
+}
+
+/** Сдвигает время/секунды: «30–45с» → «35–50с», «20с / 40с отдых» → «25с / 40с отдых». */
+function shiftTime(reps: string, delta: number): string {
+  const range = reps.match(/^(\d+)\s*[–—-]\s*(\d+)(.*)$/);
+  if (range) {
+    return `${parseInt(range[1], 10) + delta}–${parseInt(range[2], 10) + delta}${range[3]}`;
+  }
+  const single = reps.match(/^(\d+)(.*)$/);
+  if (single) {
+    return `${parseInt(single[1], 10) + delta}${single[2]}`;
+  }
+  return reps;
+}
+
+/** Рабочий вес упражнения на неделю цикла (индекс 0..3):
+ *  база — стартовый, прогресс — тот же, пик — +2.5 кг, разгрузка — −20%.
+ *  `minKg` ограничивает снижение: для штанги разгрузка не опускается ниже
+ *  веса грифа (пустой гриф — минимальная нагрузка). */
+function progressWeight(
+  weightKg: number | undefined,
+  weekIdx: number,
+  minKg = 0,
+): number | undefined {
+  if (weightKg === undefined) return undefined;
+  if (weekIdx === 0 || weekIdx === 1) return weightKg;
+  if (weekIdx === 2) return roundToPlate(weightKg + 2.5, minKg);
+  return roundToPlate(weightKg * 0.8, minKg);
+}
+
+/** Пересчитывает упражнение для конкретной недели цикла (индекс 0..3):
+ *  Неделя 1 — база, Неделя 2 — те же веса +1 повтор (двойная прогрессия),
+ *  Неделя 3 — +2.5 кг (для безвесовых — +1 подход), повторения к базе,
+ *  Неделя 4 — разгрузка: −20% веса / −1 подход (штанга — не ниже грифа). */
+function progressExercise(ex: Exercise, weekIdx: number): Exercise {
+  const minKg = minWeightFor(ex.name);
+  const weightKg = progressWeight(ex.weightKg, weekIdx, minKg);
+  if (weekIdx === 0) return ex;
+
+  const kind = classifyExercise(ex);
+
+  // Неделя 2 — двойная прогрессия: та же нагрузка, больше повторений.
+  if (weekIdx === 1) {
+    if (kind === "weighted") {
+      return {
+        ...ex,
+        weightKg,
+        reps: shiftReps(ex.reps, 1),
+        weightNote: "те же веса, +1 повтор",
+      };
+    }
+    if (kind === "bodyweight") {
+      return { ...ex, reps: shiftReps(ex.reps, 1), weightNote: "+1 повтор" };
+    }
+    if (kind === "timed") {
+      return { ...ex, reps: shiftTime(ex.reps, 5), weightNote: "+5 секунд" };
+    }
+    return { ...ex, reps: shiftTime(ex.reps, 5), weightNote: "+5 минут" };
+  }
+
+  // Неделя 3 — пик: вес вверх, повторения к базе.
+  if (weekIdx === 2) {
+    if (kind === "weighted") {
+      return { ...ex, weightKg, weightNote: "+2.5 кг" };
+    }
+    if (kind === "bodyweight" || kind === "timed") {
+      return { ...ex, sets: ex.sets + 1, weightNote: "+1 подход" };
+    }
+    return { ...ex, reps: shiftTime(ex.reps, 10), weightNote: "+10 минут" };
+  }
+
+  // Неделя 4 — разгрузка: меньше объёма и веса, восстановление.
+  if (kind === "cardio") {
+    return { ...ex, weightNote: "−30% объёма" };
+  }
+  return {
+    ...ex,
+    weightKg,
+    sets: Math.max(2, ex.sets - 1),
+    weightNote: kind === "weighted" ? "−20% веса" : "лёгкий день",
+  };
+}
+
+/** Раскладывает недельный шаблон на цикл прогрессии из `weeks` недель
+ *  (по умолчанию 4): каждая неделя содержит те же дни, но с пересчитанными
+ *  подходами/повторами и рабочими весами. */
+export function applyProgression(
+  template: WorkoutTemplate,
+  weeks: number = PLAN_WEEKS,
+): ProgressionWeek[] {
+  return Array.from({ length: weeks }, (_, i) => {
+    const phase = PROGRESSION_PHASES[i % PROGRESSION_PHASES.length];
+    const days = template.days.map((day) => ({
+      ...day,
+      exercises: day.exercises.map((exercise) =>
+        progressExercise(exercise, i),
+      ),
+    }));
+    return {
+      week: i + 1,
+      label: `Неделя ${i + 1} · ${phase.label}`,
+      weightNote: phase.hint,
+      days,
+    };
+  });
+}
+
+export const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
