@@ -1,0 +1,317 @@
+/* DO NOT CHANGE */
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+/* DO NOT CHANGE */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* M3: акцент + роли */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-deep: var(--brand-deep);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-on-secondary: var(--on-secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary-container: var(--on-secondary-container);
+  --color-tertiary: var(--tertiary);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-on-tertiary-container: var(--on-tertiary-container);
+  --color-on-error: var(--on-error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+  --color-surface: var(--surface);
+  --color-on-surface: var(--on-surface);
+  --color-surface-variant: var(--surface-variant);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+}
+
+/* Material Design 3: Roboto, tonal палитра, elevation-уровни. */
+@theme {
+  --font-sans: "Roboto", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* M3 elevation 0–5 */
+  --shadow-elev-0: none;
+  --shadow-elev-1: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px 1px oklch(0 0 0 / 0.08);
+  --shadow-elev-2: 0 1px 2px oklch(0 0 0 / 0.05), 0 2px 6px 2px oklch(0 0 0 / 0.08);
+  --shadow-elev-3: 0 1px 3px oklch(0 0 0 / 0.06), 0 4px 8px 3px oklch(0 0 0 / 0.1);
+  --shadow-elev-4: 0 2px 3px oklch(0 0 0 / 0.08), 0 8px 12px 4px oklch(0 0 0 / 0.12);
+  --shadow-elev-5: 0 4px 4px oklch(0 0 0 / 0.1), 0 12px 20px 6px oklch(0 0 0 / 0.14);
+  /* Совместимость: старые имена теней = M3-уровням */
+  --shadow-soft: var(--shadow-elev-1);
+  --shadow-lifted: var(--shadow-elev-3);
+}
+
+/* CHANGE VALUES FOR THEME — M3 light scheme (teal primary) */
+:root {
+  /* Нативные контролы (инпуты, спиннеры, скроллбары) — светлые */
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.002 195);
+  --foreground: oklch(0.16 0.005 195);
+  --card: oklch(0.97 0.004 195);
+  --card-foreground: oklch(0.16 0.005 195);
+  --popover: oklch(0.93 0.006 195);
+  --popover-foreground: oklch(0.16 0.005 195);
+  --primary: oklch(0.45 0.11 185);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.92 0.02 195);
+  --secondary-foreground: oklch(0.25 0.03 195);
+  --muted: oklch(0.93 0.005 195);
+  --muted-foreground: oklch(0.45 0.008 195);
+  --accent: oklch(0.92 0.02 195);
+  --accent-foreground: oklch(0.25 0.03 195);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.86 0.008 195);
+  --input: oklch(0.6 0.01 195);
+  --ring: oklch(0.45 0.11 185);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.97 0.004 195);
+  --sidebar-foreground: oklch(0.16 0.005 195);
+  --sidebar-primary: oklch(0.45 0.11 185);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.92 0.02 195);
+  --sidebar-accent-foreground: oklch(0.25 0.03 195);
+  --sidebar-border: oklch(0.86 0.008 195);
+  --sidebar-ring: oklch(0.45 0.11 185);
+  /* M3: акцент = primary */
+  --brand: oklch(0.45 0.11 185);
+  --brand-foreground: oklch(0.99 0 0);
+  --brand-soft: oklch(0.9 0.06 185);
+  --brand-deep: oklch(0.25 0.07 185);
+  /* M3 tonal roles */
+  --on-primary: oklch(0.99 0 0);
+  --primary-container: oklch(0.9 0.06 185);
+  --on-primary-container: oklch(0.25 0.07 185);
+  --on-secondary: oklch(0.99 0 0);
+  --secondary-container: oklch(0.92 0.02 195);
+  --on-secondary-container: oklch(0.25 0.03 195);
+  --tertiary: oklch(0.52 0.07 240);
+  --on-tertiary: oklch(0.99 0 0);
+  --tertiary-container: oklch(0.93 0.04 240);
+  --on-tertiary-container: oklch(0.26 0.05 240);
+  --on-error: oklch(0.99 0 0);
+  --error-container: oklch(0.93 0.04 27);
+  --on-error-container: oklch(0.4 0.16 27);
+  --surface: oklch(0.985 0.002 195);
+  --on-surface: oklch(0.16 0.005 195);
+  --surface-variant: oklch(0.93 0.005 195);
+  --on-surface-variant: oklch(0.45 0.008 195);
+  --outline: oklch(0.6 0.01 195);
+  --outline-variant: oklch(0.86 0.008 195);
+  --surface-container-lowest: oklch(1 0 0);
+  --surface-container-low: oklch(0.97 0.004 195);
+  --surface-container: oklch(0.95 0.005 195);
+  --surface-container-high: oklch(0.93 0.006 195);
+  --surface-container-highest: oklch(0.9 0.007 195);
+  --inverse-surface: oklch(0.24 0.006 195);
+  --inverse-on-surface: oklch(0.95 0.004 195);
+}
+
+/* M3 dark scheme */
+.dark {
+  /* Нативные контролы (инпуты, спиннеры, скроллбары) — тёмные */
+  color-scheme: dark;
+  --background: oklch(0.16 0.005 195);
+  --foreground: oklch(0.93 0.005 195);
+  --card: oklch(0.2 0.006 195);
+  --card-foreground: oklch(0.93 0.005 195);
+  --popover: oklch(0.28 0.007 195);
+  --popover-foreground: oklch(0.93 0.005 195);
+  --primary: oklch(0.78 0.09 185);
+  --primary-foreground: oklch(0.2 0.06 185);
+  --secondary: oklch(0.38 0.03 195);
+  --secondary-foreground: oklch(0.92 0.02 195);
+  --muted: oklch(0.35 0.007 195);
+  --muted-foreground: oklch(0.72 0.008 195);
+  --accent: oklch(0.38 0.03 195);
+  --accent-foreground: oklch(0.92 0.02 195);
+  --destructive: oklch(0.78 0.19 27);
+  --border: oklch(0.32 0.008 195);
+  --input: oklch(0.55 0.01 195);
+  --ring: oklch(0.78 0.09 185);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.2 0.006 195);
+  --sidebar-foreground: oklch(0.93 0.005 195);
+  --sidebar-primary: oklch(0.78 0.09 185);
+  --sidebar-primary-foreground: oklch(0.2 0.06 185);
+  --sidebar-accent: oklch(0.38 0.03 195);
+  --sidebar-accent-foreground: oklch(0.92 0.02 195);
+  --sidebar-border: oklch(0.32 0.008 195);
+  --sidebar-ring: oklch(0.78 0.09 185);
+  --brand: oklch(0.78 0.09 185);
+  --brand-foreground: oklch(0.2 0.06 185);
+  --brand-soft: oklch(0.38 0.08 185);
+  --brand-deep: oklch(0.9 0.06 185);
+  --on-primary: oklch(0.2 0.06 185);
+  --primary-container: oklch(0.38 0.08 185);
+  --on-primary-container: oklch(0.9 0.06 185);
+  --on-secondary: oklch(0.28 0.03 195);
+  --secondary-container: oklch(0.38 0.03 195);
+  --on-secondary-container: oklch(0.92 0.02 195);
+  --tertiary: oklch(0.8 0.07 240);
+  --on-tertiary: oklch(0.28 0.05 240);
+  --tertiary-container: oklch(0.38 0.06 240);
+  --on-tertiary-container: oklch(0.93 0.04 240);
+  --on-error: oklch(0.4 0.16 27);
+  --error-container: oklch(0.48 0.18 27);
+  --on-error-container: oklch(0.93 0.04 27);
+  --surface: oklch(0.16 0.005 195);
+  --on-surface: oklch(0.93 0.005 195);
+  --surface-variant: oklch(0.35 0.007 195);
+  --on-surface-variant: oklch(0.72 0.008 195);
+  --outline: oklch(0.55 0.01 195);
+  --outline-variant: oklch(0.32 0.008 195);
+  --surface-container-lowest: oklch(0.12 0.004 195);
+  --surface-container-low: oklch(0.2 0.006 195);
+  --surface-container: oklch(0.24 0.006 195);
+  --surface-container-high: oklch(0.28 0.007 195);
+  --surface-container-highest: oklch(0.32 0.007 195);
+  --inverse-surface: oklch(0.93 0.005 195);
+  --inverse-on-surface: oklch(0.24 0.006 195);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Выделение текста — инверсия темы: в светлой тёмный фон, в тёмной светлый. */
+  ::selection {
+    background: var(--foreground);
+    color: var(--background);
+  }
+  button:not([disabled]),
+  [role="button"]:not([disabled]) {
+    cursor: pointer;
+  }
+}
+
+/* Editorial micro-typography helpers */
+@layer utilities {
+  .label-overline {
+    @apply font-mono text-[10px] uppercase tracking-[0.22em];
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Тонкая сетка-фон (тема-aware, работает в тёмной теме через --foreground). */
+  .bg-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 44px 44px;
+  }
+  /* Плавное затухание к низу / по краям (для сетки и декора). */
+  .mask-fade-b {
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+  }
+  .mask-fade-radial {
+    mask-image: radial-gradient(
+      ellipse 75% 65% at 50% 0%,
+      black 35%,
+      transparent 100%
+    );
+    -webkit-mask-image: radial-gradient(
+      ellipse 75% 65% at 50% 0%,
+      black 35%,
+      transparent 100%
+    );
+  }
+  /* Градиентный текст для акцентных цифр. */
+  .text-gradient {
+    background: linear-gradient(
+      120deg,
+      var(--foreground) 20%,
+      var(--brand) 90%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* ===== M3 type scale (Roboto) ===== */
+  .m3-display-large { font-size: 3.5625rem; line-height: 4rem; font-weight: 400; letter-spacing: -0.015625em; }
+  .m3-display-medium { font-size: 2.8125rem; line-height: 3.25rem; font-weight: 400; letter-spacing: 0; }
+  .m3-display-small { font-size: 2.25rem; line-height: 2.75rem; font-weight: 400; letter-spacing: 0; }
+  .m3-headline-large { font-size: 2rem; line-height: 2.5rem; font-weight: 400; letter-spacing: 0; }
+  .m3-headline-medium { font-size: 1.75rem; line-height: 2.25rem; font-weight: 400; letter-spacing: 0; }
+  .m3-headline-small { font-size: 1.5rem; line-height: 2rem; font-weight: 400; letter-spacing: 0; }
+  .m3-title-large { font-size: 1.375rem; line-height: 1.75rem; font-weight: 500; letter-spacing: 0; }
+  .m3-title-medium { font-size: 1rem; line-height: 1.5rem; font-weight: 500; letter-spacing: 0.009375em; }
+  .m3-title-small { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.00625em; }
+  .m3-body-large { font-size: 1rem; line-height: 1.5rem; font-weight: 400; letter-spacing: 0.009375em; }
+  .m3-body-medium { font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; letter-spacing: 0.015625em; }
+  .m3-body-small { font-size: 0.75rem; line-height: 1rem; font-weight: 400; letter-spacing: 0.025em; }
+  .m3-label-large { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.00625em; }
+  .m3-label-medium { font-size: 0.75rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.03125em; }
+  .m3-label-small { font-size: 0.6875rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.05em; }
+}
