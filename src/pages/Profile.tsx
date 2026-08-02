@@ -51,6 +51,7 @@ import {
 } from "@/lib/workoutLibrary";
 import { todayKey, shortDate } from "@/lib/dates";
 import { cn, parseLocalNumber } from "@/lib/utils";
+import { formatConvexError } from "@/lib/errors";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -326,17 +327,13 @@ export default function Profile() {
       toast.success("Профиль сохранён");
     } catch (err) {
       console.error(err);
-      // Показываем реальную причину из сервера (убирая служебную обёртку
-      // "[CONVEX M(...)] [Request ID: ...]") — так видна настоящая ошибка.
-      const raw = err instanceof Error ? err.message : "Неизвестная ошибка";
-      const detail = raw
-        .replace(/^\[CONVEX [^\]]*\]\s*/, "")
-        .replace(/^\[Request ID: [^\]]*\]\s*/, "")
-        .trim();
+      // Сервер теперь кидает ConvexError с понятным { message } — показываем
+      // его пользователю; если причина не пришла, показываем запасной текст.
       toast.error(
-        detail
-          ? `Не удалось сохранить профиль: ${detail}`
-          : "Не удалось сохранить профиль",
+        formatConvexError(
+          err,
+          "Не удалось сохранить профиль. Попробуйте ещё раз.",
+        ),
       );
     } finally {
       setSaving(false);
@@ -354,8 +351,11 @@ export default function Profile() {
       await addWeight({ date: todayKey(), weightKg: kg });
       setWeightInput("");
       toast.success("Вес записан");
-    } catch {
-      toast.error("Не удалось записать вес");
+    } catch (err) {
+      console.error(err);
+      toast.error(
+        formatConvexError(err, "Не удалось записать вес. Попробуйте ещё раз."),
+      );
     }
   };
 
