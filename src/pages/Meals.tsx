@@ -192,7 +192,11 @@ export default function Meals() {
       toast.success(
         `Скопировано записей: ${entries.length} из ${shortDate(copyFromDate)}`,
       );
-    } catch {
+    } catch (err) {
+      console.error(
+        "[Meals] Ошибка копирования записей из " + copyFromDate + " в сегодня:",
+        err,
+      );
       toast.error("Не удалось скопировать записи");
     } finally {
       setCopying(false);
@@ -222,7 +226,8 @@ export default function Meals() {
       });
       toast.success(`${food.name} — добавлено`);
       closeDialog();
-    } catch {
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления продукта из библиотеки:", err);
       toast.error("Не удалось добавить продукт");
     }
   };
@@ -254,7 +259,8 @@ export default function Meals() {
       });
       toast.success(`${customName.trim()} — добавлено`);
       closeDialog();
-    } catch {
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления своего продукта:", err);
       toast.error("Не удалось добавить продукт");
     }
   };
@@ -288,7 +294,8 @@ export default function Meals() {
       });
       toast.success("Запись обновлена");
       closeDialog();
-    } catch {
+    } catch (err) {
+      console.error(`[Meals] Ошибка обновления записи (id=${editingEntry._id}):`, err);
       toast.error("Не удалось обновить запись");
     }
   };
@@ -312,7 +319,8 @@ export default function Meals() {
       });
       toast.success("План на день добавлен в дневник");
       setShowPlan(false);
-    } catch {
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления плана на день в дневник:", err);
       toast.error("Не удалось добавить план");
     }
   };
@@ -345,7 +353,8 @@ export default function Meals() {
         carbs: "",
         fat: "",
       });
-    } catch {
+    } catch (err) {
+      console.error("[Meals] Ошибка сохранения своего продукта:", err);
       toast.error("Не удалось сохранить продукт");
     }
   };
