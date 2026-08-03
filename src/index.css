@@ -298,6 +298,146 @@
     color: transparent;
   }
 
+  /* ===== Декоративные фоны ===== */
+
+  /* Aurora-меш: мягкие цветные пятна, анимируется в .animate-aurora. */
+  .bg-aurora {
+    background:
+      radial-gradient(
+        42% 55% at 12% 18%,
+        color-mix(in oklch, var(--brand) 14%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        38% 50% at 88% 12%,
+        color-mix(in oklch, var(--tertiary) 12%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        50% 60% at 70% 88%,
+        color-mix(in oklch, var(--brand) 10%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        34% 44% at 22% 82%,
+        color-mix(in oklch, var(--tertiary) 9%, transparent) 0%,
+        transparent 70%
+      );
+  }
+
+  /* Тонкая точечная сетка (контролируем плотность через background-size). */
+  .bg-dots {
+    background-image: radial-gradient(
+      color-mix(in oklch, var(--foreground) 7%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+
+  /* Крупная диагональная штриховка — для «эскизных» зон и CTA. */
+  .bg-diagonal {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      color-mix(in oklch, var(--foreground) 4%, transparent) 0 1px,
+      transparent 1px 12px
+    );
+  }
+
+  /* Мягкое свечение вокруг объекта (цвет задаётся через --glow). */
+  .glow {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--glow, var(--brand)) 18%, transparent),
+      0 8px 40px -8px color-mix(in oklch, var(--glow, var(--brand)) 45%, transparent);
+  }
+
+  /* Карточка «парит» над фоном: бордер + мягкая тень + подсветка сверху. */
+  .card-lift {
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .card-lift:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in oklch, var(--ring) 45%, transparent);
+    box-shadow: var(--shadow-elev-3);
+  }
+
+  /* Плавное «дыхание» для акцентных точек. */
+  .animate-pulse-soft {
+    animation: pulse-soft 2.6s ease-in-out infinite;
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /* Блик, пробегающий по кнопке/карточке слева направо. */
+  .animate-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  .animate-shine::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 40%,
+      color-mix(in srgb, white 28%, transparent) 50%,
+      transparent 60%
+    );
+    transform: translateX(-130%);
+    transition: transform 0.7s ease;
+    pointer-events: none;
+  }
+  .animate-shine:hover::after {
+    transform: translateX(130%);
+  }
+
+  /* Медленное парение для плавающих элементов (бейджей, орбов). */
+  .animate-float {
+    animation: float-y 6s ease-in-out infinite;
+  }
+  @keyframes float-y {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  /* Анимированный aurora: пятна медленно смещаются по кругу. */
+  .animate-aurora {
+    animation: aurora-drift 18s ease-in-out infinite alternate;
+  }
+  @keyframes aurora-drift {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    100% {
+      transform: translate3d(2%, -2%, 0) scale(1.06);
+    }
+  }
+
+  /* Горизонтальный бегунок карусели (для макетов/тизеров). */
+  .animate-marquee {
+    animation: marquee 30s linear infinite;
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
   /* ===== M3 type scale (Roboto) ===== */
   .m3-display-large { font-size: 3.5625rem; line-height: 4rem; font-weight: 400; letter-spacing: -0.015625em; }
   .m3-display-medium { font-size: 2.8125rem; line-height: 3.25rem; font-weight: 400; letter-spacing: 0; }

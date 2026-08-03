@@ -59,10 +59,10 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-7xl">
+    <div className="bg-aurora relative min-h-screen bg-background text-foreground">
+      <div className="relative mx-auto flex w-full max-w-7xl">
         {/* Navigation rail (desktop) */}
-        <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r px-5 py-8 lg:flex">
+        <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-background/70 px-5 py-8 backdrop-blur lg:flex">
           <div className="flex items-center justify-between pr-1">
             <NavLink to="/" className="group flex items-baseline gap-1.5">
               <span className="text-sm font-semibold tracking-[0.28em] uppercase transition-opacity group-hover:opacity-70">
@@ -171,7 +171,7 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={openAssistant}
-                  className="flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-all hover:opacity-90 active:scale-[0.96]"
+                  className="flex items-center gap-1 rounded-full bg-gradient-to-br from-brand to-brand-deep px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-elev-1 transition-all hover:shadow-elev-2 hover:brightness-110 active:scale-[0.96]"
                 >
                   <Sparkles className="size-3.5" />
                   Ассистент
@@ -190,7 +190,7 @@ export default function Dashboard() {
 
           {/* Desktop header: greeting + assistant (переключатель темы живёт
               в рейле — не дублируем его здесь) */}
-          <div className="hidden items-center justify-between border-b px-8 py-4 lg:flex lg:px-12">
+          <div className="sticky top-0 z-10 hidden items-center justify-between border-b bg-background/70 px-8 py-4 backdrop-blur lg:flex lg:px-12">
             <div>
               <p className="text-sm font-medium">{greeting()}</p>
               <p className="label-overline mt-0.5 text-muted-foreground">{todayLabel()}</p>

@@ -98,7 +98,7 @@ function MockDashboard() {
         initial={{ opacity: 0, y: 24, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.7, delay: 0.3, ease: EASE }}
-        className="overflow-hidden rounded-xl border bg-card"
+        className="glow overflow-hidden rounded-xl border bg-card"
       >
         {/* Полоса окна */}
         <div className="flex items-center justify-between border-b px-4 py-2.5">
@@ -496,7 +496,7 @@ const STEPS = [
 
 export default function Landing() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground">
       {/* Nav */}
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <Link to="/" className="group flex items-baseline gap-1.5">
@@ -526,14 +526,23 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="relative mx-auto w-full max-w-6xl px-6 pb-16 pt-12 sm:pt-20">
-        {/* фоновый декор */}
+        {/* фоновый декор: aurora-меш + сетка + шум */}
         <div
           aria-hidden
           className="bg-grid mask-fade-b pointer-events-none absolute inset-0 -z-10 opacity-60"
         />
         <div
           aria-hidden
+          className="bg-aurora animate-aurora pointer-events-none absolute -inset-16 -z-10"
+        />
+        <div
+          aria-hidden
           className="pointer-events-none absolute -top-24 left-1/2 -z-10 h-72 w-[42rem] max-w-full -translate-x-1/2 rounded-full bg-foreground/[0.04] blur-3xl"
+        />
+        {/* плавающий декоративный орб */}
+        <div
+          aria-hidden
+          className="animate-float pointer-events-none absolute right-[8%] top-10 -z-10 hidden size-24 rounded-full border border-dashed lg:block"
         />
 
         <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:gap-8">
@@ -569,7 +578,7 @@ export default function Landing() {
             >
               <Link
                 to="/auth"
-                className="group inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background transition-opacity hover:opacity-90"
+                className="animate-shine group inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-brand to-brand-deep px-6 py-3 text-sm font-medium text-primary-foreground shadow-elev-1 transition-all hover:shadow-elev-3 hover:brightness-110 active:scale-[0.97]"
               >
                 Начать вести дневник
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -648,7 +657,7 @@ export default function Landing() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-60px" }}
                 transition={{ duration: 0.5, delay: i * 0.06, ease: EASE }}
-                className="group relative bg-background p-6 transition-colors hover:bg-secondary/40"
+                className="card-lift group relative bg-background p-6 hover:bg-secondary/40"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs num text-muted-foreground transition-colors group-hover:text-foreground">
@@ -758,6 +767,19 @@ export default function Landing() {
             aria-hidden
             className="bg-grid mask-fade-radial pointer-events-none absolute inset-0 -z-10 opacity-50"
           />
+          <div
+            aria-hidden
+            className="bg-aurora animate-aurora pointer-events-none absolute -inset-10 -z-10"
+          />
+          <div
+            aria-hidden
+            className="animate-float pointer-events-none absolute left-[14%] top-12 -z-10 hidden size-14 rounded-full border border-dashed sm:block"
+          />
+          <div
+            aria-hidden
+            className="animate-float pointer-events-none absolute right-[16%] bottom-10 -z-10 hidden size-10 rounded-full border border-dashed sm:block"
+            style={{ animationDelay: "1.4s" }}
+          />
           <motion.div {...fade}>
             <p className="label-overline text-muted-foreground">
               Всё начинается с профиля
@@ -770,7 +792,7 @@ export default function Landing() {
             </p>
             <Link
               to="/auth"
-              className="group mt-8 inline-flex items-center gap-2 rounded-full bg-foreground px-7 py-3 text-sm font-medium text-background transition-opacity hover:opacity-90"
+              className="animate-shine group mt-8 inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-brand to-brand-deep px-7 py-3 text-sm font-medium text-primary-foreground shadow-elev-1 transition-all hover:shadow-elev-3 hover:brightness-110 active:scale-[0.97]"
             >
               Создать профиль
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />

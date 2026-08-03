@@ -9,13 +9,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // M3 filled
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // M3 filled + градиентный акцент с бликом (hover-тень даёт база)
+        default:
+          "bg-gradient-to-br from-brand to-brand-deep text-primary-foreground shadow-elev-1 hover:brightness-110 animate-shine",
         destructive:
           "bg-destructive text-on-error hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         // M3 outlined
         outline:
-          "border border-outline bg-transparent text-primary hover:bg-primary-container/60 hover:text-on-primary-container dark:bg-transparent",
+          "border border-outline bg-transparent text-primary hover:border-primary/50 hover:bg-primary-container/60 hover:text-on-primary-container dark:bg-transparent",
         // M3 tonal
         secondary:
           "bg-secondary-container text-on-secondary-container hover:bg-secondary-container/80",
