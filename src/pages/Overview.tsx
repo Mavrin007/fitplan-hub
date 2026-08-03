@@ -261,7 +261,8 @@ export default function Overview() {
       if (prev < waterGoal && prev + delta >= waterGoal) {
         toast.success("Цель по воде достигнута! 🎉");
       }
-    } catch {
+    } catch (err) {
+      console.error(`[Overview] Ошибка обновления воды (delta=${delta}):`, err);
       toast.error("Не удалось обновить воду");
     }
   };

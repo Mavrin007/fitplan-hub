@@ -167,7 +167,9 @@ describe("generateWorkoutTemplate — инвентарь", () => {
     );
     const names = allExerciseNames(plan);
     expect(names).not.toContain("Тяга верхнего блока");
-    expect(names).toContain("Тяга гантели в наклоне");
+    // «Тяга верхнего блока» (тренажёр/блок) заменяется на «Подтягивания» —
+    // единственный вариант на собственный вес; гантельная тяга требует гантелей.
+    expect(names).toContain("Подтягивания");
   });
 
   it("equipmentSummary корректно описывает инвентарь", () => {

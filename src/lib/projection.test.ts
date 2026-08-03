@@ -31,12 +31,14 @@ describe("projectGoal", () => {
     expect(proj!.etaDate > "2026-01-06").toBe(true);
   });
 
-  it("возвращает null, если тренд идёт от цели", () => {
+  it("строит прогноз, когда тренд идёт к цели (набор веса)", () => {
     const rising: WeightSample[] = [0, 1, 2, 3, 4].map((i) => ({
       date: `2026-01-0${i + 1}`,
       weightKg: 70 + i * 0.3,
     }));
-    expect(projectGoal(rising, 80)).toBeNull(); // вес растёт к 80 — но выше? нет, 70→71.2 — цель 80 достижима
+    const proj = projectGoal(rising, 80); // вес растёт к 80 — цель достижима
+    expect(proj).not.toBeNull();
+    expect(proj!.etaDate > "2026-01-05").toBe(true);
   });
 
   it("возвращает null при росте веса, когда цель — похудеть", () => {
@@ -48,7 +50,8 @@ describe("projectGoal", () => {
   });
 
   it("уверенность растёт с числом замеров", () => {
-    const short = projectGoal(losingSeries(), 80);
+    // 4 замера — ниже порога уверенности (n >= 5): прогноз есть, но предварительный.
+    const short = projectGoal(losingSeries().slice(0, 4), 80);
     const long: WeightSample[] = Array.from({ length: 12 }, (_, i) => ({
       date: new Date((Date.UTC(2026, 0, 1) / 86_400_000 + i) * 86_400_000)
         .toISOString()

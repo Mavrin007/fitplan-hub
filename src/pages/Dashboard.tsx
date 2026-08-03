@@ -1,15 +1,15 @@
 import { useAuth } from "@/hooks/use-auth";
 import {
-  BarChart3,
-  LogOut,
-  UtensilsCrossed,
   Activity,
-  User,
+  BarChart3,
+  LayoutDashboard,
+  LogOut,
   Sparkles,
+  User,
+  UtensilsCrossed,
 } from "lucide-react";
 import { Outlet, NavLink, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard } from "lucide-react";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/theme-toggle";
 

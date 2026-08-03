@@ -243,7 +243,8 @@ export default function Workouts() {
           description: desc || undefined,
         });
       }
-    } catch {
+    } catch (err) {
+      console.error("[Workouts] Ошибка генерации плана тренировок:", err);
       if (!silent) toast.error("Не удалось сгенерировать план");
     } finally {
       generatingRef.current = false;
@@ -360,7 +361,8 @@ export default function Workouts() {
       });
       toast.success("Тренировка записана");
       setTrainingDay(null);
-    } catch {
+    } catch (err) {
+      console.error("[Workouts] Ошибка сохранения тренировки:", err);
       toast.error("Не удалось записать тренировку");
     } finally {
       setSavingLog(false);
@@ -372,7 +374,8 @@ export default function Workouts() {
       await deleteLog({ id });
       if (viewingLog?._id === id) setViewingLog(null);
       toast.success("Запись удалена");
-    } catch {
+    } catch (err) {
+      console.error("[Workouts] Ошибка удаления записи тренировки:", err);
       toast.error("Не удалось удалить запись");
     }
   };

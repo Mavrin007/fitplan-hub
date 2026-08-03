@@ -59,12 +59,10 @@ export { Menubar, MenubarMenu, MenubarTrigger, MenubarContent, MenubarItem, Menu
 
 // Form Components
 export { Select, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem, SelectSeparator, SelectScrollUpButton, SelectScrollDownButton } from "./select"; // ~6KB - Dropdown select
-export { Form, FormItem, FormLabel, FormControl, FormDescription, FormMessage, FormField } from "./form"; // ~4KB - Form wrapper with validation
 export { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from "./input-otp"; // ~5KB - OTP input
 
 // Content Display
 export { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "./accordion"; // ~5KB - Collapsible sections
-export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "./collapsible"; // ~3KB - Simple collapse
 export { Toggle, toggleVariants } from "./toggle"; // ~3KB - Toggle button
 export { ToggleGroup, ToggleGroupItem } from "./toggle-group"; // ~4KB - Button group toggle
 export { Alert, AlertTitle, AlertDescription } from "./alert"; // ~3KB - Alert messages
@@ -76,14 +74,7 @@ export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableC
 
 // Complex Interactions
 export { ScrollArea, ScrollBar } from "./scroll-area"; // ~6KB - Custom scrollbars
-export { Drawer, DrawerPortal, DrawerOverlay, DrawerTrigger, DrawerClose, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription } from "./drawer"; // ~12KB - Bottom sheet drawer
-export { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext } from "./carousel"; // ~15KB - Image/content carousel (uses embla-carousel)
-export { Calendar } from "./calendar"; // ~12KB - Date picker calendar (uses react-day-picker)
-export { Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandShortcut, CommandSeparator } from "./command"; // ~10KB - Command palette (uses cmdk)
 export { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "./pagination"; // ~5KB
-
-// Layout Components
-export { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "./resizable"; // ~8KB - Resizable panels
 export { Sidebar, SidebarProvider, SidebarTrigger, SidebarInset, SidebarHeader, SidebarFooter, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarGroupAction, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuAction, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, SidebarMenuBadge, SidebarSeparator, SidebarRail } from "./sidebar"; // ~10KB
 
 // Data Visualization
@@ -100,7 +91,6 @@ export { Toaster } from "./sonner"; // ~8KB - Toast notifications
  * Example: Building a simple form
  *
  * import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
- * import { Form, FormField, FormItem, FormLabel, FormControl } from "@/components/ui";
  * import { Input, Button } from "@/components/ui";
  *
  * Small bundle impact: ~12KB total

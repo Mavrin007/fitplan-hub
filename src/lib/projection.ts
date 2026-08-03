@@ -18,7 +18,7 @@ export interface GoalProjection {
   etaDate: string;
   /** Скорость изменения веса, кг в неделю (отрицательная — снижение). */
   ratePerWeek: number;
-  /** Сколько килограммов осталось до цели (по модулю). */
+  /** Сколько килограммов осталось до цели от последнего замера (по модулю). */
   remainingKg: number;
   /** Верится ли прогнозу (достаточно замеров и уверенности тренда). */
   confident: boolean;
@@ -85,7 +85,10 @@ export function projectGoal(
   if (etaDays <= lastX) return null; // уже у цели или «мимо»
 
   const etaDate = keyFromDays(Math.ceil(etaDays));
-  const remainingKg = Math.abs(targetWeightKg - meanY);
+  // «Осталось до цели» — от ПОСЛЕДНЕГО замера (текущий вес), а не от среднего:
+  // так цифра отвечает на вопрос «сколько ещё сбросить/набрать прямо сейчас».
+  const latestWeight = ys[ys.length - 1];
+  const remainingKg = Math.abs(targetWeightKg - latestWeight);
   const horizonDays = Math.max(30, etaDays - lastX);
   const ratePerWeek = slope * 7;
 

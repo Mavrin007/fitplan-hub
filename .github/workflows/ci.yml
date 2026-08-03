@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Отменяем старый запуск, если в ветку пришли новые коммиты, — не жжём минуты.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Кэш npm (node_modules восстанавливается из ~/.npm) — ускоряет npm ci.
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Фейлим CI при high/critical уязвимостях в зависимостях.
+      # Оставшиеся low (в цепочке AI SDK) аудит пропускает.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npx vite build
+
+  # Деплой в продакшен: только push в основную ветку main, только после
+  # зелёной проверки, и только если в репозитории настроены Vercel-секреты
+  # (иначе шаги пропускаются — CI остаётся зелёным до подключения деплоя).
+  deploy:
+    name: Deploy to Vercel (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    # Продакшен-окружение: защитные правила/аппрувы перед деплоем,
+    # вкладка Environments и секреты, привязанные к окружению.
+    environment: production
+    # Только push в main (дефолтная ветка репозитория) — PR-ы не деплоим.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Своя группа БЕЗ отмены: не прерываем идущий деплой новым пушем,
+    # а даём ему завершиться (следующий запуск встанет в очередь).
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+    # Секреты живут только в env: GitHub автоматически маскирует их в логах,
+    # а Vercel CLI дополнительно прячет токен в выводе. Если секреты не заданы,
+    # env-переменные пустые и шаги деплоя пропускаются (if: env.VERCEL_TOKEN != '').
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # VITE_CONVEX_URL и другие env проекта подтягиваются из панели Vercel,
+      # поэтому в GitHub их дублировать не нужно.
+      # Версия CLI закреплена мажором (58) — воспроизводимые сборки.
+      - name: Pull Vercel project settings
+        if: env.VERCEL_TOKEN != ''
+        run: npx --yes vercel@58 pull --yes --environment=production
+
+      # vercel build сам выполняет сборку (vite build) с env из Vercel
+      # и готовит .vercel/output для деплоя; папка dist остаётся на диске —
+      # её загружаем как артефакт.
+      - name: Build
+        if: env.VERCEL_TOKEN != ''
+        run: npx --yes vercel@58 build --prod
+
+      - name: Upload dist artifact
+        if: env.VERCEL_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+      # --prebuilt: деплоим уже собранный .vercel/output, ничего не пересобирая.
+      - name: Deploy to Vercel
+        if: env.VERCEL_TOKEN != ''
+        run: npx --yes vercel@58 deploy --prebuilt --prod
