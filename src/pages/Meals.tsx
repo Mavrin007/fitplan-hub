@@ -795,7 +795,11 @@ export default function Meals() {
             <div>
               <Label>Приём пищи</Label>
               <Select
-                value={dialogMeal ?? undefined}
+                // Fallback вместо undefined: при закрытии диалога dialogMeal
+                // становится null, а Radix ещё держит контент смонтированным
+                // во время exit-анимации — Select переключался бы
+                // «controlled → uncontrolled» (warning в консоли у пользователя).
+                value={dialogMeal ?? "breakfast"}
                 onValueChange={(v) => setDialogMeal(v as MealType)}
               >
                 <SelectTrigger className="mt-1.5 w-full">

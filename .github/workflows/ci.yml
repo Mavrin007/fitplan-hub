@@ -33,6 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Фейлим CI при high/critical уязвимостях в зависимостях.
+      # Оставшиеся low (в цепочке AI SDK) аудит пропускает.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       - name: Lint
         run: npm run lint
 
@@ -44,3 +49,72 @@ jobs:
 
       - name: Build
         run: npx vite build
+
+  # Деплой в продакшен: только push в master, только после зелёной проверки.
+  deploy:
+    name: Deploy to Vercel (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    # Продакшен-окружение: защитные правила/аппрувы перед деплоем,
+    # вкладка Environments и секреты, привязанные к окружению.
+    environment: production
+    # Только push в master — PR-ы и прочие ветки не деплоим.
+    # Если основная ветка у вас — main, поменяйте условие на refs/heads/main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    # Своя группа БЕЗ отмены: не прерываем идущий деплой новым пушем,
+    # а даём ему завершиться (следующий запуск встанет в очередь).
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Секреты живут только в env-переменных шага: GitHub автоматически
+      # маскирует их в логах, а Vercel CLI дополнительно прячет токен в выводе.
+      # VITE_CONVEX_URL и другие env проекта подтягиваются из панели Vercel,
+      # поэтому в GitHub их дублировать не нужно.
+      # Версия CLI закреплена мажором (58) — воспроизводимые сборки.
+      - name: Pull Vercel project settings
+        run: npx --yes vercel@58 pull --yes --environment=production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # vercel build сам выполняет сборку (vite build) с env из Vercel
+      # и готовит .vercel/output для деплоя; папка dist остаётся на диске —
+      # её загружаем как артефакт.
+      - name: Build
+        run: npx --yes vercel@58 build --prod
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+      # --prebuilt: деплоим уже собранный .vercel/output, ничего не пересобирая.
+      - name: Deploy to Vercel
+        run: npx --yes vercel@58 deploy --prebuilt --prod
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

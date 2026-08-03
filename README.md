@@ -1,3 +1,5 @@
+[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+
 ## Overview
 
 This project uses the following tech stack:

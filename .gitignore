@@ -6,6 +6,9 @@ dist/
 dist-ssr/
 *.local
 
+# --- Vercel (project settings pulled by vercel pull) ---
+.vercel/
+
 # --- Environment / secrets ---
 .env
 .env.*
