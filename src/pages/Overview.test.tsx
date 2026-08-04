@@ -8,24 +8,25 @@ vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
 vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
-import { toast } from "@/test/sonner-mock";
-import {
-  profile,
-  renderWithRouter,
-  resetMocks,
-  type MealEntry,
-  type WeightEntry,
-} from "@/test/test-utils";
+import { resetMocks, renderWithRouter, toast } from "@/test/utils";
+import { profile, type MealEntry, type WeightEntry } from "@/test/fixtures";
 import { addDays, lastNDays, toDateKey, todayKey } from "@/lib/dates";
 import Overview from "./Overview";
 
 /** Цель по воде: max(1500, round(80·33/250)·250) = 2750 мл. */
 const WATER_GOAL = 2750;
 
-/** Тот же диапазон, что строит Overview для календаря активности. */
+/**
+ * Тот же диапазон, что строит Overview для календаря активности, но с ключами
+ * в обратном порядке: компонент шлёт `{ from, to }` (Overview.tsx: range =
+ * { from: …, to: … }), а мы задаём `{ to, from }`. Ключ мока совпадает
+ * благодаря stableStringify в convex-react-mock; при возврате к голому
+ * JSON.stringify все setupFilled-тесты упали бы (activity остался бы
+ * undefined, страница зависла в загрузке).
+ */
 function activityRange(): { from: string; to: string } {
   const keys = lastNDays(84);
-  return { from: keys[0], to: keys[keys.length - 1] };
+  return { to: keys[keys.length - 1], from: keys[0] };
 }
 
 /** Профиль + пустые данные дня. */
@@ -129,6 +130,8 @@ describe("Overview", () => {
       today: [
         {
           _id: "e1",
+          userId: "u1",
+          createdAt: 0,
           date: todayKey(),
           mealType: "lunch",
           name: "Обед",
@@ -149,9 +152,9 @@ describe("Overview", () => {
     // Прогноз строится от трёх замеров (projectGoal: minSamples = 3).
     setupFilled({
       weights: [
-        { _id: "w1", date: toDateKey(addDays(new Date(), -14)), weightKg: 81 },
-        { _id: "w2", date: toDateKey(addDays(new Date(), -7)), weightKg: 80 },
-        { _id: "w3", date: toDateKey(addDays(new Date(), -1)), weightKg: 79.2 },
+        { _id: "w1", userId: "u1", createdAt: 0, date: toDateKey(addDays(new Date(), -14)), weightKg: 81 },
+        { _id: "w2", userId: "u1", createdAt: 0, date: toDateKey(addDays(new Date(), -7)), weightKg: 80 },
+        { _id: "w3", userId: "u1", createdAt: 0, date: toDateKey(addDays(new Date(), -1)), weightKg: 79.2 },
       ],
     });
     renderWithRouter(<Overview />);
@@ -162,5 +165,28 @@ describe("Overview", () => {
       "/dashboard/progress",
     );
     expect(screen.getByText(/При таком темпе/)).toBeInTheDocument();
+  });
+
+  it("активность находится при переставленном порядке ключей args (stableStringify)", () => {
+    // Компонент вызывает useQuery(api.activity.getActivityDays, { from, to })
+    // (Overview.tsx: range = { from: …, to: … }). Здесь setQuery получает те же
+    // значения в порядке { to, from } — благодаря stableStringify в
+    // convex-react-mock ключ совпадает и данные доезжают до страницы.
+    // Без фикса activity остался бы undefined и Overview завис в загрузке.
+    const r = activityRange();
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
+    setQuery(api.weightEntries.listMyWeights, {}, []);
+    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.water.getByDate, { date: todayKey() }, { amountMl: 0 });
+    setQuery(api.activity.getActivityDays, { to: r.to, from: r.from }, [
+      { date: todayKey(), count: 1 },
+    ]);
+    renderWithRouter(<Overview />);
+
+    // Запись за сегодня → серия = 1 день («1» и «день подряд» — в разных
+    // элементах); это доказывает, что activity пришёл (не undefined),
+    // иначе секция активности осталась бы в загрузке.
+    expect(screen.getByText("день подряд")).toBeInTheDocument();
   });
 });
