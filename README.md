@@ -1,4 +1,4 @@
-[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+[![CI](https://github.com/Mavrin007/fitplan-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Mavrin007/fitplan-hub/actions/workflows/ci.yml)
 
 ## Overview
 
@@ -17,7 +17,19 @@ This project uses the following tech stack:
 
 All relevant files live in the 'src' directory.
 
-Use bun for the package manager.
+Use **npm** as the package manager (Node 22+):
+
+```bash
+npm install
+npm run dev   # frontend only (needs the backend, see .freebuff/run.md)
+npm test      # vitest
+npm run lint
+npm run build # tsc -b && vite build
+```
+
+For local development with the Convex backend, see `.freebuff/run.md` — the
+preview needs two processes: `CONVEX_DEV_DEPLOYMENT=local npx convex dev` and
+`npx vite`.
 
 ## Setup
 
