@@ -92,6 +92,20 @@ function keyOf(path: string, args: unknown): string {
   return `${path}:${stableStringify(args ?? null)}`;
 }
 
+/**
+ * Глубокая копия args для журнала вызовов. Реальный convex-клиент
+ * сериализует args в JSON в момент вызова, поэтому запись должна быть
+ * «снимком» на этот момент, а не ссылкой на объект, который компонент может
+ * мутировать позже. Args всегда JSON-сериализуемы (иначе они не пересекли бы
+ * провод), поэтому structuredClone не бросает для легитимных входов — если
+ * он всё же бросит, это баг фикстуры, и лучше упасть громко, чем молча
+ * сохранить ссылку. (impl мутации при этом получает живой объект args —
+ * журнал это не затрагивает.)
+ */
+function snapshotArgs(args: unknown[]): unknown[] {
+  return structuredClone(args);
+}
+
 /** useQuery из convex/react — возвращает результат, заданный через setQuery(). */
 export function useQuery(ref: unknown, args?: unknown): unknown {
   return convexMock.queryResults.get(keyOf(pathOf(ref), args));
@@ -101,7 +115,7 @@ export function useQuery(ref: unknown, args?: unknown): unknown {
 export function useMutation(ref: unknown) {
   return (...args: unknown[]) => {
     const path = pathOf(ref);
-    convexMock.mutationCalls.push({ path, args });
+    convexMock.mutationCalls.push({ path, args: snapshotArgs(args) });
     const impl = convexMock.mutationImpls.get(path);
     return impl ? impl(...args) : Promise.resolve();
   };
