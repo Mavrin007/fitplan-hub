@@ -229,7 +229,10 @@ export function isBarbellExercise(name: string): boolean {
 }
 
 /** Замены упражнения, если его нельзя выполнить с доступным инвентарём:
- *  первая подходящая по инвентарю замена выигрывает. */
+ *  варианты перечислены от «желательно» к «запасному» — первой выбирается
+ *  подходящая по инвентарю замена, которой ещё нет в этом дне (дедупликация).
+ *  Для каждого отягощённого движения есть минимум один вариант на собственный
+ *  вес, чтобы план оставался выполнимым даже с минимальным инвентарём. */
 const EQUIPMENT_ALTERNATIVES: Record<
   string,
   { name: string; equipment: Equipment[] }[]
@@ -238,9 +241,29 @@ const EQUIPMENT_ALTERNATIVES: Record<
     { name: "Румынская тяга", equipment: ["barbell", "dumbbell"] },
     { name: "Ягодичный мостик", equipment: ["bodyweight"] },
   ],
+  "Румынская тяга": [
+    { name: "Ягодичный мостик", equipment: ["bodyweight"] },
+  ],
   "Приседания со штангой": [
     { name: "Гоблет-приседания", equipment: ["dumbbell", "bodyweight"] },
     { name: "Приседания", equipment: ["bodyweight"] },
+  ],
+  "Жим лёжа": [
+    { name: "Отжимания", equipment: ["bodyweight"] },
+  ],
+  "Жим стоя": [
+    { name: "Жим гантелей под наклоном", equipment: ["dumbbell"] },
+    { name: "Отжимания", equipment: ["bodyweight"] },
+  ],
+  "Жим гантелей под наклоном": [
+    { name: "Отжимания", equipment: ["bodyweight"] },
+  ],
+  "Махи в стороны": [
+    { name: "Отжимания", equipment: ["bodyweight"] },
+  ],
+  "Разгибание рук на блоке": [
+    { name: "Французский жим с гантелью", equipment: ["dumbbell"] },
+    { name: "Отжимания", equipment: ["bodyweight"] },
   ],
   "Подтягивания": [
     { name: "Тяга верхнего блока", equipment: ["machine", "cable"] },
@@ -249,19 +272,22 @@ const EQUIPMENT_ALTERNATIVES: Record<
   "Тяга штанги в наклоне": [
     { name: "Тяга гантели в наклоне", equipment: ["dumbbell"] },
     { name: "Тяга горизонтального блока", equipment: ["machine", "cable"] },
-  ],
-  "Разгибание рук на блоке": [
-    { name: "Французский жим с гантелью", equipment: ["dumbbell"] },
+    { name: "Подтягивания", equipment: ["bodyweight"] },
   ],
   "Тяга к лицу": [
     { name: "Разведение гантелей в наклоне", equipment: ["dumbbell"] },
+    { name: "Птица-собака", equipment: ["bodyweight"] },
   ],
   "Сгибания рук со штангой": [
     { name: "Сгибания с гантелями", equipment: ["dumbbell"] },
+    { name: "Подтягивания", equipment: ["bodyweight"] },
   ],
   "Жим ногами": [
     { name: "Гоблет-приседания", equipment: ["dumbbell", "bodyweight"] },
     { name: "Приседания", equipment: ["bodyweight"] },
+  ],
+  "Махи гирей": [
+    { name: "Ягодичный мостик", equipment: ["bodyweight"] },
   ],
   "Тяга верхнего блока": [
     { name: "Подтягивания", equipment: ["bodyweight"] },
@@ -269,6 +295,7 @@ const EQUIPMENT_ALTERNATIVES: Record<
   ],
   "Тяга горизонтального блока": [
     { name: "Тяга гантели в наклоне", equipment: ["dumbbell"] },
+    { name: "Подтягивания", equipment: ["bodyweight"] },
   ],
 };
 
@@ -411,6 +438,12 @@ const ANTHRO_RULES: Record<
   "Жим лёжа": {
     short: { priority: true, reason: "короткие руки — короткая амплитуда" },
   },
+  "Сгибания с гантелями": {
+    short: { priority: true, reason: "короткие руки — компактная амплитуда" },
+  },
+  "Махи в стороны": {
+    tall: { priority: true, reason: "изолирует средние дельты при длинных рычагах" },
+  },
   "Жим стоя": {
     short: { priority: true, reason: "короткий путь снаряда — лучший контроль" },
   },
@@ -449,6 +482,10 @@ const INJURY_RULES: Record<
       reason: "меньше нагрузки на коленные суставы",
       priority: true,
     },
+    "Приседания": {
+      alternative: "Степ-ап с весом",
+      reason: "без глубоких приседаний — контролируемая амплитуда для коленей",
+    },
     "Выпады в ходьбе": {
       alternative: "Степ-ап с весом",
       reason: "контролируемая амплитуда вместо шагающих выпадов",
@@ -475,6 +512,10 @@ const INJURY_RULES: Record<
       alternative: "Жим гантелей под наклоном",
       reason: "без жима над головой — щадящая траектория для плеч",
       priority: true,
+    },
+    "Жим лёжа": {
+      alternative: "Отжимания",
+      reason: "широкий жим лёжа перегружает плечи — отжимания щадят суставы",
     },
     Подтягивания: {
       alternative: "Тяга верхнего блока",
@@ -516,6 +557,17 @@ const LEGS = [
   ex("Жим ногами", 3, "10–12", 90),
   ex("Выпады в ходьбе", 3, "10–12 / нога", 60),
   ex("Подъёмы на носки", 4, "15", 45),
+];
+
+/** Плечи и руки — четвёртый день для тех, кто тренируется 4+ раз в неделю.
+ *  Даёт полноценный 4-дневный сплит «Жим/Тяга/Ноги/Плечи и руки» вместо
+ *  повторяющегося жимового дня, когда фокусы кончаются раньше недели. */
+const ARMS = [
+  ex("Жим гантелей под наклоном", 3, "10–12", 90),
+  ex("Махи в стороны", 3, "12–15", 60),
+  ex("Разгибание рук на блоке", 3, "10–12", 60),
+  ex("Сгибания с гантелями", 3, "10–12", 60),
+  ex("Тяга к лицу", 3, "12–15", 60),
 ];
 
 const FULL_BODY_A = [
@@ -608,6 +660,8 @@ function buildSessionPool(
         { name: "Жимовая", exercises: PUSH },
         { name: "Тяговая", exercises: PULL },
         { name: "Ноги", exercises: LEGS },
+        // 4+ тренировок: полноценный сплит вместо повторов жимового дня.
+        { name: "Плечи и руки", exercises: ARMS },
       ],
     };
   }
@@ -750,7 +804,11 @@ function adaptForInjuries(
 
 /** Подстраивает день под доступный инвентарь: упражнения, которые нельзя
  *  выполнить с выбранным оборудованием, заменяются на аналоги (с теми же
- *  подходами/повторами), а причины попадают в заметки дня. */
+ *  подходами/повторами), а причины попадают в заметки дня. Из нескольких
+ *  подходящих замен предпочитается та, которой ещё нет в этом дне — чтобы
+ *  несколько упражнений не превращались в одинаковые строки.
+ *  У каждого отягощённого движения есть вариант на собственный вес, поэтому
+ *  план остаётся выполнимым даже с минимальным инвентарём. */
 function adaptForEquipment(
   day: WorkoutDay,
   available: Set<Equipment>,
@@ -759,15 +817,27 @@ function adaptForEquipment(
   if (available.size === 0) return { day, notes: [] };
 
   const notes: string[] = [];
+  const used = new Set<string>(); // финальные имена уже обработанных упражнений
   const exercises = day.exercises.map((exercise) => {
     const required = EXERCISE_EQUIPMENT[exercise.name];
     if (!required || required.some((e) => available.has(e))) {
+      used.add(exercise.name);
       return exercise; // подходит для доступного инвентаря
     }
     const options = EQUIPMENT_ALTERNATIVES[exercise.name] ?? [];
-    const alt = options.find((o) => o.equipment.some((e) => available.has(e)));
-    if (!alt) return exercise; // нет подходящей замены — оставляем как есть
+    const fitting = options.filter((o) =>
+      o.equipment.some((e) => available.has(e)),
+    );
+    // Сначала — подходящая замена, которой нет в этом дне; если таких нет —
+    // берём первую подходящую (повтор допустим, но лучше, чем невозможный
+    // снаряд).
+    const alt = fitting.find((o) => !used.has(o.name)) ?? fitting[0];
+    if (!alt) {
+      used.add(exercise.name);
+      return exercise; // нет подходящей замены — оставляем как есть
+    }
 
+    used.add(alt.name);
     notes.push(
       `«${exercise.name}» → «${alt.name}»: нет нужного инвентаря (${equipmentSummary([...required])}).`,
     );
@@ -914,6 +984,7 @@ function buildHowCalculated(
   },
   limitations: Limitation[],
   sessions: number,
+  splitType: string,
 ): string[] {
   const bullets: string[] = [];
 
@@ -956,6 +1027,13 @@ function buildHowCalculated(
     );
   }
 
+  const equipment = normalizeEquipment(profile.equipment);
+  if (equipment.length > 0 && equipment.every((e) => e === "bodyweight")) {
+    bullets.push(
+      "Инвентарь: только собственный вес — сплит переключён на фулбоди/круги, отягощения заменены на упражнения с весом тела.",
+    );
+  }
+
   const goalBullets: Record<FitnessGoal, string> = {
     gain_muscle:
       "Цель «набор массы»: 3–4 подхода × 6–12 повторов, темп 3-1-1, отдых 90–120 с на базовых упражнениях.",
@@ -969,7 +1047,7 @@ function buildHowCalculated(
   bullets.push(goalBullets[profile.fitnessGoal]);
 
   bullets.push(
-    `Тренировок в неделю: ${sessions}${profile.preferredTrainingDays ? " (по вашему выбору)" : ""} — выбрана схема «${buildSessionPool(profile.fitnessGoal, profile.experienceLevel).splitType}».`,
+    `Тренировок в неделю: ${sessions}${profile.preferredTrainingDays ? " (по вашему выбору)" : ""} — выбрана схема «${splitType}».`,
   );
   bullets.push(
     "Прогрессия: +2.5 кг или +1–2 повтора, когда дойдёте до верхней границы диапазона. Цикл: база → +1 повтор → +2.5 кг → разгрузка.",
@@ -979,11 +1057,16 @@ function buildHowCalculated(
 }
 
 /** Строит сводку «под кого собран план»: пол, возраст, рост/вес, активность,
- *  цель, целевой вес, инвентарь, ограничения и количество замен. */
+ *  цель, целевой вес, инвентарь, ограничения и количество замен.
+ *  `hasWeighted`/`hasBarbell` — реальное наличие отягощений в финальном плане:
+ *  для планов на собственном весе не пишем «стартовые веса рассчитаны» и
+ *  «штанга — общий вес с грифом». */
 function buildAdaptedFor(
   profile: TrainingProfile,
   substitutions: number,
   limitations: Limitation[],
+  hasWeighted: boolean,
+  hasBarbell: boolean,
 ): string {
   const parts: string[] = [];
 
@@ -1018,9 +1101,9 @@ function buildAdaptedFor(
     parts.push(`цель: ${profile.targetWeightKg} кг (${direction})`);
   }
 
-  parts.push("стартовые веса рассчитаны по профилю");
+  if (hasWeighted) parts.push("стартовые веса рассчитаны по профилю");
   // Штанговые упражнения: вес указан общим (гриф 20 кг включён).
-  parts.push("штанга — общий вес с грифом 20 кг");
+  if (hasBarbell) parts.push("штанга — общий вес с грифом 20 кг");
   if (profile.age >= 50) parts.push("щадящий режим с возрастом (+30 с отдыха)");
   if (limitations.length > 0) {
     parts.push(
@@ -1044,13 +1127,66 @@ function buildAdaptedFor(
  *  заменяет рискованные для пользователя упражнения и те, что не подходят под
  *  доступное оборудование, помечает приоритетные, назначает стартовые рабочие
  *  веса и темп, добавляет разминку и объясняет изменения в заметках. */
+/** Распределяет фокусы пула по числу тренировок в неделю:
+ *  - если тренировок не больше фокусов — берём первые `sessions` (для
+ *    «Жим/Тяга/Ноги/Плечи и руки» 3 дня = без плечевого дня);
+ *  - иначе каждый фокус получает `floor(sessions/n)` дней по кругу, а
+ *    остаток раздаётся с конца пула — «Ноги» и «Плечи и руки» получают
+ *    второй день раньше, чем «Жимовая». Соседние дни никогда не
+ *    дублируются (старт остатка сдвигается от последнего фокуса круга). */
+function distributeSessions(pool: SessionSeed[], sessions: number): SessionSeed[] {
+  const n = pool.length;
+  if (sessions <= n) return pool.slice(0, sessions);
+
+  const base = Math.floor(sessions / n);
+  const extra = sessions % n;
+  const out: SessionSeed[] = [];
+  for (let r = 0; r < base; r++) {
+    for (let i = 0; i < n; i++) out.push(pool[i]);
+  }
+  // Остаток: с конца пула, но не совпадающий с последним фокусом круга.
+  const last = out[out.length - 1].name;
+  let start = n - 1;
+  if (pool[start].name === last) start = n - 2;
+  for (let i = 0; i < extra; i++) {
+    out.push(pool[(start - i + n) % n]);
+  }
+  return out;
+}
+
+/** Есть ли в пуле хоть одно упражнение, требующее снаряда (не только
+ *  собственный вес)? По этому признаку решаем, переключать ли сплит для
+ *  пользователей без инвентаря. */
+function poolNeedsEquipment(pool: SessionSeed[]): boolean {
+  return pool.some((s) =>
+    s.exercises.some(
+      (ex) =>
+        !(EXERCISE_EQUIPMENT[ex.name]?.length === 1 &&
+          EXERCISE_EQUIPMENT[ex.name][0] === "bodyweight"),
+    ),
+  );
+}
+
 export function generateWorkoutTemplate(
   profile: TrainingProfile,
 ): WorkoutTemplate {
-  const { splitType, pool } = buildSessionPool(
+  const equipmentOnly = normalizeEquipment(profile.equipment);
+  // У пользователя ТОЛЬКО собственный вес (без гантелей/штанги/тренажёров).
+  const bodyweightOnly =
+    equipmentOnly.length > 0 && equipmentOnly.every((e) => e === "bodyweight");
+
+  let { splitType, pool } = buildSessionPool(
     profile.fitnessGoal,
     profile.experienceLevel,
   );
+  // Без инвентаря тренажёрный сплит («Жим/Тяга/Ноги», «Верх/Низ») выродился
+  // бы в несколько одинаковых отжиманий. Переключаемся на фулбоди/круги,
+  // которые почти целиком адаптируются под собственный вес.
+  if (bodyweightOnly && poolNeedsEquipment(pool)) {
+    const bw = buildSessionPool(profile.fitnessGoal, "beginner");
+    splitType = `${bw.splitType} · без инвентаря`;
+    pool = bw.pool;
+  }
   const sessions = Math.min(
     6,
     Math.max(
@@ -1061,9 +1197,10 @@ export function generateWorkoutTemplate(
   );
   const name = `${splitType} — ${EXPERIENCE_LABELS[profile.experienceLevel].toLowerCase()}`;
 
-  // Дни распределяются равномерно по неделе.
-  const baseDays: WorkoutDay[] = Array.from({ length: sessions }, (_, i) => {
-    const seed = pool[i % pool.length];
+  // Сессии для недели: фокусы пула без соседних повторов, дополнительные
+  // дни отдаются «Ногам» и «Плечам и рукам» (конец пула), а не жимовому дню.
+  const order = distributeSessions(pool, sessions);
+  const baseDays: WorkoutDay[] = order.map((seed, i) => {
     const day = sessions === 1 ? 1 : Math.min(6, Math.floor((i * 7) / sessions));
     return { day, focus: seed.name, exercises: seed.exercises };
   });
@@ -1092,6 +1229,7 @@ export function generateWorkoutTemplate(
         },
         normalizeLimitations(profile.limitations),
         sessions,
+        splitType,
       ),
     };
   }
@@ -1134,13 +1272,23 @@ export function generateWorkoutTemplate(
     return notes.length > 0 ? { ...withWeights, notes } : withWeights;
   });
 
+  const finalExercises = days.flatMap((d) => d.exercises);
+  const hasWeighted = finalExercises.some((e) => e.weightKg !== undefined);
+  const hasBarbell = finalExercises.some((e) => isBarbellExercise(e.name));
+
   return {
     name,
-    adaptedFor: buildAdaptedFor(profile, substitutions, limitations),
+    adaptedFor: buildAdaptedFor(
+      profile,
+      substitutions,
+      limitations,
+      hasWeighted,
+      hasBarbell,
+    ),
     splitType,
     sessionsPerWeek: sessions,
     durationWeeks: PLAN_WEEKS,
-    howCalculated: buildHowCalculated(profile, ctx, limitations, sessions),
+    howCalculated: buildHowCalculated(profile, ctx, limitations, sessions, splitType),
     days,
   };
 }
@@ -1219,7 +1367,10 @@ export interface WarmUpSet {
  *  округлённую до блинов по 2.5 кг. `minKg` — нижняя граница веса
  *  (для штанговых упражнений — вес грифа 20 кг: разминочный подход на
  *  штанге не может быть легче пустого грифа). Без веса (собственный
- *  вес/кардио) возвращает пустой список — разминка не нужна. */
+ *  вес/кардио) возвращает пустой список — разминка не нужна.
+ *  При малых весах несколько ступеней могут округлиться к одному весу —
+ *  повторы с одинаковым весом схлопываются в один подход (не показываем
+ *  «20 кг × 8, 20 кг × 6, 20 кг × 4»). */
 export function warmUpSets(
   weightKg: number | undefined,
   minKg = 0,
@@ -1232,10 +1383,15 @@ export function warmUpSets(
     { factor: 0.6, reps: "6–8" },
     { factor: 0.8, reps: "4–6" },
   ];
-  return steps.map((s) => ({
-    weightKg: Math.min(weightKg, roundToPlate(weightKg * s.factor, minKg)),
-    reps: s.reps,
-  }));
+  const unique: WarmUpSet[] = [];
+  for (const step of steps) {
+    const weight = Math.min(weightKg, roundToPlate(weightKg * step.factor, minKg));
+    const last = unique[unique.length - 1];
+    if (!last || last.weightKg !== weight) {
+      unique.push({ weightKg: weight, reps: step.reps });
+    }
+  }
+  return unique;
 }
 
 /* ------------------------------------------------------------------ */
