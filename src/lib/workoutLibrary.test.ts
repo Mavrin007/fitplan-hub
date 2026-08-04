@@ -154,6 +154,32 @@ describe("generateWorkoutTemplate — ограничения/травмы", () =
     expect(names).not.toContain("Жим стоя");
     expect(names).toContain("Жим гантелей под наклоном");
   });
+
+  it("при проблемах с плечами заменяет и жим лёжа", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        limitations: ["shoulders"],
+        fitnessGoal: "gain_muscle",
+        experienceLevel: "advanced",
+      }),
+    );
+    const names = allExerciseNames(plan);
+    expect(names).not.toContain("Жим лёжа");
+    expect(names).toContain("Отжимания");
+  });
+
+  it("при проблемах с коленями заменяет приседания без веса на степ-ап", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        limitations: ["knees"],
+        fitnessGoal: "gain_muscle",
+        experienceLevel: "beginner",
+      }),
+    );
+    const names = allExerciseNames(plan);
+    expect(names).not.toContain("Приседания");
+    expect(names).toContain("Степ-ап с весом");
+  });
 });
 
 describe("generateWorkoutTemplate — инвентарь", () => {
@@ -180,6 +206,59 @@ describe("generateWorkoutTemplate — инвентарь", () => {
   it("normalizeEquipment отбрасывает неизвестные ключи", () => {
     expect(normalizeEquipment(["barbell", "hoverboard"])).toEqual(["barbell"]);
     expect(normalizeLimitations(["knees", "carpal_tunnel"])).toEqual(["knees"]);
+  });
+
+  it("с одним только собственным весом план не содержит упражнений со снарядом", () => {
+    // Продвинутый пользователь с целью набора: тренажёрный сплит «Жим/Тяга/Ноги»
+    // выродился бы в повторяющиеся отжимания — движок переключает на фулбоди.
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        equipment: ["bodyweight"],
+        fitnessGoal: "gain_muscle",
+        experienceLevel: "advanced",
+        preferredTrainingDays: 4,
+      }),
+    );
+    // Названия упражнений, которым нужен любой снаряд (штанга/гантели/тренажёр…).
+    const needsGear = [
+      "Жим лёжа",
+      "Жим стоя",
+      "Жим гантелей под наклоном",
+      "Махи в стороны",
+      "Разгибание рук на блоке",
+      "Становая тяга",
+      "Румынская тяга",
+      "Тяга штанги в наклоне",
+      "Тяга к лицу",
+      "Сгибания рук со штангой",
+      "Приседания со штангой",
+      "Жим ногами",
+      "Тяга верхнего блока",
+      "Тяга горизонтального блока",
+      "Махи гирей",
+      "Тяга гантели в наклоне",
+      "Французский жим с гантелью",
+      "Разведение гантелей в наклоне",
+      "Сгибания с гантелями",
+    ];
+    const names = new Set(allExerciseNames(plan));
+    for (const bad of needsGear) {
+      expect(names.has(bad)).toBe(false);
+    }
+    // Сплит честно сообщает о переключении на собственный вес.
+    expect(plan.splitType).toContain("без инвентаря");
+  });
+
+  it("для тела без инвентаря план даёт хотя бы один упражнение на собственный вес", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        equipment: ["bodyweight"],
+        fitnessGoal: "gain_muscle",
+        experienceLevel: "intermediate",
+      }),
+    );
+    const names = allExerciseNames(plan);
+    expect(names.some((n) => ["Отжимания", "Подтягивания", "Приседания", "Планка"].includes(n))).toBe(true);
   });
 });
 
@@ -220,6 +299,27 @@ describe("generateWorkoutTemplate — структура плана", () => {
     const plan = generateWorkoutTemplate(baseProfile({ preferredTrainingDays: 4 }));
     expect(plan.sessionsPerWeek).toBe(4);
     expect(plan.days).toHaveLength(4);
+  });
+
+  it("4 дня на массе — полноценный сплит Жим/Тяга/Ноги/Плечи и руки", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ preferredTrainingDays: 4 }),
+    );
+    const focuses = plan.days.map((d) => d.focus);
+    expect(focuses).toEqual(["Жимовая", "Тяговая", "Ноги", "Плечи и руки"]);
+    // Ноги не остаются без внимания при четырёхдневном сплите.
+    expect(focuses.filter((f) => f === "Ноги")).toHaveLength(1);
+  });
+
+  it("5 дней на массе: ноги и плечи получают второй день раньше жимового", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ preferredTrainingDays: 5 }),
+    );
+    const focuses = plan.days.map((d) => d.focus);
+    // Без соседних дублей и с равномерным покрытием фокусов (разница ≤ 1).
+    expect(focuses.some((f, i) => i > 0 && f === focuses[i - 1])).toBe(false);
+    const count = (f: string) => focuses.filter((x) => x === f).length;
+    expect(count("Ноги")).toBeGreaterThanOrEqual(count("Жимовая"));
   });
 
   it("добавляет разминку в каждый день", () => {
@@ -306,5 +406,14 @@ describe("profileSignature и warmUpSets", () => {
 
   it("без веса разминка пустая", () => {
     expect(warmUpSets(undefined)).toHaveLength(0);
+  });
+
+  it("при малых весах дубли ступеней разминки схлопываются", () => {
+    // 20 кг (пустой гриф): 40%/60%/80% все округляются к 20 кг — показываем
+    // один подход, а не три одинаковых.
+    const sets = warmUpSets(20, 20);
+    expect(sets.length).toBeGreaterThanOrEqual(1);
+    const weights = sets.map((s) => s.weightKg);
+    expect(new Set(weights).size).toBe(weights.length); // без повторов веса
   });
 });

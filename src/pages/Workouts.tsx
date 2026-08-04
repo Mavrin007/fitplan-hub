@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { WorkoutMode } from "@/components/WorkoutMode";
+import { EmptyState } from "@/components/empty-state";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
 import {
@@ -35,6 +36,7 @@ import {
   EXERCISE_TIPS,
   generateWorkoutTemplate,
   normalizeEquipment,
+  normalizeLimitations,
   profileSignature,
   WEEKDAYS,
   type TrainingProfile,
@@ -47,7 +49,13 @@ import {
   EFFORT_LABELS,
   type Effort,
 } from "@/lib/effort";
-import { ACTIVITY_LABELS, EXPERIENCE_LABELS, GENDER_LABELS, GOAL_LABELS } from "@/lib/nutrition";
+import {
+  ACTIVITY_LABELS,
+  EXPERIENCE_LABELS,
+  GENDER_LABELS,
+  GOAL_LABELS,
+  LIMITATION_LABELS,
+} from "@/lib/nutrition";
 import { todayKey, shortDate, prettyDate } from "@/lib/dates";
 import {
   ArrowUpDown,
@@ -76,6 +84,7 @@ const WORKOUT_ART: Record<string, { icon: LucideIcon; gradient: string }> = {
   "Жимовая": { icon: MoveUp, gradient: "to-tertiary-container/40" },
   "Тяговая": { icon: ArrowUpDown, gradient: "to-primary-container/40" },
   "Ноги": { icon: Footprints, gradient: "to-tertiary-container/50" },
+  "Плечи и руки": { icon: MoveUp, gradient: "to-tertiary-container/50" },
   "Круговая": { icon: Repeat, gradient: "to-primary-container/60" },
   HIIT: { icon: Zap, gradient: "to-tertiary-container/60" },
   "Метаболический круг": { icon: Flame, gradient: "to-primary-container/40" },
@@ -138,7 +147,10 @@ function planChangeSummary(
       if (oldEquip !== newEquip) parts.push(`инвентарь: ${equipmentSummary(profile.equipment)}`);
       // 10-й сегмент — ограничения, 11-й — предпочитаемые дни в неделю.
       const oldLimits = s[9] ?? "";
-      const newLimits = (profile.limitations ?? []).slice().sort().join(",");
+      const newLimits = normalizeLimitations(profile.limitations)
+        .slice()
+        .sort()
+        .join(",");
       if (oldLimits !== newLimits) parts.push("учтены новые ограничения");
       if (s.length >= 11) {
         const oldDays = s[10] ?? "";
@@ -425,7 +437,11 @@ export default function Workouts() {
               {ACTIVITY_LABELS[profile.activityLevel].toLowerCase()} · инвентарь:{" "}
               {equipmentText}
               {profile.limitations && profile.limitations.length > 0 ? (
-                <> · ограничения: {profile.limitations.join(", ")}</>
+                <> · ограничения:{" "}
+                  {profile.limitations
+                    .map((l) => LIMITATION_LABELS[l])
+                    .join(", ")}
+                </>
               ) : null}
             </p>
             {plan?.adaptedFor && (
@@ -678,18 +694,26 @@ export default function Workouts() {
             })}
         </section>
       ) : (
-        <div className="rounded-lg border border-dashed p-10 text-center">
-          <Dumbbell className="mx-auto size-6 text-muted-foreground" />
-          <p className="mt-3 text-sm font-medium">Плана тренировок пока нет</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Сгенерируйте 4-недельный цикл с прогрессией нагрузки: база → те же
-            веса +1 повтор → +2.5 кг → разгрузка. Упражнения подбираются под
-            весь профиль — рост, вес, пол, возраст, цель, опыт, инвентарь и
-            ограничения — а стартовые веса следующего цикла автоматически
-            подстраиваются под ваши прошлые тренировки и оценку усилия
-            («легко / норм / тяжело»).
-          </p>
-        </div>
+        <EmptyState
+          icon={Dumbbell}
+          title="Плана тренировок пока нет"
+          description={
+            <>
+              Сгенерируйте 4-недельный цикл с прогрессией нагрузки: база → те же
+              веса +1 повтор → +2.5 кг → разгрузка. Упражнения подбираются под
+              весь профиль — рост, вес, пол, возраст, цель, опыт, инвентарь и
+              ограничения — а стартовые веса следующего цикла автоматически
+              подстраиваются под ваши прошлые тренировки и оценку усилия
+              («легко / норм / тяжело»).
+            </>
+          }
+          action={
+            <Button onClick={() => handleGenerate(false)} disabled={generating}>
+              <Dumbbell className="size-4" />
+              {generating ? "Генерация…" : "Сгенерировать план"}
+            </Button>
+          }
+        />
       )}
 
       <Separator />
@@ -707,12 +731,13 @@ export default function Workouts() {
           legend={<LegendChip color="var(--foreground)" label="Тоннаж (кг)" />}
         >
           {tonnageData.length === 0 ? (
-            <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Dumbbell className="size-5" />
-              <p className="max-w-[260px] text-center text-xs">
-                Запишите пару тренировок в режиме «Начать тренировку» — график
-                объёма появится здесь.
-              </p>
+            <div className="flex h-[200px] items-center justify-center">
+              <EmptyState
+                compact
+                icon={Dumbbell}
+                title="Пока нет графика объёма"
+                description="Запишите пару тренировок в режиме «Начать тренировку» — недельный тоннаж появится здесь."
+              />
             </div>
           ) : (
             <ResponsiveContainer key={`tonnage-${tonnageData.length}`} width="100%" height={200}>
@@ -758,9 +783,13 @@ export default function Workouts() {
             40 кг × 10, приседания — 60 кг × 8.
           </p>
           {prs.length === 0 ? (
-            <p className="mt-5 text-xs text-muted-foreground">
-              Пока нет рекордов — они появятся после первых записанных тренировок.
-            </p>
+            <EmptyState
+              compact
+              icon={Trophy}
+              title="Рекордов пока нет"
+              description="Они появятся после первых записанных тренировок — максимальный рабочий вес по каждому упражнению."
+              className="mt-4"
+            />
           ) : (
             <div className="mt-5 grid gap-2 sm:grid-cols-2">
               {prs.map((pr) => (
