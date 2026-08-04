@@ -75,6 +75,9 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      # Deploy token для облачного Convex: создаётся в настройках проекта Convex
+      # (Dashboard → Project → Settings → Deploy Keys). Без него шаг пропускается.
+      CONVEX_DEPLOY_TOKEN: ${{ secrets.CONVEX_DEPLOY_TOKEN }}
 
     steps:
       - name: Checkout
@@ -88,6 +91,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Деплой функций бэкенда в облачный Convex (схема, функции, http-роуты).
+      # Auth-переменные (JWT_PRIVATE_KEY, JWKS, …) задаются в панели Convex,
+      # а не в коде, поэтому сюда попадать не должны.
+      - name: Deploy to Convex
+        if: env.CONVEX_DEPLOY_TOKEN != ''
+        run: npx --no-install convex deploy
 
       # VITE_CONVEX_URL и другие env проекта подтягиваются из панели Vercel,
       # поэтому в GitHub их дублировать не нужно.

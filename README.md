@@ -31,6 +31,58 @@ The convex server has a separate set of environment variables that are accessibl
 
 Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
 
+## Production: Convex cloud + Vercel
+
+### 1. Deploy the backend to Convex cloud
+
+Log in once (opens a browser):
+
+```bash
+npx convex login
+```
+
+Then push functions, schema and http routes to the cloud project:
+
+```bash
+npx convex deploy
+```
+
+The CLI prints the cloud deployment URL (e.g. `https://<project>.convex.cloud`) and
+writes `VITE_CONVEX_URL` to `.env.local` — keep it for local builds, and copy the
+**cloud** URL (not `http://127.0.0.1:3210`) into Vercel.
+
+### 2. Set backend env vars (Convex Dashboard)
+
+Project → Settings → Environment Variables. Values are the same ones used
+locally (see `.freebuff/run.md`):
+
+- `VLY_CONVEX_AUTH_ISSUER` → `https://freebuff.com`
+- `SITE_URL` → the **production** URL (e.g. `https://fitplan-hub.vercel.app`)
+- `JWT_PRIVATE_KEY` → PKCS8 RSA key, **single line** (newlines → spaces)
+- `JWT_STORAGE_KEY` → base64 session-storage key
+- `JWKS` → public-key JSON
+
+Do **NOT** set `VLY_EMAIL_DEV_CAPTURE` in production — the dev OTP capture is
+for local work only. Guest sign-in works immediately; email OTP additionally
+needs `email.vly.ai` to accept requests (its hardcoded key currently returns
+401, so email login may not deliver in production until VLY is configured).
+
+### 3. Frontend env + deploy to Vercel
+
+In Vercel project → Settings → Environment Variables, add:
+
+- `VITE_CONVEX_URL` → the cloud Convex URL (from step 1)
+
+The repo ships `vercel.json` (Vite + SPA rewrites for react-router). CI deploys
+from GitHub Actions: the `deploy` job (branch `main`) runs once these repo
+secrets exist — Vercel → Account Settings → Tokens:
+
+- `VERCEL_TOKEN` (token), `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (from `npx vercel link`)
+- `CONVEX_DEPLOY_TOKEN` (Convex Dashboard → Settings → Deploy Keys) — deploys
+  backend functions before the frontend build
+
+Without these secrets the CI `deploy` job is skipped and only the `check` job runs.
+
 
 # Using Authentication (Important!)
 
