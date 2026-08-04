@@ -141,14 +141,47 @@ describe("mutationCalls — args записываются без мутации"
     });
   });
 
-  it("замороженный args записывается как есть, без копии и без правок", async () => {
+  it("замороженный args записывается как снимок: структурно тот же, но не та же ссылка", async () => {
     const args = deepFreeze({ id: "e1", name: "Яблоко" });
     const del = useMutation(api.mealLog.deleteEntry);
     await del(args);
 
     const call = convexMock.mutationCalls.find((c) => c.path === "mealLog.deleteEntry");
     expect(call).toBeDefined();
-    // Записан ровно тот же объект (по ссылке), а не мутированная копия.
-    expect(call!.args[0]).toBe(args);
+    // Структурно идентично входу (заморозка не помешала клонированию).
+    expect(call!.args[0]).toEqual(args);
+    // Но это снимок, а не ссылка на входной объект: реальный клиент
+    // сериализует args в момент вызова, и последующая мутация входа
+    // не должна исказить журнал.
+    expect(call!.args[0]).not.toBe(args);
+  });
+
+  it("мутация входных args после вызова не меняет запись в журнале", async () => {
+    const args = { date: "2026-01-01", amountMl: 250 };
+    const addWater = useMutation(api.water.addWater);
+    await addWater(args);
+
+    // Компонент «по ошибке» меняет объект уже после вызова — журнал обязан
+    // сохранить состояние на момент вызова (250, а не 999).
+    args.amountMl = 999;
+
+    expect(convexMock.mutationCalls).toContainEqual({
+      path: "water.addWater",
+      args: [{ date: "2026-01-01", amountMl: 250 }],
+    });
+  });
+
+  it("снимок глубокий: вложенные структуры не связаны с входом", async () => {
+    const args = { entries: [{ name: "Обед", calories: 500 }] };
+    const addEntries = useMutation(api.mealLog.addEntries);
+    await addEntries(args);
+
+    // Мутация на любой глубине после вызова не задевает запись.
+    args.entries[0].calories = 9999;
+    args.entries.push({ name: "Лишнее", calories: 1 });
+
+    expect(convexMock.mutationCalls[0].args[0]).toEqual({
+      entries: [{ name: "Обед", calories: 500 }],
+    });
   });
 });
