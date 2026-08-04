@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import {
   FOOD_LIBRARY,
@@ -326,6 +327,28 @@ export default function Meals() {
     }
   };
 
+  /** Удалить запись из дневника с понятным фидбеком. */
+  const handleDeleteEntry = async (id: Doc<"mealLog">["_id"], name: string) => {
+    try {
+      await deleteEntry({ id });
+      toast.success(`${name} — удалено`);
+    } catch (err) {
+      console.error(`[Meals] Ошибка удаления записи (id=${id}):`, err);
+      toast.error("Не удалось удалить запись");
+    }
+  };
+
+  /** Удалить свой продукт из библиотеки с понятным фидбеком. */
+  const handleDeleteFood = async (id: Doc<"foods">["_id"], name: string) => {
+    try {
+      await deleteFood({ id });
+      toast.success(`${name} — удалено из моих продуктов`);
+    } catch (err) {
+      console.error(`[Meals] Ошибка удаления продукта (id=${id}):`, err);
+      toast.error("Не удалось удалить продукт");
+    }
+  };
+
   const handleSaveFood = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const amount = parseLocalNumber(newFood.amount) ?? 100;
@@ -378,14 +401,16 @@ export default function Meals() {
           <p className="label-overline text-muted-foreground">Питание</p>
           <h1 className="m3-headline-large mt-2">Питание</h1>
         </header>
-        <div className="rounded-xl border border-dashed bg-card/50 p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            Настройте профиль, чтобы получить цели по калориям и макросам.
-          </p>
-          <Button asChild className="mt-4">
-            <a href="/dashboard/profile">Перейти в профиль</a>
-          </Button>
-        </div>
+        <EmptyState
+          icon={UtensilsCrossed}
+          title="Цели ещё не рассчитаны"
+          description="Настройте профиль — возраст, рост, вес, активность и цель — и получите дневные нормы по калориям и макросам."
+          action={
+            <Button asChild>
+              <a href="/dashboard/profile">Перейти в профиль</a>
+            </Button>
+          }
+        />
       </div>
     );
   }
@@ -617,9 +642,9 @@ export default function Meals() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteEntry({ id: e._id })}
+                            onClick={() => void handleDeleteEntry(e._id, e.name)}
                             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
-                            aria-label="Удалить"
+                            aria-label={`Удалить ${e.name}`}
                           >
                             <Trash2 className="size-3.5" />
                           </button>
@@ -764,9 +789,9 @@ export default function Meals() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => deleteFood({ id: f._id })}
+                      onClick={() => void handleDeleteFood(f._id, f.name)}
                       className="text-muted-foreground transition-colors hover:text-destructive"
-                      aria-label="Удалить"
+                      aria-label={`Удалить ${f.name}`}
                     >
                       <Trash2 className="size-4" />
                     </button>
