@@ -1,8 +1,8 @@
 import { Email } from "@convex-dev/auth/providers/Email";
 import type { EmailConfig } from "@convex-dev/auth/server";
-import axios from "axios";
 import { RandomReader, generateRandomString } from "@oslojs/crypto/random";
 import { internal } from "../_generated/api";
+import { vly } from "../../lib/vly-integrations";
 
 // Второй аргумент ctx библиотека передаёт реально (см. server/implementation/signIn.ts),
 // хотя в типах Auth.js его нет. Описываем минимальную форму для своих нужд.
@@ -33,9 +33,9 @@ export const emailOtp = Email({
     { identifier: email, token }: { identifier: string; token: string },
     ctx: SendVerificationCtx,
   ) => {
-    // Локальная разработка без внешнего SMTP: не ходим в email.vly.ai
-    // (он сейчас отдаёт 401), а печатаем код в лог бэкенда и сохраняем
-    // в таблицу devOtpCodes, чтобы форма входа показала его прямо в UI.
+    // Локальная разработка без внешнего SMTP: не ходим в VLY-шлюз, а печатаем
+    // код в лог бэкенда и сохраняем в таблицу devOtpCodes, чтобы форма входа
+    // показала его прямо в UI.
     if (process.env.VLY_EMAIL_DEV_CAPTURE === "1") {
       console.log(`[dev-otp] код для ${email}: ${token}`);
       await ctx.runMutation(internal.devOtp.insert, {
@@ -45,22 +45,39 @@ export const emailOtp = Email({
       });
       return;
     }
-    try {
-      await axios.post(
-        "https://email.vly.ai/send_otp",
-        {
-          to: email,
-          otp: token,
-          appName: process.env.VLY_APP_NAME || "a vly.ai application",
-        },
-        {
-          headers: {
-            "x-api-key": "vlytothemoon2025",
-          },
-        },
+
+    // Прод: отправляем через VLY-шлюз (VLY_INTEGRATION_KEY, задаётся в панели
+    // Convex/в окружении — никаких ключей в исходниках). Требуется верифицированный
+    // домен отправителя в дашборде VLY (vly.email.listDomains / verifyDomain).
+    if (!process.env.VLY_INTEGRATION_KEY) {
+      throw new Error(
+        "Email-отправка не настроена: задайте VLY_INTEGRATION_KEY в переменных окружения проекта.",
       );
-    } catch (error) {
-      throw new Error(JSON.stringify(error));
+    }
+
+    const appName = process.env.VLY_APP_NAME || "КИЛО";
+    const res = await vly.email.send({
+      to: email,
+      subject: `Код входа в ${appName}`,
+      text:
+        `Здравствуйте! Ваш код подтверждения для входа в ${appName}: ${token}.\n\n` +
+        `Код действует 15 минут. Если вы не запрашивали вход — просто проигнорируйте это письмо.`,
+      html:
+        `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">` +
+        `<h2 style="margin:0 0 12px;font-size:20px;">Вход в ${appName}</h2>` +
+        `<p style="margin:0 0 16px;color:#444;font-size:14px;line-height:1.5;">` +
+        `Ваш код подтверждения:</p>` +
+        `<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0b6;">${token}</p>` +
+        `<p style="margin:0;color:#888;font-size:12px;line-height:1.5;">` +
+        `Код действует 15 минут. Если вы не запрашивали вход, просто проигнорируйте это письмо.</p>` +
+        `</div>`,
+    });
+
+    if (!res.success || res.data?.status === "failed") {
+      throw new Error(
+        res.error ??
+          "Не удалось отправить письмо с кодом. Попробуйте ещё раз позже.",
+      );
     }
   }) as unknown as EmailConfig["sendVerificationRequest"],
 });
