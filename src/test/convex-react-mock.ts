@@ -57,10 +57,39 @@ function pathOf(ref: unknown): string {
   return String(ref);
 }
 
-// args сериализуются как есть: для многоключевых объектов порядок свойств
-// должен совпадать в setQuery() и в вызове useQuery() компонентом.
+/** Рекурсивно сортирует ключи объектов, массивы и примитивы оставляет как есть. */
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(obj)
+        .sort()
+        .map((k) => [k, sortKeys(obj[k])]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Стабильная сериализация args для ключей мока.
+ *
+ * JSON.stringify зависит от порядка вставки свойств, а тест и компонент могут
+ * передавать args с ключами в разном порядке (особенно после того, как поля
+ * мутации переупорядочены в коде). Сортируем ключи рекурсивно — один и тот же
+ * объект всегда даёт один и тот же ключ; порядок элементов массива сохраняется
+ * (он семантически значим).
+ */
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+// args сериализуются стабильно (stableStringify) — порядок свойств не влияет
+// на ключ, поэтому setQuery() и вызов useQuery() компонентом всегда совпадают.
 function keyOf(path: string, args: unknown): string {
-  return `${path}:${JSON.stringify(args ?? null)}`;
+  return `${path}:${stableStringify(args ?? null)}`;
 }
 
 /** useQuery из convex/react — возвращает результат, заданный через setQuery(). */
