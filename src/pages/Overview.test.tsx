@@ -9,27 +9,22 @@ vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
-import { profile, type MealEntry, type WeightEntry } from "@/test/fixtures";
+import { profile, waterEntry, type MealEntry, type WeightEntry } from "@/test/fixtures";
 import { addDays, lastNDays, toDateKey, todayKey } from "@/lib/dates";
 import Overview from "./Overview";
 
 /** Цель по воде: max(1500, round(80·33/250)·250) = 2750 мл. */
 const WATER_GOAL = 2750;
 
-/**
- * Тот же диапазон, что строит Overview для календаря активности, но с ключами
- * в обратном порядке: компонент шлёт `{ from, to }` (Overview.tsx: range =
- * { from: …, to: … }), а мы задаём `{ to, from }`. Ключ мока совпадает
- * благодаря stableStringify в convex-react-mock; при возврате к голому
- * JSON.stringify все setupFilled-тесты упали бы (activity остался бы
- * undefined, страница зависла в загрузке).
- */
+/** Тот же диапазон, что строит Overview для календаря активности. */
 function activityRange(): { from: string; to: string } {
   const keys = lastNDays(84);
-  return { to: keys[keys.length - 1], from: keys[0] };
+  return { from: keys[0], to: keys[keys.length - 1] };
 }
 
-/** Профиль + пустые данные дня. */
+/** Профиль + пустые данные дня. Вода задаётся типизированной фикстурой
+ *  (WaterEntry из схемы) — расхождение полей с водной таблицей ловится
+ *  на этапе компиляции. */
 function setupFilled(overrides: {
   today?: MealEntry[];
   waterMl?: number;
@@ -39,7 +34,11 @@ function setupFilled(overrides: {
   setQuery(api.mealLog.getByDate, { date: todayKey() }, overrides.today ?? []);
   setQuery(api.weightEntries.listMyWeights, {}, overrides.weights ?? []);
   setQuery(api.workouts.listLogs, {}, []);
-  setQuery(api.water.getByDate, { date: todayKey() }, { amountMl: overrides.waterMl ?? 0 });
+  setQuery(
+    api.water.getByDate,
+    { date: todayKey() },
+    waterEntry(overrides.waterMl ?? 0),
+  );
   setQuery(api.activity.getActivityDays, activityRange(), []);
 }
 
@@ -58,7 +57,7 @@ describe("Overview", () => {
   it("без профиля предлагает настроить его и ведёт на профиль", () => {
     setQuery(api.profiles.getMyProfile, undefined, null);
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
-    setQuery(api.water.getByDate, { date: todayKey() }, { amountMl: 0 });
+    setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
     setQuery(api.activity.getActivityDays, activityRange(), []);
     renderWithRouter(<Overview />);
 
@@ -167,26 +166,23 @@ describe("Overview", () => {
     expect(screen.getByText(/При таком темпе/)).toBeInTheDocument();
   });
 
-  it("активность находится при переставленном порядке ключей args (stableStringify)", () => {
+  it("показывает серию активных дней из диапазона", () => {
     // Компонент вызывает useQuery(api.activity.getActivityDays, { from, to })
-    // (Overview.tsx: range = { from: …, to: … }). Здесь setQuery получает те же
-    // значения в порядке { to, from } — благодаря stableStringify в
-    // convex-react-mock ключ совпадает и данные доезжают до страницы.
-    // Без фикса activity остался бы undefined и Overview завис в загрузке.
-    const r = activityRange();
+    // (Overview.tsx: range = { from: …, to: … }) — порядок ключей совпадает
+    // с серверным и с хелпером выше. (Регрессия переставленного порядка
+    // ключей покрыта отдельно в convex-react-mock.test.ts.)
     setQuery(api.profiles.getMyProfile, undefined, profile);
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
     setQuery(api.weightEntries.listMyWeights, {}, []);
     setQuery(api.workouts.listLogs, {}, []);
-    setQuery(api.water.getByDate, { date: todayKey() }, { amountMl: 0 });
-    setQuery(api.activity.getActivityDays, { to: r.to, from: r.from }, [
+    setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
+    setQuery(api.activity.getActivityDays, activityRange(), [
       { date: todayKey(), count: 1 },
     ]);
     renderWithRouter(<Overview />);
 
     // Запись за сегодня → серия = 1 день («1» и «день подряд» — в разных
-    // элементах); это доказывает, что activity пришёл (не undefined),
-    // иначе секция активности осталась бы в загрузке.
+    // элементах); секция активности отрисована, данные доехали до страницы.
     expect(screen.getByText("день подряд")).toBeInTheDocument();
   });
 });
