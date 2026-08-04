@@ -21,6 +21,7 @@ import { Separator } from "@/components/ui/separator";
 import { ProgressRing } from "@/components/progress-ring";
 import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
+import { EmptyState } from "@/components/empty-state";
 import {
   Activity,
   ArrowRight,
@@ -374,17 +375,19 @@ export default function Overview() {
       </motion.header>
 
       {noProfile ? (
-        <motion.div variants={fadeUp} className="rounded-xl border border-dashed bg-card/50 p-8 text-center">
-          <p className="text-sm font-medium">Настройте профиль, чтобы начать</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ваши цели по калориям и макросам рассчитываются из возраста, роста,
-            веса и поставленных целей.
-          </p>
-          <Button asChild className="mt-5">
-            <Link to="/dashboard/profile">
-              Настроить профиль <ArrowRight className="size-4" />
-            </Link>
-          </Button>
+        <motion.div variants={fadeUp}>
+          <EmptyState
+            icon={Target}
+            title="Настройте профиль, чтобы начать"
+            description="Ваши цели по калориям и макросам рассчитываются из возраста, роста, веса и поставленных целей."
+            action={
+              <Button asChild>
+                <Link to="/dashboard/profile">
+                  Настроить профиль <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            }
+          />
         </motion.div>
       ) : (
         <>

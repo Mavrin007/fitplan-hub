@@ -103,7 +103,7 @@
   --secondary: oklch(0.92 0.02 195);
   --secondary-foreground: oklch(0.25 0.03 195);
   --muted: oklch(0.93 0.005 195);
-  --muted-foreground: oklch(0.45 0.008 195);
+  --muted-foreground: oklch(0.5 0.008 195);
   --accent: oklch(0.92 0.02 195);
   --accent-foreground: oklch(0.25 0.03 195);
   --destructive: oklch(0.577 0.245 27.325);
@@ -234,6 +234,18 @@
   html {
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+  /* Переносы заголовков не должны рваться по одному слову */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  /* Стандартное фокус-кольцо для клавиатурной навигации */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
   /* Выделение текста — инверсия темы: в светлой тёмный фон, в тёмной светлый. */
   ::selection {
@@ -454,4 +466,9 @@
   .m3-label-large { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.00625em; }
   .m3-label-medium { font-size: 0.75rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.03125em; }
   .m3-label-small { font-size: 0.6875rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.05em; }
+
+  /* Улучшенные переносы длинных текстов (без висячих строк по одному слову) */
+  .text-pretty {
+    text-wrap: pretty;
+  }
 }
