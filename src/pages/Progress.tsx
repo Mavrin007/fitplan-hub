@@ -15,6 +15,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { PageAurora } from "@/components/page-aurora";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import {
@@ -209,7 +210,8 @@ export default function Progress() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10">
+    <div className="relative isolate mx-auto max-w-4xl space-y-10">
+      <PageAurora />
       <header>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -217,6 +219,10 @@ export default function Progress() {
             <h1 className="m3-headline-large mt-2">
               Тренды
             </h1>
+            <div
+              aria-hidden
+              className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+            />
           </div>
           <PeriodToggle value={period} onChange={setPeriod} />
         </div>
@@ -228,7 +234,7 @@ export default function Progress() {
 
       {/* Карточка-инсайт: прогноз достижения цели */}
       {projection && (
-        <section className="overflow-hidden rounded-xl border bg-card shadow-elev-1">
+        <section className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1">
           <div className="flex flex-wrap items-center justify-between gap-4 p-6 sm:p-8">
             <div className="flex min-w-0 items-center gap-4">
               <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand">
@@ -548,7 +554,7 @@ export default function Progress() {
       </section>
 
       {/* Экспорт данных */}
-      <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+      <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="label-overline flex items-center gap-1.5 text-muted-foreground">

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ProgressRing } from "@/components/progress-ring";
 import { MacroRing } from "@/components/macro-ring";
+import { PageAurora } from "@/components/page-aurora";
 import {
   Activity,
   ArrowRight,
@@ -352,7 +353,7 @@ export default function Overview() {
 
   return (
     <motion.div
-      className="mx-auto max-w-3xl space-y-10"
+      className="relative isolate mx-auto max-w-3xl space-y-10"
       initial="hidden"
       animate="show"
       variants={{
@@ -360,11 +361,16 @@ export default function Overview() {
         show: { transition: { staggerChildren: 0.07 } },
       }}
     >
+      <PageAurora />
       <motion.header variants={fadeUp}>
         <p className="label-overline text-muted-foreground">
           {prettyDate(todayKey())}
         </p>
         <h1 className="m3-headline-large mt-2">Сегодня</h1>
+        <div
+          aria-hidden
+          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+        />
       </motion.header>
 
       {noProfile ? (
@@ -385,7 +391,7 @@ export default function Overview() {
           {/* Calorie card */}
           <motion.section
             variants={fadeUp}
-            className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
+            className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
           >
             <div className="flex flex-wrap items-center justify-between gap-6">
               <div>
@@ -432,7 +438,7 @@ export default function Overview() {
           {/* Macros — кольца вместо баров */}
           <motion.section
             variants={fadeUp}
-            className="grid grid-cols-3 gap-4 rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
+            className="card-lift grid grid-cols-3 gap-4 rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
           >
             <MacroRing label="Белки" value={protein} target={targets!.protein} color="var(--foreground)" delay={0.2} />
             <MacroRing label="Углеводы" value={carbs} target={targets!.carbs} color="var(--muted-foreground)" delay={0.3} />
@@ -440,7 +446,7 @@ export default function Overview() {
           </motion.section>
 
           {/* Активность: серия дней + календарь */}
-          <motion.section variants={fadeUp} className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+          <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Flame className="size-4 text-brand" />
@@ -481,7 +487,7 @@ export default function Overview() {
           </motion.section>
 
           {/* Вода */}
-          <motion.section variants={fadeUp} className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+          <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
@@ -583,7 +589,7 @@ export default function Overview() {
 
           {/* Weight trend */}
           {weightTrend.length >= 2 && (
-            <motion.section variants={fadeUp} className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+            <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
               <div className="flex items-center justify-between">
                 <p className="label-overline text-muted-foreground">
                   Динамика веса
@@ -642,7 +648,7 @@ export default function Overview() {
           {/* AI assistant CTA */}
           <motion.section
             variants={fadeUp}
-            className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-6 shadow-elev-1"
+            className="card-lift flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-6 shadow-elev-1"
           >
             <div className="flex items-center gap-4">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">

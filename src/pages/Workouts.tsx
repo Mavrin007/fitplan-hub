@@ -18,6 +18,7 @@ import {
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { WorkoutMode } from "@/components/WorkoutMode";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { PageAurora } from "@/components/page-aurora";
 import {
   ResponsiveContainer,
   BarChart,
@@ -386,14 +387,19 @@ export default function Workouts() {
   const cycleWeeks = plan?.durationWeeks ?? weeks?.length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10">
+    <div className="relative isolate mx-auto max-w-4xl space-y-10">
+      <PageAurora />
       <header>
         <p className="label-overline text-muted-foreground">Тренировки</p>
         <h1 className="m3-headline-large mt-2">План тренировок</h1>
+        <div
+          aria-hidden
+          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+        />
       </header>
 
       {/* Сводная карточка плана: сплит, частота, цикл и профиль, под который собран план */}
-      <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+      <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="label-overline text-muted-foreground">Текущий план</p>
@@ -517,7 +523,7 @@ export default function Workouts() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.35, ease: "easeOut", delay: idx * 0.06 }}
-                  className="overflow-hidden rounded-xl border bg-card shadow-elev-1"
+                  className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1"
                 >
                   {/* Placeholder-иллюстрация тренировки */}
                   <div
@@ -742,7 +748,7 @@ export default function Workouts() {
         </ChartCard>
 
         {/* Личные рекорды */}
-        <div className="rounded-xl border bg-card p-6 shadow-elev-1">
+        <div className="card-lift rounded-xl border bg-card p-6 shadow-elev-1">
           <div className="flex items-center gap-2">
             <Trophy className="size-4 text-amber-500" />
             <h2 className="m3-title-small">Личные рекорды</h2>
@@ -797,7 +803,7 @@ export default function Workouts() {
             Пока нет записей — нажмите «Начать тренировку» у любой сессии выше.
           </p>
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-card shadow-elev-1">
+          <div className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1">
             <div className="divide-y">
               {(logs ?? []).slice(0, 12).map((l) => (
                 <div key={l._id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">

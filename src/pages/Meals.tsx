@@ -18,6 +18,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { MacroRing } from "@/components/macro-ring";
+import { PageAurora } from "@/components/page-aurora";
 import { Badge } from "@/components/ui/badge";
 import {
   FOOD_LIBRARY,
@@ -396,10 +397,15 @@ export default function Meals() {
   const calLeft = targets.calories - totals.calories;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10">
+    <div className="relative isolate mx-auto max-w-4xl space-y-10">
+      <PageAurora />
       <header>
         <p className="label-overline text-muted-foreground">Питание</p>
         <h1 className="m3-headline-large mt-2">Рацион за сегодня</h1>
+        <div
+          aria-hidden
+          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+        />
       </header>
 
       {/* Totals summary — легенда + анимированные кольца макросов */}
@@ -489,7 +495,7 @@ export default function Meals() {
       </ChartCard>
 
       {/* Перенос записей из прошлого дня */}
-      <section className="rounded-xl border bg-card p-5 shadow-elev-1">
+      <section className="card-lift rounded-xl border bg-card p-5 shadow-elev-1">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
@@ -551,7 +557,7 @@ export default function Meals() {
           return (
             <div
               key={mt}
-              className="overflow-hidden rounded-xl border bg-card shadow-elev-1"
+              className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1"
             >
               {/* Placeholder-иллюстрация */}
               <div className="relative h-20 overflow-hidden bg-gradient-to-br from-secondary-container/80 to-primary-container/50">
@@ -654,7 +660,7 @@ export default function Meals() {
 
         <form
           onSubmit={handleSaveFood}
-          className="grid gap-3 rounded-xl border bg-card p-5 shadow-elev-1 sm:grid-cols-6"
+          className="card-lift grid gap-3 rounded-xl border bg-card p-5 shadow-elev-1 sm:grid-cols-6"
         >
           <div className="sm:col-span-2">
             <Label htmlFor="nf-name">Название</Label>
@@ -727,7 +733,7 @@ export default function Meals() {
         </form>
 
         {(foods ?? []).length > 0 && (
-          <div className="overflow-hidden rounded-xl border bg-card shadow-elev-1">
+          <div className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1">
             <div className="divide-y">
               {(foods ?? []).map((f) => (
                 <div

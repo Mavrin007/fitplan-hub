@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { PageAurora } from "@/components/page-aurora";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -399,12 +400,17 @@ export default function Profile() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-10">
+    <div className="relative isolate mx-auto max-w-4xl space-y-10">
+      <PageAurora />
       <header>
         <p className="label-overline text-muted-foreground">Профиль</p>
         <h1 className="mt-2 m3-headline-large">
           Ваши цифры
         </h1>
+        <div
+          aria-hidden
+          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+        />
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
           Дневные цели по калориям и макросам рассчитываются из этих данных по
           формуле Миффлина–Сан Жеора. Целевой вес показывается пунктиром на
@@ -416,7 +422,7 @@ export default function Profile() {
       {/* Гостевой аккаунт без почты: привязка email, чтобы данные не терялись
           при входе с другого устройства / после выхода из гостевой сессии. */}
       {user && !user.email && (
-        <section className="rounded-xl border bg-secondary-container/30 p-5 shadow-elev-1">
+        <section className="card-lift rounded-xl border bg-secondary-container/30 p-5 shadow-elev-1">
           <div className="flex items-start gap-3">
             <div className="mt-0.5 rounded-full bg-secondary-container p-2">
               <Link2 className="size-4 text-on-secondary-container" />
@@ -527,7 +533,7 @@ export default function Profile() {
       )}
 
       {/* M3 onboarding: линейный прогресс + шаги */}
-      <section className="rounded-xl border bg-card p-5 shadow-elev-1">
+      <section className="card-lift rounded-xl border bg-card p-5 shadow-elev-1">
         <div className="flex items-center justify-between gap-3">
           <p className="label-overline text-muted-foreground">Онбординг</p>
           <p className="text-xs font-medium num">{onboardingPct}%</p>
@@ -563,7 +569,7 @@ export default function Profile() {
       </section>
 
       <form onSubmit={handleSave} className="space-y-8">
-        <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
           <p className="label-overline text-muted-foreground">Основное</p>
           <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
@@ -729,7 +735,7 @@ export default function Profile() {
         </section>
 
         {/* Ограничения / травмы */}
-        <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
           <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
             <AlertTriangle className="size-3.5" />
             Ограничения и травмы
@@ -765,7 +771,7 @@ export default function Profile() {
         </section>
 
         {/* Инвентарь */}
-        <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
           <p className="label-overline text-muted-foreground">Инвентарь</p>
           <p className="mt-1 max-w-xl text-xs text-muted-foreground">
             План тренировок подберёт упражнения под то, что у вас есть, и
@@ -811,7 +817,7 @@ export default function Profile() {
         </section>
 
         {/* Live targets */}
-        <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
           <div className="flex items-baseline justify-between gap-3">
             <p className="label-overline text-muted-foreground">Дневные цели</p>
             {targets && (
@@ -867,7 +873,7 @@ export default function Profile() {
         </section>
 
         {/* Разбор калорий: ИМТ + BMR → активность → TDEE → дефицит/профицит */}
-        <section className="rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
               <Activity className="size-3.5" />
