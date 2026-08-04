@@ -1,11 +1,11 @@
 /**
  * Мок для `convex/react` и `@/convex/_generated/api` в компонентных тестах.
  *
- * Почему так: реальный `api` — это Proxy (`anyApi`), который при каждом
- * обращении создаёт новый объект без стабильного identity, поэтому тесты не
- * могут адресовать запросы по ссылкам на функции. Вместо этого мок подменяет
- * модуль api на обычные объекты с меткой `__path`, а мок convex/react ключует
- * результаты и вызовы по этой метке (+ сериализованные args).
+ * Реальный `api` — это Proxy (`anyApi`), который при каждом обращении создаёт
+ * новый объект без стабильного identity, поэтому тесты не могут адресовать
+ * запросы по ссылкам на функции. Вместо этого мок подменяет модуль api на
+ * обычные объекты с меткой `__path`, а результаты и вызовы ключуются по этой
+ * метке (+ сериализованные args).
  *
  * Подключение в тесте:
  *   vi.mock("convex/react", () => import("@/test/convex-react-mock"));
@@ -13,11 +13,10 @@
  */
 import { vi } from "vitest";
 
-// Внутреннее состояние — оборачиваем в vi.hoisted, чтобы фабрики vi.mock
-// могли захватить его, не попадая под TDZ-ограничения хойстинга.
+// Внутреннее состояние — в vi.hoisted, чтобы фабрики vi.mock могли захватить
+// его, не попадая под TDZ-ограничения хойстинга.
 const state = vi.hoisted(() => ({
   queryResults: new Map<string, unknown>(),
-  queryCalls: [] as { path: string; args: unknown }[],
   mutationImpls: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
   mutationCalls: [] as { path: string; args: unknown[] }[],
 }));
@@ -51,10 +50,6 @@ export const api = {
   activity: { getActivityDays: ref("activity.getActivityDays") },
 };
 
-// Остальные экспорты generated-модуля — страницы их не используют.
-export const internal = {};
-export const components = {};
-
 function pathOf(ref: unknown): string {
   if (ref && typeof ref === "object" && "__path" in ref) {
     return (ref as { __path: string }).__path;
@@ -62,34 +57,15 @@ function pathOf(ref: unknown): string {
   return String(ref);
 }
 
-/** Стабильная сериализация args: сортируем ключи объектов рекурсивно, чтобы
- *  порядок свойств в объекте не влиял на совпадение setQuery/useQuery.
- *  Иначе `{ a: 1, b: 2 }` и `{ b: 2, a: 1 }` дали бы разные ключи и мок
- *  молча вернул бы undefined вместо фикстуры. */
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const keys = Object.keys(obj).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
+// args сериализуются как есть: для многоключевых объектов порядок свойств
+// должен совпадать в setQuery() и в вызове useQuery() компонентом.
 function keyOf(path: string, args: unknown): string {
-  return `${path}:${stableStringify(args ?? null)}`;
+  return `${path}:${JSON.stringify(args ?? null)}`;
 }
 
 /** useQuery из convex/react — возвращает результат, заданный через setQuery(). */
 export function useQuery(ref: unknown, args?: unknown): unknown {
-  const path = pathOf(ref);
-  const key = keyOf(path, args);
-  convexMock.queryCalls.push({ path, args });
-  return convexMock.queryResults.has(key)
-    ? convexMock.queryResults.get(key)
-    : undefined;
+  return convexMock.queryResults.get(keyOf(pathOf(ref), args));
 }
 
 /** useMutation из convex/react — записывает вызовы, реализацию можно задать. */
@@ -107,7 +83,7 @@ export function setQuery(ref: unknown, args: unknown, value: unknown): void {
   convexMock.queryResults.set(keyOf(pathOf(ref), args), value);
 }
 
-/** Задать реализацию мутации (например, резолвящуюся с задержкой). */
+/** Задать реализацию мутации (например, отклоняющуюся с ошибкой). */
 export function setMutation(
   ref: unknown,
   impl: (...args: unknown[]) => Promise<unknown>,
@@ -119,6 +95,5 @@ export function setMutation(
 export function resetConvexMock(): void {
   convexMock.queryResults.clear();
   convexMock.mutationImpls.clear();
-  convexMock.queryCalls = [];
   convexMock.mutationCalls = [];
 }

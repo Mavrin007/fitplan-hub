@@ -1,48 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 
 // Мок convex-слоя: стабильные ссылки на функции вместо anyApi-Proxy.
 vi.mock("convex/react", () => import("@/test/convex-react-mock"));
 vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
+vi.mock("sonner", () => import("@/test/sonner-mock"));
 
-const toastMock = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  info: vi.fn(),
-}));
-vi.mock("sonner", () => ({ toast: toastMock }));
-
-import { api, convexMock, resetConvexMock, setQuery } from "@/test/convex-react-mock";
+import { api, convexMock, setQuery } from "@/test/convex-react-mock";
+import { toast } from "@/test/sonner-mock";
+import { profile, renderWithRouter, resetMocks, type MealEntry } from "@/test/test-utils";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
 import Meals from "./Meals";
-
-/** Тот же профиль, что в Overview: цель по калориям ~2345 ккал. */
-const profile = {
-  userId: "u1",
-  age: 30,
-  gender: "male",
-  heightCm: 180,
-  weightKg: 80,
-  targetWeightKg: 75,
-  activityLevel: "moderate",
-  fitnessGoal: "lose_weight",
-  experienceLevel: "intermediate",
-  updatedAt: 0,
-};
-
-type MealEntry = {
-  _id: string;
-  date: string;
-  mealType: string;
-  name: string;
-  quantity: number;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-};
 
 function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: unknown[] } = {}) {
   setQuery(api.profiles.getMyProfile, undefined, profile);
@@ -50,25 +19,15 @@ function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: u
   setQuery(api.foods.listMyFoods, {}, foods);
 }
 
-function renderMeals() {
-  return render(
-    <MemoryRouter>
-      <Meals />
-    </MemoryRouter>,
-  );
-}
-
 describe("Meals", () => {
   beforeEach(() => {
-    resetConvexMock();
-    toastMock.success.mockClear();
-    toastMock.error.mockClear();
+    resetMocks();
   });
 
   it("без профиля предлагает перейти в профиль", () => {
     setQuery(api.profiles.getMyProfile, undefined, null);
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     expect(
       screen.getByText("Настройте профиль, чтобы получить цели по калориям и макросам."),
@@ -81,7 +40,7 @@ describe("Meals", () => {
 
   it("пустой день: четыре карточки приёмов и генератор плана", () => {
     setupMeals();
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     expect(
       screen.getByRole("heading", { name: "Рацион за сегодня" }),
@@ -120,7 +79,7 @@ describe("Meals", () => {
         },
       ],
     });
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     expect(screen.getByText("Куриная грудка (гриль)")).toBeInTheDocument();
     expect(screen.getByText("Белый рис")).toBeInTheDocument();
@@ -148,7 +107,7 @@ describe("Meals", () => {
         fat: 13,
       },
     ]);
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     expect(screen.getByText(/Готово к копированию: 1 запись/)).toBeInTheDocument();
 
@@ -170,7 +129,7 @@ describe("Meals", () => {
         ],
       }),
     );
-    expect(toastMock.success).toHaveBeenCalledWith(
+    expect(toast.success).toHaveBeenCalledWith(
       expect.stringContaining("Скопировано записей: 1"),
     );
   });
@@ -178,7 +137,7 @@ describe("Meals", () => {
   it("добавляет продукт из библиотеки через диалог", async () => {
     const user = userEvent.setup();
     setupMeals();
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
     const dialog = screen.getByRole("dialog");
@@ -206,13 +165,13 @@ describe("Meals", () => {
         ],
       }),
     );
-    expect(toastMock.success).toHaveBeenCalledWith("Куриная грудка (гриль) — добавлено");
+    expect(toast.success).toHaveBeenCalledWith("Куриная грудка (гриль) — добавлено");
   });
 
   it("сохраняет свой продукт из формы", async () => {
     const user = userEvent.setup();
     setupMeals();
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     await user.type(screen.getByLabelText("Название"), "Мой протеиновый коктейль");
     await user.type(screen.getByLabelText("ккал"), "400");
@@ -234,7 +193,7 @@ describe("Meals", () => {
         ],
       }),
     );
-    expect(toastMock.success).toHaveBeenCalledWith("Продукт сохранён");
+    expect(toast.success).toHaveBeenCalledWith("Продукт сохранён");
   });
 
   it("удаляет запись по кнопке", async () => {
@@ -254,7 +213,7 @@ describe("Meals", () => {
         },
       ],
     });
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     await user.click(screen.getByRole("button", { name: "Удалить" }));
 
@@ -269,7 +228,7 @@ describe("Meals", () => {
   it("добавляет предложенный план на день в дневник", async () => {
     const user = userEvent.setup();
     setupMeals();
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     await user.click(screen.getByRole("button", { name: /Сгенерировать план на день/ }));
     const dialog = screen.getByRole("dialog");
@@ -287,7 +246,7 @@ describe("Meals", () => {
         args: [expect.objectContaining({ entries: expect.any(Array) })],
       }),
     );
-    expect(toastMock.success).toHaveBeenCalledWith("План на день добавлен в дневник");
+    expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
   });
 
   it("редактирует запись: диалог предзаполнен, изменения сохраняются", async () => {
@@ -307,7 +266,7 @@ describe("Meals", () => {
         },
       ],
     });
-    renderMeals();
+    renderWithRouter(<Meals />);
 
     await user.click(screen.getByRole("button", { name: "Редактировать запись" }));
     const dialog = screen.getByRole("dialog");
@@ -325,6 +284,6 @@ describe("Meals", () => {
         args: [expect.objectContaining({ id: "e1", name: "Яйца", calories: 200 })],
       }),
     );
-    expect(toastMock.success).toHaveBeenCalledWith("Запись обновлена");
+    expect(toast.success).toHaveBeenCalledWith("Запись обновлена");
   });
 });

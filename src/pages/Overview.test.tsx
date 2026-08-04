@@ -1,59 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 
 // Мок convex-слоя: стабильные ссылки на функции вместо anyApi-Proxy.
 vi.mock("convex/react", () => import("@/test/convex-react-mock"));
 vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
+vi.mock("sonner", () => import("@/test/sonner-mock"));
 
-const toastMock = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  info: vi.fn(),
-}));
-vi.mock("sonner", () => ({ toast: toastMock }));
-
+import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
+import { toast } from "@/test/sonner-mock";
 import {
-  api,
-  convexMock,
-  resetConvexMock,
-  setMutation,
-  setQuery,
-} from "@/test/convex-react-mock";
+  profile,
+  renderWithRouter,
+  resetMocks,
+  type MealEntry,
+  type WeightEntry,
+} from "@/test/test-utils";
 import { addDays, lastNDays, toDateKey, todayKey } from "@/lib/dates";
 import Overview from "./Overview";
 
-/** Профиль: рост 180, вес 80, цель — похудение. Цель по калориям ~2345 ккал. */
-const profile = {
-  userId: "u1",
-  age: 30,
-  gender: "male",
-  heightCm: 180,
-  weightKg: 80,
-  targetWeightKg: 75,
-  activityLevel: "moderate",
-  fitnessGoal: "lose_weight",
-  experienceLevel: "intermediate",
-  updatedAt: 0,
-};
-
 /** Цель по воде: max(1500, round(80·33/250)·250) = 2750 мл. */
 const WATER_GOAL = 2750;
-
-type MealEntry = {
-  _id: string;
-  date: string;
-  mealType: string;
-  name: string;
-  quantity: number;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-};
-
-type WeightEntry = { _id: string; date: string; weightKg: number };
 
 /** Тот же диапазон, что строит Overview для календаря активности. */
 function activityRange(): { from: string; to: string } {
@@ -75,23 +42,13 @@ function setupFilled(overrides: {
   setQuery(api.activity.getActivityDays, activityRange(), []);
 }
 
-function renderOverview() {
-  return render(
-    <MemoryRouter>
-      <Overview />
-    </MemoryRouter>,
-  );
-}
-
 describe("Overview", () => {
   beforeEach(() => {
-    resetConvexMock();
-    toastMock.success.mockClear();
-    toastMock.error.mockClear();
+    resetMocks();
   });
 
   it("показывает загрузку, пока профиль не пришёл", () => {
-    renderOverview();
+    renderWithRouter(<Overview />);
     expect(
       screen.queryByRole("heading", { name: "Сегодня" }),
     ).not.toBeInTheDocument();
@@ -102,7 +59,7 @@ describe("Overview", () => {
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
     setQuery(api.water.getByDate, { date: todayKey() }, { amountMl: 0 });
     setQuery(api.activity.getActivityDays, activityRange(), []);
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     expect(screen.getByText("Настройте профиль, чтобы начать")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Настроить профиль/ })).toHaveAttribute(
@@ -113,7 +70,7 @@ describe("Overview", () => {
 
   it("с профилем показывает цели, воду, макросы и быстрые действия", () => {
     setupFilled();
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     expect(screen.getByRole("heading", { name: "Сегодня" })).toBeInTheDocument();
     expect(screen.getByText("Приёмов пищи")).toBeInTheDocument();
@@ -141,7 +98,7 @@ describe("Overview", () => {
   it("добавление воды вызывает мутацию и поздравляет при достижении цели", async () => {
     const user = userEvent.setup();
     setupFilled({ waterMl: WATER_GOAL - 250 });
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     await user.click(screen.getByRole("button", { name: /\+250 мл/ }));
 
@@ -149,14 +106,14 @@ describe("Overview", () => {
       path: "water.addWater",
       args: [{ date: todayKey(), amountMl: 250 }],
     });
-    expect(toastMock.success).toHaveBeenCalledWith("Цель по воде достигнута! 🎉");
+    expect(toast.success).toHaveBeenCalledWith("Цель по воде достигнута! 🎉");
   });
 
   it("при ошибке обновления воды показывает toast об ошибке", async () => {
     const user = userEvent.setup();
     setupFilled({ waterMl: 500 });
     setMutation(api.water.addWater, () => Promise.reject(new Error("boom")));
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     await user.click(screen.getByRole("button", { name: /\+250 мл/ }));
 
@@ -164,7 +121,7 @@ describe("Overview", () => {
       path: "water.addWater",
       args: [{ date: todayKey(), amountMl: 250 }],
     });
-    expect(toastMock.error).toHaveBeenCalledWith("Не удалось обновить воду");
+    expect(toast.error).toHaveBeenCalledWith("Не удалось обновить воду");
   });
 
   it("при превышении калорий показывает предупреждение", () => {
@@ -183,7 +140,7 @@ describe("Overview", () => {
         },
       ],
     });
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     expect(screen.getByText("Превышение нормы")).toBeInTheDocument();
   });
@@ -197,7 +154,7 @@ describe("Overview", () => {
         { _id: "w3", date: toDateKey(addDays(new Date(), -1)), weightKg: 79.2 },
       ],
     });
-    renderOverview();
+    renderWithRouter(<Overview />);
 
     expect(screen.getByText("Динамика веса")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Смотреть всё" })).toHaveAttribute(
