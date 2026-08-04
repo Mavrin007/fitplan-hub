@@ -9,11 +9,13 @@ vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
-import { profile, type MealEntry } from "@/test/fixtures";
+import { profile, type FoodEntry, type MealEntry } from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
 import Meals from "./Meals";
 
-function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: unknown[] } = {}) {
+/** Список продуктов типизируется FoodEntry (поля из foodsFieldsValidator
+ *  схемы) — расхождение фикстур со схемой ловится на этапе компиляции. */
+function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: FoodEntry[] } = {}) {
   setQuery(api.profiles.getMyProfile, undefined, profile);
   setQuery(api.mealLog.getByDate, { date: todayKey() }, today);
   setQuery(api.foods.listMyFoods, {}, foods);
@@ -49,6 +51,33 @@ describe("Meals", () => {
     expect(screen.getAllByText("Пока ничего не записано.")).toHaveLength(4);
     expect(
       screen.getByRole("button", { name: /Сгенерировать план на день/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("показывает свои продукты из библиотеки (типизированный FoodEntry)", () => {
+    // Литерал проверяется типом FoodEntry из foodsFieldsValidator схемы —
+    // дрейф схемы (новое поле/смена типа) ломает компиляцию этого теста.
+    setupMeals({
+      foods: [
+        {
+          _id: "f1",
+          userId: "u1",
+          createdAt: 0,
+          name: "Овсянка",
+          amount: 100,
+          unit: "г",
+          calories: 350,
+          protein: 12,
+          carbs: 60,
+          fat: 6,
+        },
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    expect(screen.getByText("Овсянка")).toBeInTheDocument();
+    expect(
+      screen.getByText("350 ккал / 100 г · Б 12 · У 60 · Ж 6"),
     ).toBeInTheDocument();
   });
 

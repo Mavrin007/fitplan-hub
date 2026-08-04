@@ -144,6 +144,29 @@ export const mealLogEntryFieldsValidator = v.object({
 });
 export type MealLogEntryFields = Infer<typeof mealLogEntryFieldsValidator>;
 
+// User-defined custom foods / products.
+export const foodsFieldsValidator = v.object({
+  userId: v.id("users"),
+  name: v.string(),
+  amount: v.number(), // serving size in `unit`
+  unit: v.string(), // "g", "ml", "serving", "piece", ...
+  calories: v.number(), // per `amount`
+  protein: v.number(), // per `amount`
+  carbs: v.number(), // per `amount`
+  fat: v.number(), // per `amount`
+  createdAt: v.number(),
+});
+export type FoodFields = Infer<typeof foodsFieldsValidator>;
+
+// Daily water intake, one row per user per day (total ml).
+export const waterEntryFieldsValidator = v.object({
+  userId: v.id("users"),
+  date: v.string(), // YYYY-MM-DD (local)
+  amountMl: v.number(),
+  createdAt: v.number(),
+});
+export type WaterEntryFields = Infer<typeof waterEntryFieldsValidator>;
+
 const schema = defineSchema(
   {
     // default auth tables using convex auth.
@@ -169,28 +192,13 @@ const schema = defineSchema(
     weightEntries: defineTable(weightEntryFieldsValidator).index("by_user_date", ["userId", "date"]),
 
     // User-defined custom foods / products.
-    foods: defineTable({
-      userId: v.id("users"),
-      name: v.string(),
-      amount: v.number(), // serving size in `unit`
-      unit: v.string(), // "g", "ml", "serving", "piece", ...
-      calories: v.number(), // per `amount`
-      protein: v.number(), // per `amount`
-      carbs: v.number(), // per `amount`
-      fat: v.number(), // per `amount`
-      createdAt: v.number(),
-    }).index("by_user", ["userId"]),
+    foods: defineTable(foodsFieldsValidator).index("by_user", ["userId"]),
 
     // One row per logged meal / food for a given day.
     mealLog: defineTable(mealLogEntryFieldsValidator).index("by_user_date", ["userId", "date"]),
 
     // Daily water intake, one row per user per day (total ml).
-    waterEntries: defineTable({
-      userId: v.id("users"),
-      date: v.string(), // YYYY-MM-DD (local)
-      amountMl: v.number(),
-      createdAt: v.number(),
-    }).index("by_user_date", ["userId", "date"]),
+    waterEntries: defineTable(waterEntryFieldsValidator).index("by_user_date", ["userId", "date"]),
 
     // The user's current generated workout plan (one doc per user).
     workoutPlans: defineTable({

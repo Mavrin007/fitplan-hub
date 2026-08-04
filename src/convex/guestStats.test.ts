@@ -1,6 +1,6 @@
 /**
  * Юнит-тесты `countMyData` (src/convex/guestStats.ts) без Convex-рантайма:
- * фейковый ctx.db + мокнутый getAuthUserId (тот же паттерн, что в water/activity).
+ * общий фейковый ctx.db (src/test/convex-db-mock.ts) + мокнутый getAuthUserId.
  *
  * Проверяем, что счётчик: возвращает 0 без сессии, суммирует записи по всем
  * шести таблицам и не учитывает записи других пользователей.
@@ -11,56 +11,14 @@ vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { countMyData } from "./guestStats";
+import { makeConvexDb, type ConvexDbMock } from "@/test/convex-db-mock";
 
 const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
-type Doc = { _id: string; _creationTime: number } & Record<string, unknown>;
-
-/** Минимальный in-memory аналог ctx.db: withIndex + eq + collect. */
-interface FakeDb {
-  query: (table: string) => {
-    withIndex: (_name: string, fn: (q: unknown) => void) => {
-      collect: () => Doc[];
-    };
-  };
-}
-
-function makeDb(seed: Record<string, Doc[]> = {}): { db: FakeDb } {
-  const store: Record<string, Doc[]> = {
-    mealLog: [],
-    waterEntries: [],
-    workoutLogs: [],
-    weightEntries: [],
-    foods: [],
-    profiles: [],
-    ...seed,
-  };
-  const db: FakeDb = {
-    query(table: string) {
-      const filters: { op: "eq"; f: string; val: unknown }[] = [];
-      const q = {
-        eq(f: string, val: unknown) {
-          filters.push({ op: "eq", f, val });
-          return q;
-        },
-      };
-      const match = (d: Doc) =>
-        filters.every(({ f, val }) => d[f] === val);
-      return {
-        withIndex(_name: string, fn: (q: unknown) => void) {
-          fn(q);
-          return { collect: () => store[table].filter(match) };
-        },
-      };
-    },
-  };
-  return { db };
-}
-
-const runCount = async (db: FakeDb) =>
+const runCount = async (db: ConvexDbMock) =>
   (
     countMyData as unknown as {
-      _handler: (ctx: { db: FakeDb }) => Promise<number>;
+      _handler: (ctx: { db: ConvexDbMock }) => Promise<number>;
     }
   )._handler({ db });
 
@@ -72,17 +30,17 @@ describe("countMyData", () => {
 
   it("без сессии возвращает 0", async () => {
     vi.mocked(getAuthUserId).mockResolvedValue(null);
-    const { db } = makeDb();
+    const { db } = makeConvexDb();
     expect(await runCount(db)).toBe(0);
   });
 
   it("пустая база — 0", async () => {
-    const { db } = makeDb();
+    const { db } = makeConvexDb();
     expect(await runCount(db)).toBe(0);
   });
 
   it("суммирует записи по всем таблицам пользователя", async () => {
-    const { db } = makeDb({
+    const { db } = makeConvexDb({
       mealLog: [
         { _id: "m1", _creationTime: 0, userId: "user-1", date: "2026-08-04" },
         { _id: "m2", _creationTime: 0, userId: "user-1", date: "2026-08-04" },
@@ -110,7 +68,7 @@ describe("countMyData", () => {
   });
 
   it("не учитывает записи других пользователей", async () => {
-    const { db } = makeDb({
+    const { db } = makeConvexDb({
       mealLog: [
         { _id: "m1", _creationTime: 0, userId: "user-2", date: "2026-08-04" },
         { _id: "m2", _creationTime: 0, userId: "user-1", date: "2026-08-04" },
