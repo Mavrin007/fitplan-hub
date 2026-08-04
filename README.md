@@ -43,6 +43,22 @@ The convex server has a separate set of environment variables that are accessibl
 
 Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
 
+The AI assistant (`src/convex/assistant.ts`) reads two backend keys — at least one
+is required for it to answer:
+
+- `GEMINI_API_KEY` — primary provider (Google Gemini, no extra gateway needed)
+- `VLY_INTEGRATION_KEY` — fallback: routes through the VLY gateway (`gpt-4o-mini`)
+
+The **same `VLY_INTEGRATION_KEY` also powers production email OTP delivery**: the
+auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code through
+`vly.email.send` (no API keys in the source). `VLY_APP_NAME` (optional) is used as
+the sender name in the letter. A verified sender domain is required in the VLY
+dashboard (`vly.email.verifyDomain` / `listDomains`) for letters to be delivered.
+
+Frontend error tracking (Sentry) is enabled only when `VITE_SENTRY_DSN` is set;
+`beforeSend` strips emails, JWTs and API keys before events leave the browser.
+Read-only helper values (`GEMINI_MODEL`, optional) tune the model used.
+
 ## Production: Convex cloud + Vercel
 
 ### 1. Deploy the backend to Convex cloud
@@ -73,17 +89,23 @@ locally (see `.freebuff/run.md`):
 - `JWT_PRIVATE_KEY` → PKCS8 RSA key, **single line** (newlines → spaces)
 - `JWT_STORAGE_KEY` → base64 session-storage key
 - `JWKS` → public-key JSON
+- `GEMINI_API_KEY` → Google AI Studio key for the assistant (or `VLY_INTEGRATION_KEY` as fallback)
+- `VLY_INTEGRATION_KEY` → VLY gateway key: assistant fallback **and** production email OTP delivery (`vly.email.send`)
+- `VLY_APP_NAME` → optional sender name in OTP letters (defaults to «КИЛО»)
+- `GEMINI_MODEL` → optional model override (defaults to `gemini-flash-latest`)
 
 Do **NOT** set `VLY_EMAIL_DEV_CAPTURE` in production — the dev OTP capture is
-for local work only. Guest sign-in works immediately; email OTP additionally
-needs `email.vly.ai` to accept requests (its hardcoded key currently returns
-401, so email login may not deliver in production until VLY is configured).
+for local work only. Guest sign-in works immediately; email OTP sends the code
+through the VLY gateway (`vly.email.send`) using `VLY_INTEGRATION_KEY`. For
+letters to be delivered, verify the sender domain in the VLY dashboard — until
+then the send call returns an error and the code is not delivered.
 
 ### 3. Frontend env + deploy to Vercel
 
 In Vercel project → Settings → Environment Variables, add:
 
 - `VITE_CONVEX_URL` → the cloud Convex URL (from step 1)
+- `VITE_SENTRY_DSN` → optional; enables error tracking (PII-free by `beforeSend`)
 
 The repo ships `vercel.json` (Vite + SPA rewrites for react-router). CI deploys
 from GitHub Actions: the `deploy` job (branch `main`) runs once these repo
