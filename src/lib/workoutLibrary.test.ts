@@ -8,7 +8,10 @@ import {
   PLAN_WEEKS,
   profileSignature,
   warmUpSets,
+  type Exercise,
+  type ProgressionWeek,
   type TrainingProfile,
+  type WorkoutTemplate,
 } from "./workoutLibrary";
 
 /** Базовый «нейтральный» профиль — без особенностей антропометрии и травм. */
@@ -415,5 +418,206 @@ describe("profileSignature и warmUpSets", () => {
     expect(sets.length).toBeGreaterThanOrEqual(1);
     const weights = sets.map((s) => s.weightKg);
     expect(new Set(weights).size).toBe(weights.length); // без повторов веса
+  });
+
+  it("точная лестница от 100 кг: 40/60/80 с нарастающими повторами", () => {
+    expect(warmUpSets(100)).toEqual([
+      { weightKg: 40, reps: "8–10" },
+      { weightKg: 60, reps: "6–8" },
+      { weightKg: 80, reps: "4–6" },
+    ]);
+  });
+
+  it("веса округляются до блинов по 2.5 кг", () => {
+    // 22.5 · 40% = 9 → 10; · 60% = 13.5 → 12.5; · 80% = 18 → 17.5.
+    expect(warmUpSets(22.5)).toEqual([
+      { weightKg: 10, reps: "8–10" },
+      { weightKg: 12.5, reps: "6–8" },
+      { weightKg: 17.5, reps: "4–6" },
+    ]);
+  });
+
+  it("схлопываются не все ступени, а только совпавшие по весу", () => {
+    // 5 кг: 40% и 60% округляются к 2.5 кг — показываем один подход;
+    // 80% даёт 5 кг — отдельная ступень.
+    expect(warmUpSets(5)).toEqual([
+      { weightKg: 2.5, reps: "8–10" },
+      { weightKg: 5, reps: "4–6" },
+    ]);
+  });
+
+  it("minKg не даёт разминочному подходу опуститься ниже веса грифа", () => {
+    // Штанговое упражнение: нижняя граница 20 кг (пустой гриф).
+    expect(warmUpSets(22.5, 20)).toEqual([{ weightKg: 20, reps: "8–10" }]);
+  });
+
+  it("некорректные веса возвращают пустую разминку", () => {
+    expect(warmUpSets(0)).toEqual([]);
+    expect(warmUpSets(-10)).toEqual([]);
+    expect(warmUpSets(NaN)).toEqual([]);
+    expect(warmUpSets(Infinity)).toEqual([]);
+  });
+});
+
+describe("progressExercise — прогрессия по видам упражнений (через applyProgression)", () => {
+  /** Однодневный шаблон из упражнений для прямых тестов прогрессии. */
+  function templateWith(...exercises: Exercise[]): WorkoutTemplate {
+    return { name: "Тест", days: [{ day: 0, focus: "Тест", exercises }] };
+  }
+
+  /** Упражнение недели `weekIdx` (индекс 0..3) в цикле прогрессии. */
+  function at(weeks: ProgressionWeek[], weekIdx: number): Exercise {
+    return weeks[weekIdx].days[0].exercises[0];
+  }
+
+  it("отягощённое: полный цикл вес/повторы/подходы", () => {
+    const weeks = applyProgression(
+      templateWith({
+        name: "Жим лёжа",
+        sets: 4,
+        reps: "6–8",
+        restSeconds: 120,
+        weightKg: 40,
+      }),
+    );
+    // Неделя 1 — база, ничего не меняется.
+    expect(at(weeks, 0)).toMatchObject({ sets: 4, reps: "6–8", weightKg: 40 });
+    expect(at(weeks, 0).weightNote).toBeUndefined();
+    // Неделя 2 — двойная прогрессия: те же веса, +1 повтор.
+    expect(at(weeks, 1)).toMatchObject({
+      sets: 4,
+      weightKg: 40,
+      reps: "7–9",
+      weightNote: "те же веса, +1 повтор",
+    });
+    // Неделя 3 — пик: +2.5 кг, повторы к базе.
+    expect(at(weeks, 2)).toMatchObject({
+      sets: 4,
+      weightKg: 42.5,
+      reps: "6–8",
+      weightNote: "+2.5 кг",
+    });
+    // Неделя 4 — разгрузка: −20% (40 · 0.8 = 32 → 32.5 по блинам), −1 подход.
+    expect(at(weeks, 3)).toMatchObject({
+      sets: 3,
+      weightKg: 32.5,
+      weightNote: "−20% веса",
+    });
+  });
+
+  it("разгрузка штанги не опускается ниже веса грифа (20 кг)", () => {
+    const weeks = applyProgression(
+      templateWith({
+        name: "Сгибания рук со штангой",
+        sets: 3,
+        reps: "10–12",
+        restSeconds: 60,
+        weightKg: 20,
+      }),
+    );
+    // 20 · 0.8 = 16 → округление упирается в мин. вес грифа.
+    expect(at(weeks, 3).weightKg).toBe(20);
+    expect(at(weeks, 3).weightNote).toBe("−20% веса");
+    // Пик — +2.5 кг от базы.
+    expect(at(weeks, 2).weightKg).toBe(22.5);
+  });
+
+  it("собственный вес: +1 повтор, затем +1 подход, разгрузка — лёгкий день", () => {
+    const weeks = applyProgression(
+      templateWith({ name: "Отжимания", sets: 3, reps: "10–15", restSeconds: 30 }),
+    );
+    expect(at(weeks, 1)).toMatchObject({
+      sets: 3,
+      reps: "11–16",
+      weightNote: "+1 повтор",
+    });
+    expect(at(weeks, 2)).toMatchObject({
+      sets: 4,
+      reps: "10–15",
+      weightNote: "+1 подход",
+    });
+    expect(at(weeks, 3)).toMatchObject({
+      sets: 2,
+      weightKg: undefined,
+      weightNote: "лёгкий день",
+    });
+  });
+
+  it("по времени: диапазон секунд +5 с, пик +1 подход, разгрузка −1 подход", () => {
+    const weeks = applyProgression(
+      templateWith({ name: "Планка", sets: 3, reps: "30–45с", restSeconds: 45 }),
+    );
+    expect(at(weeks, 1)).toMatchObject({
+      reps: "35–50с",
+      weightNote: "+5 секунд",
+    });
+    expect(at(weeks, 2)).toMatchObject({ sets: 4, weightNote: "+1 подход" });
+    expect(at(weeks, 3)).toMatchObject({ sets: 2, weightNote: "лёгкий день" });
+  });
+
+  it("по времени: одиночная секундная запись «30с» → «35с»", () => {
+    const weeks = applyProgression(
+      templateWith({ name: "Джампинг-джек", sets: 4, reps: "30с", restSeconds: 30 }),
+    );
+    expect(at(weeks, 1).reps).toBe("35с");
+  });
+
+  it("кардио: +5 мин, затем +10 мин, разгрузка −30% объёма без сдвига повторов", () => {
+    const weeks = applyProgression(
+      templateWith({ name: "Ходьба / бег", sets: 1, reps: "30–40 мин", restSeconds: 0 }),
+    );
+    expect(at(weeks, 1)).toMatchObject({
+      sets: 1,
+      reps: "35–45 мин",
+      weightNote: "+5 минут",
+    });
+    expect(at(weeks, 2)).toMatchObject({
+      reps: "40–50 мин",
+      weightNote: "+10 минут",
+    });
+    expect(at(weeks, 3)).toMatchObject({
+      sets: 1,
+      reps: "30–40 мин",
+      weightNote: "−30% объёма",
+    });
+  });
+
+  it("одиночная запись повторов «5» → «5–6» на неделе прогресса", () => {
+    const weeks = applyProgression(
+      templateWith({
+        name: "Становая тяга",
+        sets: 4,
+        reps: "5",
+        restSeconds: 180,
+        weightKg: 70,
+      }),
+    );
+    expect(at(weeks, 1).reps).toBe("5–6");
+  });
+
+  it("суффикс диапазона сохраняется: «10–12 / нога» → «11–13 / нога»", () => {
+    const weeks = applyProgression(
+      templateWith({
+        name: "Выпады в ходьбе",
+        sets: 3,
+        reps: "10–12 / нога",
+        restSeconds: 60,
+        weightKg: 10,
+      }),
+    );
+    expect(at(weeks, 1).reps).toBe("11–13 / нога");
+  });
+
+  it("повторы без чисел не меняются", () => {
+    const weeks = applyProgression(
+      templateWith({
+        name: "Гиперэкстензия",
+        sets: 3,
+        reps: "до отказа",
+        restSeconds: 90,
+        weightKg: 10,
+      }),
+    );
+    expect(at(weeks, 1).reps).toBe("до отказа");
   });
 });
