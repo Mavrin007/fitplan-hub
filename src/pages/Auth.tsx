@@ -6,8 +6,10 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Mail } from "lucide-react";
+import { api } from "@/convex/_generated/api";
+import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
+import { useQuery } from "convex/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -25,6 +27,30 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
+// Convex-клиент держит WebSocket-подключение с ретраями: если бэкенд
+// недоступен (не задан VITE_CONVEX_URL, сервер не запущен), signIn() никогда
+// не резолвится и не падает — кнопка зависла бы в loading навсегда.
+// Ограничиваем ожидание, чтобы пользователь увидел ошибку, а не вечный спиннер.
+const AUTH_TIMEOUT_MS = 15000;
+
+function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Сервер не отвечает. Проверьте подключение и повторите попытку."));
+    }, AUTH_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
   const navigate = useNavigate();
@@ -38,6 +64,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
+  // и мы показываем их прямо в форме вместо письма. Хук вызывается всегда
+  // (null args = Convex skip-query вне OTP-шага или при выключенном флаге).
+  const devOtpCode = useQuery(
+    api.devOtp.getByEmail,
+    import.meta.env.VITE_EMAIL_DEV_CAPTURE === "1" && step !== "signIn"
+      ? { email: step.email }
+      : "skip",
+  );
+
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
       navigate(redirect);
@@ -50,7 +86,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
+      await withAuthTimeout(signIn("email-otp", formData));
       setStep({ email: formData.get("email") as string });
       setIsLoading(false);
     } catch (error) {
@@ -70,7 +106,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
+      await withAuthTimeout(signIn("email-otp", formData));
       navigate(redirect);
     } catch (error) {
       console.error("OTP verification error:", error);
@@ -84,7 +120,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      await signIn("anonymous");
+      await withAuthTimeout(signIn("anonymous"));
       navigate(redirect);
     } catch (error) {
       console.error("Guest login error:", error);
@@ -225,6 +261,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         </InputOTPGroup>
                       </InputOTP>
                     </div>
+                    {devOtpCode && (
+                      <div className="rounded-lg border border-brand/40 bg-brand/10 p-3 text-center">
+                        <p className="flex items-center justify-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-brand">
+                          <ShieldAlert className="size-3.5" />
+                          Dev-режим: код без письма
+                        </p>
+                        <p className="num mt-1 font-mono text-2xl font-semibold tracking-[0.35em] text-foreground">
+                          {devOtpCode}
+                        </p>
+                      </div>
+                    )}
                     {error && (
                       <p className="text-center text-xs text-destructive">{error}</p>
                     )}

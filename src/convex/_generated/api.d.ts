@@ -12,6 +12,7 @@ import type * as activity from "../activity.js";
 import type * as assistant from "../assistant.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as devOtp from "../devOtp.js";
 import type * as foods from "../foods.js";
 import type * as http from "../http.js";
 import type * as mealLog from "../mealLog.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   assistant: typeof assistant;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
+  devOtp: typeof devOtp;
   foods: typeof foods;
   http: typeof http;
   mealLog: typeof mealLog;

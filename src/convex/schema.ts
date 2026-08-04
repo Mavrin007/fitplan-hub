@@ -203,6 +203,14 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
 
+    // Dev-only: перехваченные OTP-коды для локальной разработки без внешнего
+    // SMTP. Заполняется из emailOtp.ts только при VLY_EMAIL_DEV_CAPTURE=1.
+    devOtpCodes: defineTable({
+      email: v.string(),
+      code: v.string(),
+      createdAt: v.number(),
+    }).index("by_email_created", ["email", "createdAt"]),
+
     // Completed workout sessions.
     workoutLogs: defineTable({
       userId: v.id("users"),
