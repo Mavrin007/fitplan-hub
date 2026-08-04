@@ -47,8 +47,10 @@ jobs:
       - name: Tests
         run: npm test
 
+      # Собираем той же командой, что и Vercel (vercel.json buildCommand) —
+      # локальная проверка = прод-сборка, никаких расхождений.
       - name: Build
-        run: npx vite build
+        run: npm run build
 
   # Деплой в продакшен: только push в основную ветку main, только после
   # зелёной проверки, и только если в репозитории настроены Vercel-секреты
@@ -93,8 +95,11 @@ jobs:
         run: npm ci
 
       # Деплой функций бэкенда в облачный Convex (схема, функции, http-роуты).
-      # Auth-переменные (JWT_PRIVATE_KEY, JWKS, …) задаются в панели Convex,
-      # а не в коде, поэтому сюда попадать не должны.
+      # Auth-переменные (JWT_PRIVATE_KEY, JWKS, …) и ключи ассистента
+      # (GEMINI_API_KEY / VLY_INTEGRATION_KEY) задаются в панели Convex
+      # (Dashboard → Environment Variables), а не в коде или CI-секретах, —
+      # поэтому сюда попадать не должны. Sentry включается отдельно через
+      # VITE_SENTRY_DSN в панели Vercel (в коде — только безопасный beforeSend).
       - name: Deploy to Convex
         if: env.CONVEX_DEPLOY_TOKEN != ''
         run: npx --no-install convex deploy
@@ -105,6 +110,13 @@ jobs:
       - name: Pull Vercel project settings
         if: env.VERCEL_TOKEN != ''
         run: npx --yes vercel@58 pull --yes --environment=production
+
+      # Гард: не даём уехать «пустой» сборке — фейлим деплой, если
+      # VITE_CONVEX_URL отсутствует, локальный (localhost/127.0.0.1) или не https.
+      # vercel pull кладёт env из панели в .vercel/.env.production.local — его и проверяем.
+      - name: Guard production env (VITE_CONVEX_URL)
+        if: env.VERCEL_TOKEN != ''
+        run: node scripts/guard-prod-env.mjs
 
       # vercel build сам выполняет сборку (vite build) с env из Vercel
       # и готовит .vercel/output для деплоя; папка dist остаётся на диске —
@@ -123,6 +135,18 @@ jobs:
           retention-days: 7
 
       # --prebuilt: деплоим уже собранный .vercel/output, ничего не пересобирая.
+      # Захватываем URL деплоя (последний https-адрес в выводе) для смоук-теста.
       - name: Deploy to Vercel
         if: env.VERCEL_TOKEN != ''
-        run: npx --yes vercel@58 deploy --prebuilt --prod
+        run: |
+          npx --yes vercel@58 deploy --prebuilt --prod 2>&1 | tee /tmp/vercel-deploy.log
+          echo "DEPLOY_URL=$(grep -oE 'https://[^ ]+' /tmp/vercel-deploy.log | tail -1)" >> "$GITHUB_ENV"
+
+      # Смоук-тест живого деплоя: главная страница и SPA-роут /dashboard
+      # должны отвечать 200 (благодаря rewrites /dashboard тоже отдаёт index.html).
+      - name: Smoke test deployed URL
+        if: env.VERCEL_TOKEN != ''
+        run: |
+          test -n "$DEPLOY_URL" || { echo "::error::DEPLOY_URL пуст — деплой не удался"; exit 1; }
+          curl -fsS -o /dev/null -w "GET $DEPLOY_URL -> %{http_code}\n" "$DEPLOY_URL"
+          curl -fsS -o /dev/null -w "GET $DEPLOY_URL/dashboard -> %{http_code}\n" "$DEPLOY_URL/dashboard"
