@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import {
   Activity,
@@ -12,6 +13,7 @@ import { Outlet, NavLink, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { GuestSignOutOverlay } from "@/components/guest-sign-out-overlay";
 
 const OPEN_ASSISTANT_EVENT = "kilo:open-assistant";
 
@@ -52,10 +54,24 @@ function initials(name: string | undefined | null): string {
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  // Оверлей «у вас N записей» при выходе из гостевой сессии.
+  const [signOutOpen, setSignOutOpen] = useState(false);
 
-  const handleSignOut = async () => {
+  // Гость = анонимная сессия (нет email). Для таких выход перехватывается.
+  const isGuest = user != null && (user.isAnonymous === true || !user.email);
+
+  const doSignOut = async () => {
     await signOut();
     navigate("/");
+  };
+
+  const handleSignOut = async () => {
+    if (isGuest) {
+      // Оверлей сам решит: если записей нет — выйдет сразу.
+      setSignOutOpen(true);
+      return;
+    }
+    await doSignOut();
   };
 
   return (
@@ -212,6 +228,25 @@ export default function Dashboard() {
           </main>
         </div>
       </div>
+
+      {/* Защита данных гостя: при выходе из анонимной сессии с записями
+          предлагаем привязать почту (оверлей сам закрывается и выходит,
+          если данных нет). Монтируем только при открытии — счётчик записей
+          (6 запросов) не должен выполняться на каждом рендере дашборда. */}
+      {signOutOpen && (
+        <GuestSignOutOverlay
+          open
+          onCancel={() => setSignOutOpen(false)}
+          onAttach={() => {
+            setSignOutOpen(false);
+            navigate("/dashboard/profile");
+          }}
+          onSignOut={() => {
+            setSignOutOpen(false);
+            void doSignOut();
+          }}
+        />
+      )}
 
       {/* Mobile bottom navigation (M3 navigation bar) */}
       <nav
