@@ -8,8 +8,8 @@ vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
 vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setQuery } from "@/test/convex-react-mock";
-import { toast } from "@/test/sonner-mock";
-import { profile, renderWithRouter, resetMocks, type MealEntry } from "@/test/test-utils";
+import { resetMocks, renderWithRouter, toast } from "@/test/utils";
+import { profile, type MealEntry } from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
 import Meals from "./Meals";
 
@@ -30,7 +30,7 @@ describe("Meals", () => {
     renderWithRouter(<Meals />);
 
     expect(
-      screen.getByText("Настройте профиль, чтобы получить цели по калориям и макросам."),
+      screen.getByText("Цели ещё не рассчитаны"),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Перейти в профиль" })).toHaveAttribute(
       "href",
@@ -57,6 +57,8 @@ describe("Meals", () => {
       today: [
         {
           _id: "e1",
+          userId: "u1",
+          createdAt: 0,
           date: todayKey(),
           mealType: "breakfast",
           name: "Куриная грудка (гриль)",
@@ -68,6 +70,8 @@ describe("Meals", () => {
         },
         {
           _id: "e2",
+          userId: "u1",
+          createdAt: 0,
           date: todayKey(),
           mealType: "lunch",
           name: "Белый рис",
@@ -94,18 +98,19 @@ describe("Meals", () => {
     const user = userEvent.setup();
     const yesterday = toDateKey(addDays(new Date(), -1));
     setupMeals();
-    setQuery(api.mealLog.getByDate, { date: yesterday }, [
-      {
-        _id: "y1",
-        date: yesterday,
-        mealType: "dinner",
-        name: "Лосось (запечённый)",
-        quantity: 1,
-        calories: 400,
-        protein: 20,
-        carbs: 0,
-        fat: 13,
-      },
+    setQuery(api.mealLog.getByDate, { date: yesterday }, [        {
+          _id: "y1",
+          userId: "u1",
+          createdAt: 0,
+          date: yesterday,
+          mealType: "dinner",
+          name: "Лосось (запечённый)",
+          quantity: 1,
+          calories: 400,
+          protein: 20,
+          carbs: 0,
+          fat: 13,
+        },
     ]);
     renderWithRouter(<Meals />);
 
@@ -202,6 +207,8 @@ describe("Meals", () => {
       today: [
         {
           _id: "e1",
+          userId: "u1",
+          createdAt: 0,
           date: todayKey(),
           mealType: "snack",
           name: "Яблоко",
@@ -215,7 +222,7 @@ describe("Meals", () => {
     });
     renderWithRouter(<Meals />);
 
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: /Удалить/ }));
 
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
@@ -255,6 +262,8 @@ describe("Meals", () => {
       today: [
         {
           _id: "e1",
+          userId: "u1",
+          createdAt: 0,
           date: todayKey(),
           mealType: "breakfast",
           name: "Яйца",

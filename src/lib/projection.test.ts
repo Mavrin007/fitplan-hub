@@ -67,6 +67,74 @@ describe("projectGoal", () => {
     const samples = losingSeries().map((s) => ({ ...s, weightKg: s.weightKg - 15 }));
     expect(projectGoal(samples, 80)).toBeNull();
   });
+
+  it("возвращает null, если все замеры в один день (нет разброса по времени)", () => {
+    const sameDay = [
+      { date: "2026-01-01", weightKg: 90 },
+      { date: "2026-01-01", weightKg: 89 },
+      { date: "2026-01-01", weightKg: 88 },
+    ];
+    expect(projectGoal(sameDay, 80)).toBeNull();
+  });
+
+  it("возвращает null при пологом тренде к цели (slope ≥ −0.001)", () => {
+    const shallow = [
+      { date: "2026-01-01", weightKg: 90 },
+      { date: "2026-01-02", weightKg: 89.9995 },
+      { date: "2026-01-03", weightKg: 89.999 },
+    ];
+    // Снижение ~ −0.0005 кг/день — слишком медленно, чтобы верить прогнозу.
+    expect(projectGoal(shallow, 80)).toBeNull();
+  });
+
+  it("уважает параметр minSamples", () => {
+    // 4 замера достаточно по умолчанию, но не для minSamples = 5.
+    expect(projectGoal(losingSeries().slice(0, 4), 80, 5)).toBeNull();
+    expect(projectGoal(losingSeries().slice(0, 4), 80)).not.toBeNull();
+  });
+
+  it("отфильтровывает замеры с весом ≤ 0", () => {
+    const withBad = [
+      { date: "2026-01-01", weightKg: 0 },
+      { date: "2026-01-02", weightKg: -5 },
+      { date: "2026-01-03", weightKg: 90 },
+      { date: "2026-01-04", weightKg: 89.8 },
+      { date: "2026-01-05", weightKg: 89.6 },
+    ];
+    const proj = projectGoal(withBad, 85);
+    expect(proj).not.toBeNull();
+    expect(proj!.remainingKg).toBeCloseTo(4.6, 1); // 89.6 − 85
+  });
+
+  it("не зависит от порядка замеров на входе (сортирует внутри)", () => {
+    const sorted = losingSeries();
+    const reversed = [...sorted].reverse();
+    const a = projectGoal(sorted, 80);
+    const b = projectGoal(reversed, 80);
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a!.etaDate).toBe(b!.etaDate);
+    expect(a!.ratePerWeek).toBeCloseTo(b!.ratePerWeek, 6);
+  });
+
+  it("remainingKg считается от ПОСЛЕДНЕГО замера, а не от среднего", () => {
+    // Серия 90 → 89.2: последний замер 89.2, цель 80 → осталось 9.2 кг.
+    const proj = projectGoal(losingSeries(), 80);
+    expect(proj).not.toBeNull();
+    expect(proj!.remainingKg).toBeCloseTo(9.2, 1);
+  });
+
+  it("не уверен в прогнозе на горизонте дольше года", () => {
+    // Очень медленное снижение (−0.002 кг/день): цель в ~5000 днях — это
+    // далеко за горизонтом 365 дней, даже при 5 замеров confident = false.
+    const slow = [0, 1, 2, 3, 4].map((i) => ({
+      date: `2026-01-0${i + 1}`,
+      weightKg: 90 - i * 0.002,
+    }));
+    const proj = projectGoal(slow, 80);
+    expect(proj).not.toBeNull();
+    expect(proj!.confident).toBe(false);
+  });
 });
 
 describe("humanizeDistance", () => {

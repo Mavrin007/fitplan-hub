@@ -96,6 +96,54 @@ export const loggedExerciseValidator = v.object({
   weightKg: v.number(),
 });
 
+// Поля таблиц вынесены в отдельные валидаторы: единый источник правды для
+// defineTable и для тестовых фикстур (fixtures.ts типизируется через
+// Infer<typeof ...>, чтобы расхождение фикстур со схемой ловилось
+// на этапе компиляции).
+
+// User profile with the inputs for the calorie / macro calculator.
+export const profileFieldsValidator = v.object({
+  userId: v.id("users"),
+  age: v.number(),
+  gender: genderValidator,
+  heightCm: v.number(),
+  weightKg: v.number(),
+  targetWeightKg: v.optional(v.number()), // goal weight shown as a dashed line on the progress chart
+  activityLevel: activityLevelValidator,
+  fitnessGoal: fitnessGoalValidator,
+  experienceLevel: experienceLevelValidator,
+  equipment: v.optional(v.array(equipmentValidator)), // доступный инвентарь для плана тренировок
+  limitations: v.optional(v.array(limitationValidator)), // ограничения/травмы (поясница, колени, плечи)
+  preferredTrainingDays: v.optional(v.number()), // сколько тренировок в неделю хочет пользователь (1–6)
+  updatedAt: v.number(),
+});
+export type ProfileFields = Infer<typeof profileFieldsValidator>;
+
+// Weight check-ins over time (drives the progress chart).
+export const weightEntryFieldsValidator = v.object({
+  userId: v.id("users"),
+  date: v.string(), // YYYY-MM-DD (local)
+  weightKg: v.number(),
+  createdAt: v.number(),
+});
+export type WeightEntryFields = Infer<typeof weightEntryFieldsValidator>;
+
+// One row per logged meal / food for a given day.
+export const mealLogEntryFieldsValidator = v.object({
+  userId: v.id("users"),
+  date: v.string(), // YYYY-MM-DD (local)
+  mealType: mealTypeValidator,
+  foodId: v.optional(v.id("foods")), // set when logged from a custom food
+  name: v.string(),
+  quantity: v.number(), // multiplier of the recorded serving
+  calories: v.number(),
+  protein: v.number(),
+  carbs: v.number(),
+  fat: v.number(),
+  createdAt: v.number(),
+});
+export type MealLogEntryFields = Infer<typeof mealLogEntryFieldsValidator>;
+
 const schema = defineSchema(
   {
     // default auth tables using convex auth.
@@ -115,29 +163,10 @@ const schema = defineSchema(
     // ---- Fitness & nutrition app tables ---- //
 
     // User profile with the inputs for the calorie / macro calculator.
-    profiles: defineTable({
-      userId: v.id("users"),
-      age: v.number(),
-      gender: genderValidator,
-      heightCm: v.number(),
-      weightKg: v.number(),
-      targetWeightKg: v.optional(v.number()), // goal weight shown as a dashed line on the progress chart
-      activityLevel: activityLevelValidator,
-      fitnessGoal: fitnessGoalValidator,
-      experienceLevel: experienceLevelValidator,
-      equipment: v.optional(v.array(equipmentValidator)), // доступный инвентарь для плана тренировок
-      limitations: v.optional(v.array(limitationValidator)), // ограничения/травмы (поясница, колени, плечи)
-      preferredTrainingDays: v.optional(v.number()), // сколько тренировок в неделю хочет пользователь (1–6)
-      updatedAt: v.number(),
-    }).index("by_user", ["userId"]),
+    profiles: defineTable(profileFieldsValidator).index("by_user", ["userId"]),
 
     // Weight check-ins over time (drives the progress chart).
-    weightEntries: defineTable({
-      userId: v.id("users"),
-      date: v.string(), // YYYY-MM-DD (local)
-      weightKg: v.number(),
-      createdAt: v.number(),
-    }).index("by_user_date", ["userId", "date"]),
+    weightEntries: defineTable(weightEntryFieldsValidator).index("by_user_date", ["userId", "date"]),
 
     // User-defined custom foods / products.
     foods: defineTable({
@@ -153,19 +182,7 @@ const schema = defineSchema(
     }).index("by_user", ["userId"]),
 
     // One row per logged meal / food for a given day.
-    mealLog: defineTable({
-      userId: v.id("users"),
-      date: v.string(), // YYYY-MM-DD (local)
-      mealType: mealTypeValidator,
-      foodId: v.optional(v.id("foods")), // set when logged from a custom food
-      name: v.string(),
-      quantity: v.number(), // multiplier of the recorded serving
-      calories: v.number(),
-      protein: v.number(),
-      carbs: v.number(),
-      fat: v.number(),
-      createdAt: v.number(),
-    }).index("by_user_date", ["userId", "date"]),
+    mealLog: defineTable(mealLogEntryFieldsValidator).index("by_user_date", ["userId", "date"]),
 
     // Daily water intake, one row per user per day (total ml).
     waterEntries: defineTable({
