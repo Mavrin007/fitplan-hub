@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   queryResults: new Map<string, unknown>(),
   mutationImpls: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
   mutationCalls: [] as { path: string; args: unknown[] }[],
+  actionImpls: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
 }));
 
 /** Общее состояние мока — живёт между рендерами в пределах одного теста. */
@@ -31,7 +32,10 @@ function ref(path: string): { __path: string } {
 
 /** Мок `@/convex/_generated/api` — только функции, которые используют страницы. */
 export const api = {
-  profiles: { getMyProfile: ref("profiles.getMyProfile") },
+  profiles: {
+    getMyProfile: ref("profiles.getMyProfile"),
+    upsertProfile: ref("profiles.upsertProfile"),
+  },
   mealLog: {
     getByDate: ref("mealLog.getByDate"),
     getByRange: ref("mealLog.getByRange"),
@@ -45,13 +49,29 @@ export const api = {
     addFood: ref("foods.addFood"),
     deleteFood: ref("foods.deleteFood"),
   },
-  weightEntries: { listMyWeights: ref("weightEntries.listMyWeights") },
-  workouts: { listLogs: ref("workouts.listLogs") },
+  weightEntries: {
+    listMyWeights: ref("weightEntries.listMyWeights"),
+    addWeight: ref("weightEntries.addWeight"),
+    deleteWeight: ref("weightEntries.deleteWeight"),
+  },
+  workouts: {
+    listLogs: ref("workouts.listLogs"),
+    getMyPlan: ref("workouts.getMyPlan"),
+    savePlan: ref("workouts.savePlan"),
+    logWorkout: ref("workouts.logWorkout"),
+    deleteLog: ref("workouts.deleteLog"),
+  },
   water: { getByDate: ref("water.getByDate"), addWater: ref("water.addWater") },
   activity: { getActivityDays: ref("activity.getActivityDays") },
   guestStats: {
     hasMyData: ref("guestStats.hasMyData"),
     countMyData: ref("guestStats.countMyData"),
+  },
+  devOtp: { getByEmail: ref("devOtp.getByEmail") },
+  users: { currentUser: ref("users.currentUser") },
+  assistant: {
+    chat: ref("assistant.chat"),
+    checkConnection: ref("assistant.checkConnection"),
   },
 };
 
@@ -126,6 +146,24 @@ export function useMutation(ref: unknown) {
   };
 }
 
+/** useAction из convex/react — как мутация, но для ассистента (действия). */
+export function useAction(ref: unknown) {
+  return (...args: unknown[]) => {
+    const path = pathOf(ref);
+    const impl = convexMock.actionImpls.get(path);
+    if (!impl) return Promise.reject(new Error(`Нет реализации действия ${path}`));
+    return impl(...args);
+  };
+}
+
+/** Задать реализацию действия (assistant.chat / checkConnection). */
+export function setAction(
+  ref: unknown,
+  impl: (...args: unknown[]) => Promise<unknown>,
+): void {
+  convexMock.actionImpls.set(pathOf(ref), impl);
+}
+
 /** Задать результат useQuery(ref, args). */
 export function setQuery(ref: unknown, args: unknown, value: unknown): void {
   convexMock.queryResults.set(keyOf(pathOf(ref), args), value);
@@ -143,5 +181,6 @@ export function setMutation(
 export function resetConvexMock(): void {
   convexMock.queryResults.clear();
   convexMock.mutationImpls.clear();
+  convexMock.actionImpls.clear();
   convexMock.mutationCalls = [];
 }
