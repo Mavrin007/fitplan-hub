@@ -13,9 +13,21 @@ This project uses the following tech stack:
 - Convex (for backend & database)
 - Convex Auth (for authentication)
 - Framer Motion (for animations)
-- Three js (for 3d models)
 
 All relevant files live in the 'src' directory.
+
+## Features
+
+- **Personalized workout plans** (`src/lib/workoutLibrary.ts`) — weekly split adapted
+to goal, gender, age, height/weight/BMI, experience, equipment, injuries and training
+frequency, with 4-week progression, RPE-based load adjustment (`src/lib/effort.ts`)
+and realistic substitutions (no jumping for high BMI, joint-safe alternatives).
+- **Realistic meal plans** (`src/lib/mealLibrary.ts`) — curated dishes with human
+portions (no "0.75 bars" or odd combos): 7-day weekly menus for weight loss and
+muscle gain (second snack on a bulk), goal-aware portion scaling, dishes don't
+repeat within a week, day total converges to the calorie target.
+- Guest-first flow with email attach, nutrition diary, water tracking, weight/
+progress charts and CSV export.
 
 Use **npm** as the package manager (Node 22+):
 
@@ -94,11 +106,25 @@ locally (see `.freebuff/run.md`):
 - `VLY_APP_NAME` → optional sender name in OTP letters (defaults to «КИЛО»)
 - `GEMINI_MODEL` → optional model override (defaults to `gemini-flash-latest`)
 
+**Google OAuth** (optional second sign-in, `src/convex/auth.ts`):
+
+- `AUTH_GOOGLE_ID` → OAuth Client ID (Google Cloud Console)
+- `AUTH_GOOGLE_SECRET` → OAuth Client Secret
+
+These are read automatically by `@auth/core/providers/google` (Auth.js
+convention: `AUTH_<PROVIDER_ID>_ID` / `AUTH_<PROVIDER_ID>_SECRET`).
+
 Do **NOT** set `VLY_EMAIL_DEV_CAPTURE` in production — the dev OTP capture is
 for local work only. Guest sign-in works immediately; email OTP sends the code
 through the VLY gateway (`vly.email.send`) using `VLY_INTEGRATION_KEY`. For
 letters to be delivered, verify the sender domain in the VLY dashboard — until
 then the send call returns an error and the code is not delivered.
+
+OTP delivery is rate-limited server-side (`src/convex/otpRateLimit.ts`):
+re-sending a code to the same email within 60 seconds is rejected before the
+VLY gateway is hit. Failed code-entry attempts are additionally capped at 5
+per hour (`signIn.maxFailedAttempsPerHour` in `src/convex/auth.ts`, built into
+`@convex-dev/auth`).
 
 ### 3. Frontend env + deploy to Vercel
 
@@ -124,9 +150,35 @@ You must follow these conventions when using authentication.
 
 ## Auth is already set up.
 
-All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
+All convex authentication functions are already set up. The auth currently uses email OTP, Google OAuth and anonymous (guest) users.
 
 The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
+
+The Google OAuth provider lives in `src/convex/auth.ts` (imported from
+`@auth/core/providers/google`); the sign-in button is on `/auth`.
+
+### Enabling Google OAuth (one-time setup)
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   → **Create credentials → OAuth client ID** → type **Web application**.
+2. Under **Authorized redirect URIs** add the Convex auth callback:
+   - local backend: `http://127.0.0.1:3210/api/auth/callback/google`
+   - production: `https://<your-project>.convex.cloud/api/auth/callback/google`
+   (also add your frontend URL under **Authorized JavaScript origins**).
+3. Copy the **Client ID** and **Client Secret** into the Convex environment
+   as `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` (Convex Dashboard → Settings →
+   Environment Variables, or `npx convex env set`).
+4. `npx convex deploy` to push the updated `auth.ts` provider list.
+
+The button on `/auth` then signs the user in with their Google account. When
+an anonymous guest signs in with Google, the existing user and their data are
+kept (account linking, `createOrUpdateUser` in `src/convex/auth.ts`).
+
+> **Linking note:** account linking here is *session-based* (guest → Google,
+> guest → email). A Google account whose email already belongs to an
+> email-OTP user is **not** auto-merged — that would require email-based
+> linking (`allowDangerousEmailAccountLinking`), which is intentionally off
+> to avoid silently joining accounts.
 
 Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
 
