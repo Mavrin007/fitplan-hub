@@ -12,13 +12,30 @@
  *   runHandler({ db }, args);
  */
 import { ConvexError } from "convex/values";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 
 /** Документ Convex: обязательные служебные поля + произвольные данные. */
 export type ConvexDoc = { _id: string; _creationTime: number } & Record<
   string,
   unknown
 >;
+
+/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется).
+ *  Общий для всех convex-тестов — константа была продублирована в каждом файле. */
+export const AUTH_USER_ID = "user-1" as unknown as Awaited<
+  ReturnType<typeof import("@convex-dev/auth/server").getAuthUserId>
+>;
+
+/** Сетап мока getAuthUserId в beforeEach: user — залогинен, null — аноним.
+ *  Убирает повторяющуюся обвязку из каждого convex-теста. */
+export function mockAuth(
+  getAuthUserId: unknown,
+  mode: "user" | "anonymous" = "user",
+): void {
+  const mocked = getAuthUserId as ReturnType<typeof vi.fn>;
+  mocked.mockReset();
+  mocked.mockResolvedValue(mode === "user" ? AUTH_USER_ID : null);
+}
 
 /** Минимальный q-объект для filter(): field/lt/gt/lte/gte/eq против строки. */
 export interface ConvexFilterQ {

@@ -11,12 +11,11 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { currentUser } from "./users";
 import {
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 /** Хендлер query без обёртки — единственное, что нужно для теста. */
 const runCurrentUser = (
@@ -27,12 +26,11 @@ const runCurrentUser = (
 
 describe("currentUser", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает null", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runCurrentUser({ db })).resolves.toBeNull();
   });
