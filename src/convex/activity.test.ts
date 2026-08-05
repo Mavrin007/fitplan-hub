@@ -11,12 +11,11 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { getActivityDays } from "./activity";
 import {
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type ActivityArgs = { from: string; to: string };
 
@@ -36,12 +35,11 @@ function doc(table: string, id: string, userId: string, date: string): ConvexDoc
 
 describe("getActivityDays", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает пустой массив", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(
       runActivity({ db }, { from: "2026-07-01", to: "2026-08-04" }),

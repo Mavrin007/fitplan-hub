@@ -104,6 +104,15 @@ describe("assertText — названия еды и единицы (addFood)", (
     );
   });
 
+  it("null/undefined вместо строки отклоняется (fallback ?? \"\")", () => {
+    expect(
+      messageOf(() => assertText(null as unknown as string, 100, "Название")),
+    ).toBe("Название: от 1 до 100 символов");
+    expect(
+      messageOf(() => assertText(undefined as unknown as string, 100, "Название")),
+    ).toBe("Название: от 1 до 100 символов");
+  });
+
   it("строка длиннее maxLen отклоняется, ровно maxLen проходит", () => {
     const ok = "а".repeat(100);
     expect(assertText(ok, 100, "Название")).toHaveLength(100);

@@ -5,7 +5,7 @@
  * CONVEX_SITE_URL), вставку и чистку устаревших кодов, а также чтение
  * последнего кода через getByEmail.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getByEmail, insert } from "./devOtp";
 import {
   makeConvexDb,
@@ -61,6 +61,13 @@ describe("devOtp", () => {
     const { db, store } = makeConvexDb();
     await runInsert({ db }, { email: "a@b.c", code: "123456", createdAt: 1000 });
     expect(store.devOtpCodes).toHaveLength(0);
+  });
+
+  it("localhost в CONVEX_SITE_URL тоже включает перехват", async () => {
+    process.env.CONVEX_SITE_URL = "http://localhost:3210";
+    const { db, store } = makeConvexDb();
+    await runInsert({ db }, { email: "a@b.c", code: "123456", createdAt: 1000 });
+    expect(store.devOtpCodes).toHaveLength(1);
   });
 
   it("вставляет код и чистит коды старше 15 минут для того же адреса", async () => {
