@@ -13,12 +13,14 @@ import type {
   FitnessGoal,
   Gender,
   Limitation,
+  TrainingStyle,
 } from "./nutrition";
 import {
   ACTIVITY_LABELS,
   EXPERIENCE_LABELS,
   GENDER_LABELS,
   LIMITATION_LABELS,
+  TRAINING_STYLE_LABELS,
 } from "./nutrition";
 
 export interface Exercise {
@@ -38,6 +40,8 @@ export interface WorkoutDay {
   exercises: Exercise[];
   notes?: string[]; // персональные замечания по дню
   warmup?: string[]; // разминка/мобильность перед тренировкой
+  /** Примерная длительность сессии в минутах (разминка + подходы + отдых). */
+  approxMinutes?: number;
 }
 
 export interface WorkoutTemplate {
@@ -75,6 +79,7 @@ export interface TrainingProfile {
   equipment?: string[]; // сырые ключи инвентаря (нормализуются внутри)
   limitations?: string[]; // сырые ключи ограничений (нормализуются внутри)
   preferredTrainingDays?: number; // 1–6
+  trainingStyle?: TrainingStyle; // предпочтение стиля (power/hypertrophy/functional/balanced)
 }
 
 export type BodyBuild = "tall" | "average" | "short";
@@ -396,6 +401,20 @@ const ANTHRO_RULES: Record<
       reason: "высокоударная связка с возрастом избыточна",
       restBonus: 15,
     },
+    heavy: {
+      alternative: "Марш с подъёмом коленей",
+      reason: "высокоударная связка с лишним весом избыточна — марш безопаснее",
+    },
+  },
+  "Спринт-интервалы": {
+    heavy: {
+      alternative: "Ходьба / бег",
+      reason: "спринты с лишним весом перегружают суставы — ровный темп безопаснее",
+    },
+    senior: {
+      alternative: "Ходьба / бег",
+      reason: "спринты с возрастом травмоопасны — ровный темп безопаснее",
+    },
   },
   "Жим ногами": {
     tall: {
@@ -623,6 +642,45 @@ const ENDURANCE_HIIT = [
 
 const CARDIO_DAY = [ex("Ходьба / бег", 1, "30–40 мин", 0)];
 
+/* Силовой пул (цель «Сила»): базовые движения, 3–6 повторов,
+ * длинный отдых 2–4 мин — прогрессия весов в приоритете. */
+const STRENGTH_PUSH = [
+  ex("Жим лёжа", 5, "5", 180),
+  ex("Жим стоя", 4, "5", 150),
+  ex("Махи в стороны", 3, "10–12", 60),
+  ex("Разгибание рук на блоке", 3, "8–10", 60),
+];
+
+const STRENGTH_PULL = [
+  ex("Становая тяга", 5, "3–5", 240),
+  ex("Подтягивания", 4, "5", 180),
+  ex("Тяга штанги в наклоне", 4, "5", 150),
+  ex("Тяга к лицу", 3, "12–15", 60),
+];
+
+const STRENGTH_LEGS = [
+  ex("Приседания со штангой", 5, "5", 240),
+  ex("Румынская тяга", 4, "6", 180),
+  ex("Жим ногами", 3, "8", 120),
+  ex("Подъёмы на носки", 4, "12–15", 45),
+];
+
+const STRENGTH_FULLBODY_A = [
+  ex("Приседания со штангой", 3, "6", 180),
+  ex("Жим лёжа", 3, "6", 150),
+  ex("Тяга штанги в наклоне", 3, "6", 150),
+  ex("Жим стоя", 2, "8", 90),
+  ex("Планка", 3, "30–45с", 45),
+];
+
+const STRENGTH_FULLBODY_B = [
+  ex("Становая тяга", 3, "5", 240),
+  ex("Жим гантелей под наклоном", 3, "6–8", 120),
+  ex("Гоблет-приседания", 3, "8", 120),
+  ex("Подтягивания", 3, "6", 150),
+  ex("Скручивания «велосипед»", 3, "15", 45),
+];
+
 /** Сессия-«семя»: упражнения без дня недели — день назначается при сборке. */
 interface SessionSeed {
   name: string; // название фокуса («Фулбоди A»)
@@ -634,6 +692,25 @@ function buildSessionPool(
   goal: FitnessGoal,
   experience: ExperienceLevel,
 ): { splitType: string; pool: SessionSeed[] } {
+  if (goal === "strength") {
+    if (experience === "beginner") {
+      return {
+        splitType: "Силовой фулбоди",
+        pool: [
+          { name: "Силовой фулбоди A", exercises: STRENGTH_FULLBODY_A },
+          { name: "Силовой фулбоди B", exercises: STRENGTH_FULLBODY_B },
+        ],
+      };
+    }
+    return {
+      splitType: "Силовой сплит",
+      pool: [
+        { name: "Силовые ноги", exercises: STRENGTH_LEGS },
+        { name: "Силовой жим", exercises: STRENGTH_PUSH },
+        { name: "Силовая тяга", exercises: STRENGTH_PULL },
+      ],
+    };
+  }
   if (goal === "improve_endurance") {
     return {
       splitType: "Круги на выносливость",
@@ -708,6 +785,8 @@ function buildSessionPool(
 
 /** Сколько тренировок в неделю задаёт цель и уровень по умолчанию. */
 function defaultSessions(goal: FitnessGoal, experience: ExperienceLevel): number {
+  if (goal === "strength")
+    return experience === "beginner" ? 3 : 4;
   if (goal === "improve_endurance") return experience === "beginner" ? 3 : 4;
   if (goal === "gain_muscle")
     return experience === "beginner" ? 3 : experience === "advanced" ? 5 : 4;
@@ -936,6 +1015,8 @@ const TEMPO_BY_GOAL: Record<FitnessGoal, string> = {
   lose_weight: "2-1-1",
   maintain: "2-1-2",
   improve_endurance: "2-0-1",
+  // Медленная эксцентрика, пауза, взрывная концентрика — классика силы.
+  strength: "3-0-2",
 };
 
 /** Собирает разминку дня под профиль: базовое кардио + суставная гимнастика +
@@ -1043,8 +1124,22 @@ function buildHowCalculated(
       "Цель «поддержание»: сбалансированные тренировки на всё тело, сила + мобильность.",
     improve_endurance:
       "Цель «выносливость»: круги с собственным весом, 12–20 повторов, короткий отдых 30–45 с.",
+    strength:
+      "Цель «сила»: базовые движения, 3–6 повторов, отдых 2–4 мин, прогрессия рабочих весов — в приоритете.",
   };
   bullets.push(goalBullets[profile.fitnessGoal]);
+
+  const style = profile.trainingStyle ?? "balanced";
+  const styleBullets: Partial<Record<TrainingStyle, string>> = {
+    power: "Стиль «силовой»: повторы сдвинуты вниз (3–6), отдых увеличен — база на максимуме силы.",
+    hypertrophy:
+      "Стиль «объёмный»: повторы сдвинуты вверх (10–15), отдых сокращён — больше работы на мышцу.",
+    functional:
+      "Стиль «функциональный»: короткий отдых 30–45 с, комбинированная нагрузка.",
+  };
+  // Дефолтный стиль не объясняем — это и есть «классический» план.
+  const styleBullet = styleBullets[style];
+  if (styleBullet) bullets.push(styleBullet);
 
   bullets.push(
     `Тренировок в неделю: ${sessions}${profile.preferredTrainingDays ? " (по вашему выбору)" : ""} — выбрана схема «${splitType}».`,
@@ -1081,8 +1176,16 @@ function buildAdaptedFor(
     parts.push("фокус на набор мышечной массы");
   } else if (profile.fitnessGoal === "improve_endurance") {
     parts.push("фокус на выносливость и работоспособность");
+  } else if (profile.fitnessGoal === "strength") {
+    parts.push("фокус на силовые показатели");
   } else {
     parts.push("поддержание формы");
+  }
+
+  if (profile.trainingStyle && profile.trainingStyle !== "balanced") {
+    parts.push(
+      `стиль: ${TRAINING_STYLE_LABELS[profile.trainingStyle].toLowerCase()}`,
+    );
   }
 
   const activity =
@@ -1152,6 +1255,63 @@ function distributeSessions(pool: SessionSeed[], sessions: number): SessionSeed[
     out.push(pool[(start - i + n) % n]);
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Предпочтение стиля тренировок                                        */
+/* ------------------------------------------------------------------ */
+
+/** Сдвиг повторов/отдыха по выбранному стилю: power — низкие повторы и
+ *  длинный отдых, hypertrophy — объём и короткий отдых, functional —
+ *  минимальный отдых, balanced — без изменений. */
+const STYLE_RULES: Record<
+  TrainingStyle,
+  { repsDelta: number; restDelta: number; restMin: number }
+> = {
+  power: { repsDelta: -2, restDelta: 30, restMin: 90 },
+  hypertrophy: { repsDelta: 2, restDelta: -15, restMin: 45 },
+  functional: { repsDelta: 1, restDelta: -15, restMin: 30 },
+  balanced: { repsDelta: 0, restDelta: 0, restMin: 0 },
+};
+
+/** Сдвигает диапазон повторов на delta с защитой от вырождения:
+ *  «6–8» → «4–6», одиночное «5» → «3–5» (delta<0) или «5–7» (delta>0),
+ *  минимум 3 повтора. Тайминги («30с») не трогаем. */
+function shiftStyleReps(reps: string, delta: number): string {
+  if (delta === 0) return reps;
+  const range = reps.match(/^(\d+)\s*[–—-]\s*(\d+)(.*)$/);
+  if (range) {
+    const lo = Math.max(3, parseInt(range[1], 10) + delta);
+    const hi = Math.max(lo, parseInt(range[2], 10) + delta);
+    return `${lo}–${hi}${range[3]}`;
+  }
+  const single = reps.match(/^(\d+)(.*)$/);
+  if (single) {
+    const n = parseInt(single[1], 10);
+    const shifted = Math.max(3, n + delta);
+    return delta > 0
+      ? `${n}–${shifted}${single[2]}`
+      : `${shifted}–${n}${single[2]}`;
+  }
+  return reps;
+}
+
+/** Применяет предпочтение стиля к упражнению: сдвиг повторов и отдыха.
+ *  Тайминги («30с») и кардио («30–40 мин») не трогаем — отдых там зашит
+ *  в строку или не применим (повторы «мин» нельзя сдвигать по стилю). */
+function applyTrainingStyle(exercise: Exercise, style: TrainingStyle): Exercise {
+  const rule = STYLE_RULES[style];
+  if (rule.repsDelta === 0 && rule.restDelta === 0) return exercise;
+  const kind = classifyExercise(exercise);
+  if (kind === "timed" || kind === "cardio") return exercise;
+  return {
+    ...exercise,
+    reps: shiftStyleReps(exercise.reps, rule.repsDelta),
+    restSeconds: Math.max(
+      rule.restMin,
+      exercise.restSeconds + rule.restDelta,
+    ),
+  };
 }
 
 /** Есть ли в пуле хоть одно упражнение, требующее снаряда (не только
@@ -1260,16 +1420,28 @@ export function generateWorkoutTemplate(
     const withWeights: WorkoutDay = {
       ...equipped.day,
       warmup: buildWarmup(profile, ctx, limitations),
-      exercises: equipped.day.exercises.map((exercise) => ({
-        ...exercise,
-        weightKg: computeStartWeight(exercise, profile),
-        // Темп только для отягощённых упражнений.
-        tempo: REFERENCE_WEIGHTS[exercise.name] !== undefined
-          ? TEMPO_BY_GOAL[profile.fitnessGoal]
-          : undefined,
-      })),
+      exercises: equipped.day.exercises.map((exercise) => {
+        // Стиль тренировок (повторы/отдых) применяется после замен —
+        // к итоговым именам упражнений.
+        const styled = applyTrainingStyle(
+          exercise,
+          profile.trainingStyle ?? "balanced",
+        );
+        return {
+          ...styled,
+          weightKg: computeStartWeight(styled, profile),
+          // Темп только для отягощённых упражнений.
+          tempo: REFERENCE_WEIGHTS[styled.name] !== undefined
+            ? TEMPO_BY_GOAL[profile.fitnessGoal]
+            : undefined,
+        };
+      }),
     };
-    return notes.length > 0 ? { ...withWeights, notes } : withWeights;
+    const withMinutes: WorkoutDay = {
+      ...withWeights,
+      approxMinutes: estimateSessionMinutes(withWeights),
+    };
+    return notes.length > 0 ? { ...withMinutes, notes } : withMinutes;
   });
 
   const finalExercises = days.flatMap((d) => d.exercises);
@@ -1307,6 +1479,7 @@ export function profileSignature(profile: TrainingProfile): string {
     normalizeEquipment(profile.equipment).slice().sort().join(","),
     normalizeLimitations(profile.limitations).slice().sort().join(","),
     profile.preferredTrainingDays ?? "",
+    profile.trainingStyle ?? "",
   ].join("|");
 }
 
@@ -1524,6 +1697,28 @@ export function applyProgression(
       days,
     };
   });
+}
+
+/** Рабочие секунды одного подхода для `reps` (строки вида «6–8», «30с»,
+ *  «20с / 40с отдых», «30–40 мин»). Для повторов — ~2.5 с на повтор,
+ *  для секундных интервалов — само время работы, для минут — минуты. */
+function workSecondsPerSet(reps: string): number {
+  const nums = (reps.match(/\d+/g) ?? []).map(Number);
+  const avg = nums.reduce((s, n) => s + n, 0) / Math.max(1, nums.length);
+  if (reps.includes("мин")) return avg * 60;
+  if (reps.includes("с")) return avg; // «30с» или «20с / 40с отдых» — работа = avg
+  return avg * 2.5;
+}
+
+/** Примерная длительность тренировки в минутах: разминка + сумма подходов
+ *  (работа + отдых). Показывает пользователю, сколько времени заложить. */
+export function estimateSessionMinutes(day: WorkoutDay): number {
+  const warmup = (day.warmup?.length ?? 0) > 0 ? 6 : 3;
+  const training = day.exercises.reduce(
+    (s, ex) => s + ex.sets * (workSecondsPerSet(ex.reps) + ex.restSeconds),
+    0,
+  );
+  return Math.max(10, Math.round((warmup + training) / 60));
 }
 
 export const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];

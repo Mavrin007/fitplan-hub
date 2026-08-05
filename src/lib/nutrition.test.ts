@@ -4,6 +4,7 @@ import {
   computeTargets,
   computeTdee,
   GOAL_ADJUSTMENTS,
+  waterGoal,
   type ProfileInput,
 } from "./nutrition";
 
@@ -69,10 +70,40 @@ describe("computeTargets — дефицит/профицит по цели", () 
     expect(lose.protein).toBe(152); // 1.9 × 80
   });
 
+  it("сила: калории на поддержании, белки 1.8 г/кг", () => {
+    const t = computeTargets(p({ fitnessGoal: "strength", weightKg: 80 }));
+    expect(t.protein).toBe(144); // 1.8 × 80
+    const tdee = computeTdee(p({ fitnessGoal: "strength", weightKg: 80 }));
+    expect(t.calories).toBeCloseTo(tdee, 0); // GOAL_ADJUSTMENTS.strength = 0
+  });
+
   it("макросы согласованы с калориями (4+4+9 ккал/г)", () => {
     const t = computeTargets(p());
     const fromMacros = t.protein * 4 + t.carbs * 4 + t.fat * 9;
     // Из-за округлений допускаем небольшую погрешность.
     expect(Math.abs(fromMacros - t.calories)).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("waterGoal", () => {
+  it("80 кг → 2750 мл (round(80·33/250)·250)", () => {
+    expect(waterGoal(80)).toBe(2750);
+  });
+
+  it("95 кг → round(95·33/250)·250 = round(12.54)·250 = 3250 мл", () => {
+    expect(waterGoal(95)).toBe(3250);
+  });
+
+  it("маленький вес не опускается ниже минимума 1500 мл", () => {
+    // 40 кг → round(40·33/250)·250 = 1250 < 1500 → 1500.
+    expect(waterGoal(40)).toBe(1500);
+    // Экстремальный случай тоже.
+    expect(waterGoal(1)).toBe(1500);
+  });
+
+  it("всегда кратно 250", () => {
+    for (const w of [55, 62.5, 77.3, 100, 120]) {
+      expect(waterGoal(w) % 250).toBe(0);
+    }
   });
 });

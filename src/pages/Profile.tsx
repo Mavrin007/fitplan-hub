@@ -37,12 +37,15 @@ import {
   LIMITATION_KEYS,
   LIMITATION_LABELS,
   LIMITATION_DESCRIPTIONS,
+  TRAINING_STYLE_HINTS,
+  TRAINING_STYLE_LABELS,
   computeTargets,
   type ActivityLevel,
   type ExperienceLevel,
   type FitnessGoal,
   type Gender,
   type Limitation,
+  type TrainingStyle,
 } from "@/lib/nutrition";
 import {
   EQUIPMENT_KEYS,
@@ -93,6 +96,13 @@ const GOAL_KEYS: FitnessGoal[] = [
   "maintain",
   "gain_muscle",
   "improve_endurance",
+  "strength",
+];
+const TRAINING_STYLE_KEYS: TrainingStyle[] = [
+  "power",
+  "hypertrophy",
+  "functional",
+  "balanced",
 ];
 const EXPERIENCE_KEYS: ExperienceLevel[] = [
   "beginner",
@@ -199,6 +209,7 @@ export default function Profile() {
     equipment: [] as Equipment[],
     limitations: [] as Limitation[],
     preferredTrainingDays: 3,
+    trainingStyle: "balanced" as TrainingStyle,
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -222,6 +233,7 @@ export default function Profile() {
       equipment: (profile.equipment ?? []) as Equipment[],
       limitations: (profile.limitations ?? []) as Limitation[],
       preferredTrainingDays: profile.preferredTrainingDays ?? 3,
+      trainingStyle: (profile.trainingStyle ?? "balanced") as TrainingStyle,
     });
   }
 
@@ -324,6 +336,7 @@ export default function Profile() {
         equipment: form.equipment,
         limitations: form.limitations,
         preferredTrainingDays: form.preferredTrainingDays,
+        trainingStyle: form.trainingStyle,
       });
       toast.success("Профиль сохранён");
     } catch (err) {
@@ -729,6 +742,30 @@ export default function Profile() {
               </Select>
               <p className="text-[11px] text-muted-foreground">
                 План тренировок строится под это число.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="inline-flex items-center gap-1.5">
+                Стиль тренировок
+                <Dumbbell className="size-3 text-muted-foreground" />
+              </Label>
+              <Select
+                value={form.trainingStyle}
+                onValueChange={(v) => set("trainingStyle", v as TrainingStyle)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TRAINING_STYLE_KEYS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {TRAINING_STYLE_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {TRAINING_STYLE_HINTS[form.trainingStyle]}.
               </p>
             </div>
           </div>

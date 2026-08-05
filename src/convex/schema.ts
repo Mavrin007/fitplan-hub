@@ -29,12 +29,21 @@ export const fitnessGoalValidator = v.union(
   v.literal("maintain"),
   v.literal("gain_muscle"),
   v.literal("improve_endurance"),
+  v.literal("strength"),
 );
 
 export const experienceLevelValidator = v.union(
   v.literal("beginner"),
   v.literal("intermediate"),
   v.literal("advanced"),
+);
+
+/** Предпочтение стиля тренировок: влияет на повторы/отдых в плане. */
+export const trainingStyleValidator = v.union(
+  v.literal("power"),
+  v.literal("hypertrophy"),
+  v.literal("functional"),
+  v.literal("balanced"),
 );
 
 export const genderValidator = v.union(v.literal("male"), v.literal("female"));
@@ -87,6 +96,7 @@ export const workoutDayValidator = v.object({
   exercises: v.array(exerciseValidator),
   notes: v.optional(v.array(v.string())), // персональные заметки
   warmup: v.optional(v.array(v.string())), // разминка/мобильность перед тренировкой
+  approxMinutes: v.optional(v.number()), // примерная длительность сессии (мин)
 });
 
 export const loggedExerciseValidator = v.object({
@@ -115,6 +125,7 @@ export const profileFieldsValidator = v.object({
   equipment: v.optional(v.array(equipmentValidator)), // доступный инвентарь для плана тренировок
   limitations: v.optional(v.array(limitationValidator)), // ограничения/травмы (поясница, колени, плечи)
   preferredTrainingDays: v.optional(v.number()), // сколько тренировок в неделю хочет пользователь (1–6)
+  trainingStyle: v.optional(trainingStyleValidator), // предпочтение стиля тренировок
   updatedAt: v.number(),
 });
 export type ProfileFields = Infer<typeof profileFieldsValidator>;
@@ -235,6 +246,16 @@ const schema = defineSchema(
       code: v.string(),
       createdAt: v.number(),
     }).index("by_email_created", ["email", "createdAt"]),
+
+    // Rate-limit отправки OTP: одна строка на email, lastSentAt — время
+    // последней отправки кода. Серверная защита прод-пути: интервал повторной
+    // отправки 60с, чтобы не дёргать VLY-шлюз вхолостую (лимит попыток
+    // ввода кода реализован в самом @convex-dev/auth через authRateLimits
+    // и signIn.maxFailedAttempsPerHour).
+    otpRateLimits: defineTable({
+      email: v.string(),
+      lastSentAt: v.number(),
+    }).index("by_email", ["email"]),
 
     // Completed workout sessions.
     workoutLogs: defineTable({

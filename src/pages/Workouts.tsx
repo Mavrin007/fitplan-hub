@@ -18,6 +18,7 @@ import {
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { WorkoutMode } from "@/components/WorkoutMode";
 import { EmptyState } from "@/components/empty-state";
+import { FitnessHero } from "@/components/illustrations";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
 import {
@@ -33,6 +34,7 @@ import { axisProps, gridProps, tooltipStyle, barAnim } from "@/lib/charts";
 import {
   applyProgression,
   equipmentSummary,
+  estimateSessionMinutes,
   EXERCISE_TIPS,
   generateWorkoutTemplate,
   normalizeEquipment,
@@ -55,12 +57,15 @@ import {
   GENDER_LABELS,
   GOAL_LABELS,
   LIMITATION_LABELS,
+  TRAINING_STYLE_LABELS,
+  type TrainingStyle,
 } from "@/lib/nutrition";
 import { todayKey, shortDate, prettyDate } from "@/lib/dates";
 import {
   ArrowUpDown,
   Bike,
   ChevronDown,
+  Clock,
   Dumbbell,
   Flame,
   Footprints,
@@ -156,6 +161,14 @@ function planChangeSummary(
         const oldDays = s[10] ?? "";
         const newDays = String(profile.preferredTrainingDays ?? "");
         if (oldDays !== newDays && newDays) parts.push(`дней в неделю: ${newDays}`);
+      }
+      // 12-й сегмент (с версии со стилем тренировок) — предпочтение стиля.
+      if (s.length >= 12) {
+        const oldStyle = s[11] ?? "";
+        const newStyle = profile.trainingStyle ?? "";
+        if (oldStyle !== newStyle && newStyle) {
+          parts.push(`стиль: ${TRAINING_STYLE_LABELS[newStyle as TrainingStyle].toLowerCase()}`);
+        }
       }
     }
   }
@@ -401,13 +414,16 @@ export default function Workouts() {
   return (
     <div className="relative isolate mx-auto max-w-4xl space-y-10">
       <PageAurora />
-      <header>
-        <p className="label-overline text-muted-foreground">Тренировки</p>
-        <h1 className="m3-headline-large mt-2">План тренировок</h1>
-        <div
-          aria-hidden
-          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
-        />
+      <header className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="label-overline text-muted-foreground">Тренировки</p>
+          <h1 className="m3-headline-large mt-2">План тренировок</h1>
+          <div
+            aria-hidden
+            className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+          />
+        </div>
+        <FitnessHero className="hidden h-24 w-32 shrink-0 sm:block" />
       </header>
 
       {/* Сводная карточка плана: сплит, частота, цикл и профиль, под который собран план */}
@@ -424,11 +440,17 @@ export default function Workouts() {
                 {sessionsText} тренировок в неделю
                 {cycleWeeks ? ` · цикл ${cycleWeeks} недели` : ""} ·{" "}
                 {GOAL_LABELS[plan.goal ?? profile.fitnessGoal].toLowerCase()}
+                {profile.trainingStyle && profile.trainingStyle !== "balanced"
+                  ? ` · стиль: ${TRAINING_STYLE_LABELS[profile.trainingStyle].toLowerCase()}`
+                  : ""}
               </p>
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">
                 Для {EXPERIENCE_LABELS[profile.experienceLevel].toLowerCase()} ·{" "}
                 {GOAL_LABELS[profile.fitnessGoal].toLowerCase()}
+                {profile.trainingStyle && profile.trainingStyle !== "balanced"
+                  ? ` · стиль: ${TRAINING_STYLE_LABELS[profile.trainingStyle].toLowerCase()}`
+                  : ""}
               </p>
             )}
             <p className="mt-1.5 text-xs text-muted-foreground">
@@ -533,6 +555,9 @@ export default function Workouts() {
             .map((day, idx) => {
               const art = workoutArt(day.focus);
               const ArtIcon = art.icon;
+              // Длительность сессии считаем из подходов и отдыха (хранимые
+              // в БД планы могут быть старой версии, без approxMinutes).
+              const minutes = estimateSessionMinutes(day as WorkoutDay);
               return (
                 <motion.div
                   key={day.day}
@@ -553,10 +578,16 @@ export default function Workouts() {
                       <span className="label-overline text-on-secondary-container">
                         {WEEKDAYS[day.day]} · {day.focus}
                       </span>
-                      <Badge className="gap-1">
-                        <Dumbbell className="size-3" />
-                        {day.exercises.length} упражнений
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="gap-1 bg-background/50">
+                          <Clock className="size-3" />
+                          ≈ {minutes} мин
+                        </Badge>
+                        <Badge className="gap-1">
+                          <Dumbbell className="size-3" />
+                          {day.exercises.length} упражнений
+                        </Badge>
+                      </div>
                     </div>
                   </div>
 
