@@ -131,9 +131,12 @@ function snapshotArgs(args: unknown[]): unknown[] {
   return structuredClone(args);
 }
 
-/** useQuery из convex/react — возвращает результат, заданный через setQuery(). */
+/** useQuery из convex/react — возвращает результат, заданный через setQuery().
+ *  Значение отдаётся снимком (structuredClone): компонент не должен иметь
+ *  доступа к внутреннему стору мока, поэтому мутация полученного объекта
+ *  (например, в setState-обёртке) не может исказить последующие вызовы. */
 export function useQuery(ref: unknown, args?: unknown): unknown {
-  return convexMock.queryResults.get(keyOf(pathOf(ref), args));
+  return structuredClone(convexMock.queryResults.get(keyOf(pathOf(ref), args)));
 }
 
 /** useMutation из convex/react — записывает вызовы, реализацию можно задать. */
@@ -164,9 +167,11 @@ export function setAction(
   convexMock.actionImpls.set(pathOf(ref), impl);
 }
 
-/** Задать результат useQuery(ref, args). */
+/** Задать результат useQuery(ref, args). Значение хранится снимком: если тест
+ *  мутирует фикстуру после setQuery, стор мока сохраняет состояние на момент
+ *  установки (как реальный клиент, который кэширует ответ сервера). */
 export function setQuery(ref: unknown, args: unknown, value: unknown): void {
-  convexMock.queryResults.set(keyOf(pathOf(ref), args), value);
+  convexMock.queryResults.set(keyOf(pathOf(ref), args), structuredClone(value));
 }
 
 /** Задать реализацию мутации (например, отклоняющуюся с ошибкой). */
