@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
-import { Link2, LogOut, ShieldAlert } from "lucide-react";
+import { Download, Link2, Loader2, LogOut, ShieldAlert } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import { pluralRecords } from "@/lib/dates";
+import { exportMeals, exportWeights, exportWorkouts } from "@/lib/export";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,8 +35,6 @@ export function GuestSignOutOverlay({
   onAttach,
   onSignOut,
 }: GuestSignOutOverlayProps) {
-  const count = useQuery(api.guestStats.countMyData);
-
   // onSignOut живёт в замыкании рендера Dashboard; держим его в ref, чтобы
   // эффект автовыхода не перезапускался на каждый ре-рендер.
   const onSignOutRef = useRef(onSignOut);
@@ -42,13 +42,62 @@ export function GuestSignOutOverlay({
     onSignOutRef.current = onSignOut;
   });
 
-  // Записей нет — диалог ни к чему: выходим сразу (показываем его только если
-  // счётчик ещё грузится, чтобы не было «моргания» пустого диалога).
+  // Дешёвая проверка «есть ли данные»: take(1) по таблицам. Записей нет —
+  // диалог ни к чему, выходим сразу (показываем его только если проверка ещё
+  // грузится, чтобы не было «моргания» пустого диалога).
+  const hasData = useQuery(api.guestStats.hasMyData);
   useEffect(() => {
-    if (open && count === 0) onSignOutRef.current();
-  }, [open, count]);
+    if (open && hasData === false) onSignOutRef.current();
+  }, [open, hasData]);
 
-  const loading = count === undefined;
+  // Точный счёт запрашиваем только когда данные есть и диалог остаётся
+  // открытым: до подтверждения hasData запрос пропускается (skip), чтобы не
+  // гонять collect() по всем таблицам вхолостую.
+  const count = useQuery(
+    api.guestStats.countMyData,
+    hasData === true ? undefined : "skip",
+  );
+
+  const loading = hasData === undefined || count === undefined;
+
+  // Полные строки для выгрузки подгружаются только по клику «Скачать свои
+  // данные»: пока кнопка не нажата, все три запроса пропущены (skip), чтобы
+  // оверлей оставался дешёвым — счёт уже посчитан, а тела записей нужны
+  // лишь в момент экспорта. exportTick — счётчик кликов: каждый новый клик
+  // сбрасывает ref-гард и перезапускает выгрузку (кнопку можно нажать снова).
+  const [exportTick, setExportTick] = useState(0);
+  const exportedRef = useRef(false);
+  const weights = useQuery(
+    api.weightEntries.listMyWeights,
+    exportTick > 0 ? {} : "skip",
+  );
+  const meals = useQuery(
+    api.mealLog.getByRange,
+    exportTick > 0 ? { from: "0000-01-01", to: "9999-12-31" } : "skip",
+  );
+  const logs = useQuery(
+    api.workouts.listLogs,
+    exportTick > 0 ? {} : "skip",
+  );
+  const exportLoading =
+    exportTick > 0 &&
+    (weights === undefined || meals === undefined || logs === undefined);
+
+  // Когда все три запроса ответили — отдаём файлы (три CSV: вес, питание,
+  // тренировки). Функции экспорта сами создают Blob и запускают скачивание.
+  // Гард exportedRef делает выгрузку строго разовой на один клик: повторные
+  // рендеры с теми же ссылками данных не экспортируют заново.
+  useEffect(() => {
+    if (exportTick === 0) return;
+    if (weights === undefined || meals === undefined || logs === undefined)
+      return;
+    if (exportedRef.current) return;
+    exportedRef.current = true;
+    exportWeights(weights);
+    exportMeals(meals);
+    exportWorkouts(logs);
+    toast.success("Данные выгружены — три CSV-файла");
+  }, [exportTick, weights, meals, logs]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
@@ -61,20 +110,35 @@ export function GuestSignOutOverlay({
           <DialogDescription>
             {loading
               ? "Проверяем ваши данные…"
-              : count === 0
-                ? "В гостевом аккаунте пока нет записей — после выхода начнёте с чистого листа."
-                : `В гостевом аккаунте ${count} ${pluralRecords(count)}. Без привязки почты они будут недоступны после выхода и с других устройств.`}
+              : hasData
+                ? `В гостевом аккаунте ${count} ${pluralRecords(count as number)}. Без привязки почты они будут недоступны после выхода и с других устройств.`
+                : "В гостевом аккаунте пока нет записей — после выхода начнёте с чистого листа."}
           </DialogDescription>
         </DialogHeader>
 
         {/* Кнопки активны всегда — даже если счётчик ещё грузится (или запрос
             упал и остался undefined), пользователь может выйти или отменить. */}
         <div className="mt-2 flex flex-col gap-2">
-          {count !== undefined && count > 0 ? (
+          {hasData === true ? (
             <>
               <Button onClick={onAttach}>
                 <Link2 className="size-4" />
                 Привязать почту
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  exportedRef.current = false;
+                  setExportTick((t) => t + 1);
+                }}
+                disabled={exportLoading}
+              >
+                {exportLoading ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {exportLoading ? "Готовим файлы…" : "Скачать свои данные"}
               </Button>
               <Button variant="secondary" onClick={onSignOut}>
                 <LogOut className="size-4" />
