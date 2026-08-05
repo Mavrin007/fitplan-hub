@@ -16,12 +16,11 @@ import { addWeight, deleteWeight, listMyWeights } from "./weightEntries";
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type ListArgs = { from?: string; to?: string };
 type AddArgs = { date: string; weightKg: number };
@@ -54,12 +53,11 @@ function weightDoc(
 
 describe("listMyWeights", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает пустой массив", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runList({ db }, {})).resolves.toEqual([]);
   });
@@ -109,12 +107,11 @@ describe("listMyWeights", () => {
 
 describe("addWeight", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() =>
       runAdd({ db }, { date: "2026-08-04", weightKg: 80 }),
@@ -184,12 +181,11 @@ describe("addWeight", () => {
 
 describe("deleteWeight", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runDelete({ db }, { id: "w1" }));
     expect(msg).toBe("Сессия истекла — войдите заново.");
