@@ -77,6 +77,11 @@ describe("computeTargets — дефицит/профицит по цели", () 
     expect(t.calories).toBeCloseTo(tdee, 0); // GOAL_ADJUSTMENTS.strength = 0
   });
 
+  it("выносливость: белки 1.6 г/кг (ветка improve_endurance)", () => {
+    const t = computeTargets(p({ fitnessGoal: "improve_endurance", weightKg: 80 }));
+    expect(t.protein).toBe(128); // 1.6 × 80
+  });
+
   it("макросы согласованы с калориями (4+4+9 ккал/г)", () => {
     const t = computeTargets(p());
     const fromMacros = t.protein * 4 + t.carbs * 4 + t.fat * 9;
