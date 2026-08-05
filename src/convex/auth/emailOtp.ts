@@ -13,6 +13,12 @@ interface SendVerificationCtx {
   ) => Promise<unknown>;
 }
 
+/** Ответ мутации otpRateLimit.checkAndRecord. */
+interface RateLimitResult {
+  allowed: boolean;
+  retryAfterSec: number;
+}
+
 export const emailOtp = Email({
   id: "email-otp",
   maxAge: 60 * 15, // 15 minutes
@@ -33,6 +39,19 @@ export const emailOtp = Email({
     { identifier: email, token }: { identifier: string; token: string },
     ctx: SendVerificationCtx,
   ) => {
+    // Серверный rate-limit: интервал повторной отправки 60с на email.
+    // Проверяется ДО любых веток (dev-перехват и прод), чтобы не дёргать
+    // ни devOtpCodes, ни VLY-шлюз вхолостую при повторных кликах.
+    const rate = (await ctx.runMutation(
+      internal.otpRateLimit.checkAndRecord,
+      { email },
+    )) as RateLimitResult;
+    if (!rate.allowed) {
+      throw new Error(
+        `Код уже отправлен. Повторите через ${rate.retryAfterSec} сек.`,
+      );
+    }
+
     // Локальная разработка без внешнего SMTP: не ходим в VLY-шлюз, а печатаем
     // код в лог бэкенда и сохраняем в таблицу devOtpCodes, чтобы форма входа
     // показала его прямо в UI.

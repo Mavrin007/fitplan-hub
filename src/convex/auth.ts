@@ -2,11 +2,22 @@
 
 import { convexAuth, getAuthSessionId } from "@convex-dev/auth/server";
 import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
+import Google from "@auth/core/providers/google";
 import { emailOtp } from "./auth/emailOtp";
 
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [emailOtp, Anonymous],
+  providers: [emailOtp, Google, Anonymous],
+  signIn: {
+    // Лимит неудачных попыток ввода OTP/пароля в час (встроенный rate-limit
+    // @convex-dev/auth, таблица authRateLimits). 10 по умолчанию — ужесточаем
+    // до 5. Отправка кода дополнительно ограничена 60-секундным интервалом
+    // (см. convex/otpRateLimit.ts), поэтому брутфорс по коду также упирается
+    // в перевыпуск кода.
+    // (Ключ maxFailedAttempsPerHour с «опечаткой» Attemps — так он назван
+    // в @convex-dev/auth; не «исправлять», иначе лимит молча отключится.)
+    maxFailedAttempsPerHour: 5,
+  },
   callbacks: {
     // Линковка анонимной сессии к email. Дефолтный createOrUpdateUser создаёт
     // НОВОГО пользователя при привязке почты гостем — данные гостя (профиль,
@@ -27,6 +38,10 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         }
       }
       const { emailVerified, phoneVerified, ...profileRest } = profile;
+      // Google OAuth: email приходит уже верифицированным провайдером —
+      // аккаунт сразу не-анонимный, email и время верификации сохраняются.
+      // (Для email-OTP это происходит только после подтверждения кода.)
+      const isVerifiedSignIn = type === "verification" || type === "oauth";
       // Поля users-таблицы, известные схеме; profile может содержать и
       // посторонние ключи провайдера — отбрасываем их, чтобы не сломать
       // валидацию при вставке.
@@ -51,21 +66,25 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         ...(typeof profileRest.isAnonymous === "boolean"
           ? { isAnonymous: profileRest.isAnonymous }
           : null),
-        // Email записываем только после подтверждения кода — на этапе
-        // «отправить код» (type: "email") аккаунт ещё не привязан, иначе
-        // форма привязки пропала бы раньше времени.
-        ...(type === "verification" && typeof profileRest.email === "string"
+        // Email записываем только после подтверждения кода (email-OTP) или
+        // сразу для OAuth — на этапе «отправить код» (type: "email") аккаунт
+        // ещё не привязан, иначе форма привязки пропала бы раньше времени.
+        ...(isVerifiedSignIn && typeof profileRest.email === "string"
           ? { email: profileRest.email }
           : null),
-        ...(emailVerified === true
+        // Время верификации: явный флаг провайдера, либо Google OAuth с
+        // реальным email в профиле (Google подтверждает адрес при выдаче).
+        ...(emailVerified === true ||
+        (type === "oauth" && typeof profileRest.email === "string")
           ? { emailVerificationTime: Date.now() }
           : null),
         ...(phoneVerified === true
           ? { phoneVerificationTime: Date.now() }
           : null),
-        // Код подтверждён — аккаунт больше не анонимный (уходит из гостевого
-        // флоу: оверлей «привяжите почту» и автовыход при 0 записей).
-        ...(type === "verification" && typeof profileRest.email === "string"
+        // Код подтверждён / OAuth-вход — аккаунт больше не анонимный (уходит
+        // из гостевого флоу: оверлей «привяжите почту» и автовыход при 0
+        // записей).
+        ...(isVerifiedSignIn && typeof profileRest.email === "string"
           ? { isAnonymous: false }
           : null),
       };
