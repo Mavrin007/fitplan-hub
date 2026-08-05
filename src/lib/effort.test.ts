@@ -179,6 +179,33 @@ describe("applyEffortAdjustment — корректировка весов пла
     expect(bench.weightKg).toBe(40); // без данных — как было
     expect(bench.weightNote).toBeUndefined();
   });
+
+  it("существующий weightNote сохраняется и дополняется пометкой об усилии", () => {
+    const withNote: WorkoutTemplate = {
+      name: "Тест",
+      days: [
+        {
+          day: 1,
+          focus: "Сила",
+          exercises: [
+            {
+              name: "Жим лёжа",
+              sets: 4,
+              reps: "6–8",
+              restSeconds: 120,
+              weightKg: 40,
+              weightNote: "+2.5 кг на неделе 3",
+            },
+          ],
+        },
+      ],
+    };
+    const out = applyEffortAdjustment(withNote, [
+      log("2026-08-03", "easy", [{ name: "Жим лёжа", weightKg: 42.5 }]),
+    ]);
+    expect(out.days[0].exercises[0].weightNote).toContain("+2.5 кг на неделе 3");
+    expect(out.days[0].exercises[0].weightNote).toContain("по усилию: легко");
+  });
 });
 
 describe("effortAdjustedCount", () => {

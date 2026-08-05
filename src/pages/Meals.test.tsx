@@ -218,7 +218,9 @@ describe("Meals", () => {
     expect(toast.success).toHaveBeenCalledWith("Куриная грудка (гриль) — добавлено");
   });
 
-  it("сохраняет свой продукт из формы", async () => {
+  // Под полной нагрузкой coverage-прогона (все файлы параллельно) тест
+  // с dialog-аннимациями не успевает за дефолтные 5 секунд — даём запас.
+  it("сохраняет свой продукт из формы", { timeout: 20000 }, async () => {
     const user = userEvent.setup();
     setupMeals();
     renderWithRouter(<Meals />);
