@@ -16,11 +16,10 @@ import { addWater, getByDate } from "./water";
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type AddWaterArgs = { date: string; amountMl: number };
 
@@ -42,12 +41,11 @@ const runGetByDate = (
 
 describe("getByDate", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает null", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(
       runGetByDate({ db }, { date: "2026-08-04" }),
@@ -79,12 +77,11 @@ describe("getByDate", () => {
 
 describe("addWater", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() =>
       runAddWater({ db }, { date: "2026-08-04", amountMl: 250 }),

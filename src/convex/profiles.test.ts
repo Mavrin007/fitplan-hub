@@ -19,11 +19,11 @@ import { getMyProfile, upsertProfile } from "./profiles";
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type UpsertArgs = {
   age: number;
@@ -72,12 +72,11 @@ function profileDoc(id: string, userId: string): ConvexDoc {
 
 describe("getMyProfile", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает null", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runGet({ db })).resolves.toBeNull();
   });
@@ -101,12 +100,11 @@ describe("getMyProfile", () => {
 
 describe("upsertProfile", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runUpsert({ db }, VALID_ARGS));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -144,6 +142,25 @@ describe("upsertProfile", () => {
       runUpsert({ db }, { ...VALID_ARGS, targetWeightKg: 10 }),
     );
     expect(msg).toBe("Целевой вес (кг) должен быть в диапазоне 20–500");
+  });
+
+  it("профиль без опциональных полей сохраняется (false-ветки !== undefined)", async () => {
+    const { db, store } = makeConvexDb();
+    const minimal = {
+      age: 30,
+      gender: "male" as const,
+      heightCm: 180,
+      weightKg: 80,
+      activityLevel: "moderate" as const,
+      fitnessGoal: "lose_weight" as const,
+      experienceLevel: "intermediate" as const,
+    };
+    await runUpsert({ db }, minimal as UpsertArgs);
+    expect(store.profiles).toHaveLength(1);
+    expect(store.profiles[0].targetWeightKg).toBeUndefined();
+    expect(store.profiles[0].equipment).toEqual([]);
+    expect(store.profiles[0].limitations).toEqual([]);
+    expect(store.profiles[0].preferredTrainingDays).toBeUndefined();
   });
 
   it("тренировок в неделю вне 1–6 отклоняется", async () => {

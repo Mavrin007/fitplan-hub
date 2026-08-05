@@ -12,9 +12,8 @@ vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { countMyData, hasMyData } from "./guestStats";
-import { makeConvexDb, type ConvexDbMock } from "@/test/convex-db-mock";
+import { makeConvexDb, mockAuth, type ConvexDbMock } from "@/test/convex-db-mock";
 
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 const runCount = async (db: ConvexDbMock) =>
   (
@@ -32,12 +31,11 @@ const runHas = async (db: ConvexDbMock) =>
 
 describe("countMyData", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает 0", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     expect(await runCount(db)).toBe(0);
   });
@@ -103,12 +101,11 @@ describe("countMyData", () => {
 
 describe("hasMyData", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии — false", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     expect(await runHas(db)).toBe(false);
   });

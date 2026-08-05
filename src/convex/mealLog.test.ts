@@ -27,12 +27,11 @@ import {
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type EntryArgs = {
   date: string;
@@ -112,12 +111,11 @@ function mealDoc(id: string, userId: string, date: string, name: string): Convex
 
 describe("getByDate / getByRange", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращают пустой массив", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runByDate({ db }, { date: "2026-08-04" })).resolves.toEqual([]);
     await expect(
@@ -159,12 +157,11 @@ describe("getByDate / getByRange", () => {
 
 describe("addEntry", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runAdd({ db }, VALID_ENTRY));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -211,12 +208,11 @@ describe("addEntry", () => {
 
 describe("addEntries", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runAddMany({ db }, { entries: [VALID_ENTRY] }));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -255,12 +251,11 @@ describe("addEntries", () => {
 
 describe("updateEntry", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runUpdate({ db }, { id: "m1", ...VALID_ENTRY }));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -312,12 +307,11 @@ describe("updateEntry", () => {
 
 describe("deleteEntry", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runDelete({ db }, { id: "m1" }));
     expect(msg).toBe("Сессия истекла — войдите заново.");

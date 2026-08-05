@@ -25,11 +25,11 @@ import {
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 /** Валидный день плана по workoutDayValidator. */
 const DAY = {
@@ -115,12 +115,11 @@ function logDoc(id: string, userId: string, date: string): ConvexDoc {
 
 describe("getMyPlan", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает null", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runGetPlan({ db })).resolves.toBeNull();
   });
@@ -140,12 +139,11 @@ describe("getMyPlan", () => {
 
 describe("savePlan", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runSavePlan({ db }, VALID_PLAN));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -230,12 +228,11 @@ describe("savePlan", () => {
 
 describe("logWorkout", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runLogWorkout({ db }, VALID_LOG));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -281,12 +278,11 @@ describe("logWorkout", () => {
 
 describe("listLogs", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает пустой массив", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runListLogs({ db }, {})).resolves.toEqual([]);
   });
@@ -321,12 +317,11 @@ describe("listLogs", () => {
 
 describe("deleteLog", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runDeleteLog({ db }, { id: "l1" }));
     expect(msg).toBe("Сессия истекла — войдите заново.");

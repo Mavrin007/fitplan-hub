@@ -15,12 +15,11 @@ import { addFood, deleteFood, listMyFoods } from "./foods";
 import {
   errorMessage,
   makeConvexDb,
+  mockAuth,
   type ConvexDbMock,
   type ConvexDoc,
 } from "@/test/convex-db-mock";
 
-/** Поддельный Id<"users"> для мока авторизации (реальный тип не экспортируется). */
-const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
 
 type AddFoodArgs = {
   name: string;
@@ -79,12 +78,11 @@ const VALID_ARGS: AddFoodArgs = {
 
 describe("listMyFoods", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии возвращает пустой массив", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     await expect(runList({ db }, {})).resolves.toEqual([]);
   });
@@ -125,12 +123,11 @@ describe("listMyFoods", () => {
 
 describe("addFood", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runAdd({ db }, VALID_ARGS));
     expect(msg).toBe("Сессия истекла — войдите заново.");
@@ -190,12 +187,11 @@ describe("addFood", () => {
 
 describe("deleteFood", () => {
   beforeEach(() => {
-    vi.mocked(getAuthUserId).mockReset();
-    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+    mockAuth(getAuthUserId);
   });
 
   it("без сессии бросает понятную ошибку", async () => {
-    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    mockAuth(getAuthUserId, "anonymous");
     const { db } = makeConvexDb();
     const msg = await errorMessage(() => runDelete({ db }, { id: "f1" }));
     expect(msg).toBe("Сессия истекла — войдите заново.");
