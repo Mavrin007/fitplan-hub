@@ -156,8 +156,6 @@
   --surface-container: oklch(0.95 0.005 195);
   --surface-container-high: oklch(0.93 0.006 195);
   --surface-container-highest: oklch(0.9 0.007 195);
-  --inverse-surface: oklch(0.24 0.006 195);
-  --inverse-on-surface: oklch(0.95 0.004 195);
 }
 
 /* M3 dark scheme */
@@ -223,8 +221,6 @@
   --surface-container: oklch(0.24 0.006 195);
   --surface-container-high: oklch(0.28 0.007 195);
   --surface-container-highest: oklch(0.32 0.007 195);
-  --inverse-surface: oklch(0.93 0.005 195);
-  --inverse-on-surface: oklch(0.24 0.006 195);
 }
 
 @layer base {
@@ -374,21 +370,6 @@
     box-shadow: var(--shadow-elev-3);
   }
 
-  /* Плавное «дыхание» для акцентных точек. */
-  .animate-pulse-soft {
-    animation: pulse-soft 2.6s ease-in-out infinite;
-  }
-
-  @keyframes pulse-soft {
-    0%,
-    100% {
-      opacity: 0.55;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-
   /* Блик, пробегающий по кнопке/карточке слева направо. */
   .animate-shine {
     position: relative;
@@ -439,38 +420,13 @@
     }
   }
 
-  /* Горизонтальный бегунок карусели (для макетов/тизеров). */
-  .animate-marquee {
-    animation: marquee 30s linear infinite;
-  }
-  @keyframes marquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-
   /* ===== M3 type scale (Roboto) ===== */
   .m3-display-large { font-size: 3.5625rem; line-height: 4rem; font-weight: 400; letter-spacing: -0.015625em; }
   .m3-display-medium { font-size: 2.8125rem; line-height: 3.25rem; font-weight: 400; letter-spacing: 0; }
   .m3-display-small { font-size: 2.25rem; line-height: 2.75rem; font-weight: 400; letter-spacing: 0; }
   .m3-headline-large { font-size: 2rem; line-height: 2.5rem; font-weight: 400; letter-spacing: 0; }
-  .m3-headline-medium { font-size: 1.75rem; line-height: 2.25rem; font-weight: 400; letter-spacing: 0; }
   .m3-headline-small { font-size: 1.5rem; line-height: 2rem; font-weight: 400; letter-spacing: 0; }
   .m3-title-large { font-size: 1.375rem; line-height: 1.75rem; font-weight: 500; letter-spacing: 0; }
   .m3-title-medium { font-size: 1rem; line-height: 1.5rem; font-weight: 500; letter-spacing: 0.009375em; }
   .m3-title-small { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.00625em; }
-  .m3-body-large { font-size: 1rem; line-height: 1.5rem; font-weight: 400; letter-spacing: 0.009375em; }
-  .m3-body-medium { font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; letter-spacing: 0.015625em; }
-  .m3-body-small { font-size: 0.75rem; line-height: 1rem; font-weight: 400; letter-spacing: 0.025em; }
-  .m3-label-large { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.00625em; }
-  .m3-label-medium { font-size: 0.75rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.03125em; }
-  .m3-label-small { font-size: 0.6875rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.05em; }
-
-  /* Улучшенные переносы длинных текстов (без висячих строк по одному слову) */
-  .text-pretty {
-    text-wrap: pretty;
-  }
 }
