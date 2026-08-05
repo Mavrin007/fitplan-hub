@@ -75,10 +75,20 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="bg-aurora relative min-h-screen bg-background text-foreground">
+    <div className="bg-aurora isolate relative min-h-screen overflow-x-clip bg-background text-foreground">
+      {/* Слои глубины: тонкая сетка сверху + текстурный шум — не мешают
+          контенту (ниже по z, чем карточки), но убирают «плоскость» фона. */}
+      <div
+        aria-hidden
+        className="bg-grid mask-fade-radial pointer-events-none fixed inset-x-0 top-0 -z-10 h-[70vh] opacity-40"
+      />
+      <div
+        aria-hidden
+        className="bg-noise pointer-events-none fixed inset-0 -z-10 opacity-70"
+      />
       <div className="relative mx-auto flex w-full max-w-7xl">
         {/* Navigation rail (desktop) */}
-        <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-background/70 px-5 py-8 backdrop-blur lg:flex">
+        <aside className="bg-noise sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-background/70 px-5 py-8 backdrop-blur lg:flex">
           <div className="flex items-center justify-between pr-1">
             <NavLink to="/" className="group flex items-baseline gap-1.5">
               <span className="text-sm font-semibold tracking-[0.28em] uppercase transition-opacity group-hover:opacity-70">
@@ -206,7 +216,7 @@ export default function Dashboard() {
 
           {/* Desktop header: greeting + assistant (переключатель темы живёт
               в рейле — не дублируем его здесь) */}
-          <div className="sticky top-0 z-10 hidden items-center justify-between border-b bg-background/70 px-8 py-4 backdrop-blur lg:flex lg:px-12">
+          <div className="bg-noise sticky top-0 z-10 hidden items-center justify-between border-b bg-background/70 px-8 py-4 backdrop-blur lg:flex lg:px-12">
             <div>
               <p className="text-sm font-medium">{greeting()}</p>
               <p className="label-overline mt-0.5 text-muted-foreground">{todayLabel()}</p>

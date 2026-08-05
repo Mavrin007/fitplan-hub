@@ -34,6 +34,7 @@ export const api = {
   profiles: { getMyProfile: ref("profiles.getMyProfile") },
   mealLog: {
     getByDate: ref("mealLog.getByDate"),
+    getByRange: ref("mealLog.getByRange"),
     addEntry: ref("mealLog.addEntry"),
     addEntries: ref("mealLog.addEntries"),
     updateEntry: ref("mealLog.updateEntry"),
@@ -48,6 +49,10 @@ export const api = {
   workouts: { listLogs: ref("workouts.listLogs") },
   water: { getByDate: ref("water.getByDate"), addWater: ref("water.addWater") },
   activity: { getActivityDays: ref("activity.getActivityDays") },
+  guestStats: {
+    hasMyData: ref("guestStats.hasMyData"),
+    countMyData: ref("guestStats.countMyData"),
+  },
 };
 
 function pathOf(ref: unknown): string {

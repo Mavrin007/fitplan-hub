@@ -1,16 +1,17 @@
 /**
- * Юнит-тесты `countMyData` (src/convex/guestStats.ts) без Convex-рантайма:
+ * Юнит-тесты `guestStats` (src/convex/guestStats.ts) без Convex-рантайма:
  * общий фейковый ctx.db (src/test/convex-db-mock.ts) + мокнутый getAuthUserId.
  *
- * Проверяем, что счётчик: возвращает 0 без сессии, суммирует записи по всем
- * шести таблицам и не учитывает записи других пользователей.
+ * hasMyData — дешёвая проверка наличия (take(1)); countMyData — точный счёт.
+ * Проверяем: 0/false без сессии, суммирование по шести таблицам и отсечение
+ * записей других пользователей.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { countMyData } from "./guestStats";
+import { countMyData, hasMyData } from "./guestStats";
 import { makeConvexDb, type ConvexDbMock } from "@/test/convex-db-mock";
 
 const USER_ID = "user-1" as unknown as Awaited<ReturnType<typeof getAuthUserId>>;
@@ -19,6 +20,13 @@ const runCount = async (db: ConvexDbMock) =>
   (
     countMyData as unknown as {
       _handler: (ctx: { db: ConvexDbMock }) => Promise<number>;
+    }
+  )._handler({ db });
+
+const runHas = async (db: ConvexDbMock) =>
+  (
+    hasMyData as unknown as {
+      _handler: (ctx: { db: ConvexDbMock }) => Promise<boolean>;
     }
   )._handler({ db });
 
@@ -90,5 +98,58 @@ describe("countMyData", () => {
       ],
     });
     expect(await runCount(db)).toBe(1); // только m2 принадлежит user-1
+  });
+});
+
+describe("hasMyData", () => {
+  beforeEach(() => {
+    vi.mocked(getAuthUserId).mockReset();
+    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+  });
+
+  it("без сессии — false", async () => {
+    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    const { db } = makeConvexDb();
+    expect(await runHas(db)).toBe(false);
+  });
+
+  it("пустая база — false", async () => {
+    const { db } = makeConvexDb();
+    expect(await runHas(db)).toBe(false);
+  });
+
+  it("хотя бы одна запись в любой таблице — true", async () => {
+    const { db } = makeConvexDb({
+      weightEntries: [
+        { _id: "v1", _creationTime: 0, userId: "user-1", date: "2026-08-04" },
+      ],
+    });
+    expect(await runHas(db)).toBe(true);
+  });
+
+  it("записи только других пользователей — false", async () => {
+    const { db } = makeConvexDb({
+      mealLog: [
+        { _id: "m1", _creationTime: 0, userId: "user-2", date: "2026-08-04" },
+      ],
+      profiles: [
+        { _id: "p1", _creationTime: 0, userId: "user-2", age: 30 },
+      ],
+    });
+    expect(await runHas(db)).toBe(false);
+  });
+
+  it("согласован с точным счётом: hasMyData=true тогда и только тогда, когда count>0", async () => {
+    // Профиль = 1 запись: и наличие, и счёт совпадают.
+    const withProfile = makeConvexDb({
+      profiles: [{ _id: "p1", _creationTime: 0, userId: "user-1", age: 30 }],
+    });
+    expect(await runHas(withProfile.db)).toBe(true);
+    expect(await runCount(withProfile.db)).toBe(1);
+
+    // Пустая база: false и 0.
+    const empty = makeConvexDb();
+    expect(await runHas(empty.db)).toBe(false);
+    expect(await runCount(empty.db)).toBe(0);
   });
 });
