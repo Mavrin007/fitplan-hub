@@ -20,7 +20,17 @@ export type ConvexDoc = { _id: string; _creationTime: number } & Record<
   unknown
 >;
 
-/** Цепочка запросов: withIndex/eq/gte/lte/order возвращают её же (как в
+/** Минимальный q-объект для filter(): field/lt/gt/lte/gte/eq против строки. */
+export interface ConvexFilterQ {
+  field: (f: string) => unknown;
+  lt: (a: unknown, b: unknown) => boolean;
+  gt: (a: unknown, b: unknown) => boolean;
+  lte: (a: unknown, b: unknown) => boolean;
+  gte: (a: unknown, b: unknown) => boolean;
+  eq: (a: unknown, b: unknown) => boolean;
+}
+
+/** Цепочка запросов: withIndex/eq/gte/lte/order/filter возвращают её же (как в
  *  реальном билдере), first/unique/collect/take завершают. */
 export interface ConvexQueryChain {
   withIndex: (name: string, fn: (q: ConvexQueryChain) => void) => ConvexQueryChain;
@@ -28,6 +38,7 @@ export interface ConvexQueryChain {
   gte: (f: string, val: unknown) => ConvexQueryChain;
   lte: (f: string, val: unknown) => ConvexQueryChain;
   order: (dir: "asc" | "desc") => ConvexQueryChain;
+  filter: (fn: (q: ConvexFilterQ) => boolean) => ConvexQueryChain;
   first: () => ConvexDoc | undefined;
   unique: () => ConvexDoc | null;
   collect: () => ConvexDoc[];
@@ -53,11 +64,13 @@ const DEFAULT_TABLES = [
   "mealLog",
   "waterEntries",
   "workoutLogs",
+  "workoutPlans",
   "weightEntries",
   "foods",
   "profiles",
   "users",
   "otpRateLimits",
+  "devOtpCodes",
 ];
 
 export function makeConvexDb(
@@ -88,6 +101,20 @@ export function makeConvexDb(
               : String(d[f]) <= String(val),
         );
 
+      let filterFn: ((q: ConvexFilterQ) => boolean) | null = null;
+      const filterMatch = (d: ConvexDoc) => {
+        if (!filterFn) return true;
+        const field = (f: string) => d[f];
+        return filterFn({
+          field,
+          lt: (a, b) => (a as number) < (b as number),
+          gt: (a, b) => (a as number) > (b as number),
+          lte: (a, b) => (a as number) <= (b as number),
+          gte: (a, b) => (a as number) >= (b as number),
+          eq: (a, b) => a === b,
+        });
+      };
+
       const q: ConvexQueryChain = {
         eq(f, val) {
           filters.push({ op: "eq", f, val });
@@ -109,18 +136,22 @@ export function makeConvexDb(
           fn(q);
           return q;
         },
+        filter(fn) {
+          filterFn = fn;
+          return q;
+        },
         // ВАЖНО: first() не учитывает order("desc") (реальный Convex вернул бы
         // последнюю строку). Ни один текущий хендлер так не вызывает — при
         // появлении order().first() это надо учесть здесь.
         first() {
-          return store[table].filter(match)[0];
+          return store[table].filter(match).filter(filterMatch)[0];
         },
         // Как реальный Convex: ровно одна строка по фильтру или null.
         unique() {
-          return store[table].filter(match)[0] ?? null;
+          return store[table].filter(match).filter(filterMatch)[0] ?? null;
         },
         collect() {
-          const rows = store[table].filter(match);
+          const rows = store[table].filter(match).filter(filterMatch);
           // Индекс (userId, date): без order — по возрастанию дат, иначе desc.
           // Для запросов, где порядок не важен (агрегации), это безвредно.
           return desc
@@ -128,17 +159,23 @@ export function makeConvexDb(
             : rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
         },
         // Как реальный Convex: первые n строк с учётом order().
-        // Для таблиц без поля date (foods) сортировка стабильна — строки
-        // остаются в порядке вставки.
+        // date-строки (индекс userId,date) сравниваются лексикографически;
+        // createdAt-числа (devOtpCodes и т.п.) — численно, чтобы take(1)
+        // с order("desc") отдавал именно последний код.
         take(n) {
-          const rows = store[table].filter(match);
-          return desc
-            ? rows
-                .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-                .slice(0, n)
-            : rows
-                .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-                .slice(0, n);
+          const rows = store[table].filter(match).filter(filterMatch);
+          const byDate = (a: ConvexDoc, b: ConvexDoc) =>
+            String(a.date).localeCompare(String(b.date));
+          const byCreated = (a: ConvexDoc, b: ConvexDoc) =>
+            (a.createdAt as number) - (b.createdAt as number);
+          const rowsWithDate = rows.filter((r) => r.date !== undefined);
+          const rowsWithoutDate = rows.filter((r) => r.date === undefined);
+          if (rowsWithDate.length > 0) {
+            rowsWithDate.sort(desc ? (a, b) => byDate(b, a) : byDate);
+            return [...rowsWithDate, ...rowsWithoutDate].slice(0, n);
+          }
+          rowsWithoutDate.sort(desc ? (a, b) => byCreated(b, a) : byCreated);
+          return rowsWithoutDate.slice(0, n);
         },
       };
       return q;
