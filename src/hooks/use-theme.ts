@@ -4,7 +4,8 @@ const STORAGE_KEY = "kilo-theme";
 
 export type Theme = "light" | "dark";
 
-function getInitialTheme(): Theme {
+/** Экспортируется для юнит-теста SSR-ветки (window недоступен). */
+export function getInitialTheme(): Theme {
   // SSR-безопасно: в браузере читаем сохранённый выбор, иначе — светлая.
   if (typeof window === "undefined") return "light";
   try {
