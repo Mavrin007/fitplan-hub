@@ -17,19 +17,23 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { Chip } from "@/components/ui/chip";
 import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
 import { EmptyState } from "@/components/empty-state";
+import { DishScene } from "@/components/illustrations";
 import { Badge } from "@/components/ui/badge";
 import {
   FOOD_LIBRARY,
   MEAL_TYPE_LABELS,
+  WEEKDAY_SHORT,
   formatAmount,
   generateMealPlan,
+  generateWeeklyMealPlan,
   type MealType,
   type PlannedMeal,
 } from "@/lib/mealLibrary";
-import { computeTargets } from "@/lib/nutrition";
+import { GOAL_LABELS, computeTargets, type FitnessGoal } from "@/lib/nutrition";
 import { addDays, pluralRecords, shortDate, toDateKey, todayKey } from "@/lib/dates";
 import { cn, parseLocalNumber } from "@/lib/utils";
 import {
@@ -108,6 +112,10 @@ export default function Meals() {
 
   const [showPlan, setShowPlan] = useState(false);
 
+  // Стиль недельного меню: по умолчанию — цель из профиля, можно переключить
+  // на другой (например «Похудение»/«Набор массы»), чтобы посмотреть меню.
+  const [menuGoal, setMenuGoal] = useState<FitnessGoal | null>(null);
+
   const targets = profile ? computeTargets(profile) : null;
 
   const byMeal = useMemo(() => {
@@ -131,10 +139,18 @@ export default function Meals() {
     };
   }, [todayLog]);
 
+  const activeMenuGoal = menuGoal ?? (profile ? profile.fitnessGoal : "maintain");
+  // Дневной план строится под выбранную цель меню — если переключили стиль
+  // меню на неделе, план на сегодня совпадает с первым днём недельного меню.
   const plan = useMemo(() => {
     if (!targets) return null;
-    return generateMealPlan(todayKey(), targets, foods ?? []);
-  }, [targets, foods]);
+    return generateMealPlan(todayKey(), activeMenuGoal, targets);
+  }, [targets, activeMenuGoal]);
+
+  const weeklyPlan = useMemo(() => {
+    if (!targets) return null;
+    return generateWeeklyMealPlan(activeMenuGoal, targets);
+  }, [targets, activeMenuGoal]);
 
   // Записи выбранного «прошлого» дня — для предпросмотра количества.
   const copyLog = useQuery(api.mealLog.getByDate, { date: copyFromDate });
@@ -424,13 +440,16 @@ export default function Meals() {
   return (
     <div className="relative isolate mx-auto max-w-4xl space-y-10">
       <PageAurora />
-      <header>
-        <p className="label-overline text-muted-foreground">Питание</p>
-        <h1 className="m3-headline-large mt-2">Рацион за сегодня</h1>
-        <div
-          aria-hidden
-          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
-        />
+      <header className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="label-overline text-muted-foreground">Питание</p>
+          <h1 className="m3-headline-large mt-2">Рацион за сегодня</h1>
+          <div
+            aria-hidden
+            className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+          />
+        </div>
+        <DishScene className="hidden h-24 w-32 shrink-0 sm:block" />
       </header>
 
       {/* Totals summary — легенда + анимированные кольца макросов */}
@@ -571,6 +590,121 @@ export default function Meals() {
               : `Готово к копированию: ${copyLog!.length} ${pluralRecords(copyLog!.length)} за ${shortDate(copyFromDate)}.`}
         </p>
       </section>
+
+      {/* Недельное меню под цель */}
+      {weeklyPlan && targets && (
+        <section className="space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
+              <DishScene className="hidden size-14 shrink-0 sm:block" />
+              <div className="min-w-0">
+                <p className="label-overline text-muted-foreground">План на неделю</p>
+                <h2 className="m3-title-large mt-1">Недельное меню</h2>
+                <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                  7 разнообразных дней без повторов блюд. Порции и набор адаптированы
+                  под выбранную цель — например при похудении меньше круп и масла,
+                  при наборе массы больше углеводов и белка.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  "lose_weight",
+                  "gain_muscle",
+                  "maintain",
+                  "improve_endurance",
+                  "strength",
+                ] as FitnessGoal[]
+              ).map((g) => (
+                <Chip
+                  key={g}
+                  selected={activeMenuGoal === g}
+                  onClick={() => setMenuGoal(g)}
+                >
+                  {GOAL_LABELS[g]}
+                </Chip>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {weeklyPlan.days.map((day, dIdx) => {
+              const pct = Math.min(
+                100,
+                Math.round((day.calories / targets.calories) * 100),
+              );
+              return (
+                <div
+                  key={day.dateKey}
+                  className="bg-noise card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1"
+                >
+                  <div className="flex items-center justify-between gap-2 border-b bg-gradient-to-r from-secondary-container/70 to-secondary-container/20 px-4 py-2.5">
+                    <span className="label-overline">
+                      {WEEKDAY_SHORT[day.weekday]}
+                      {dIdx === 0 && <span className="text-brand"> · сегодня</span>}
+                    </span>
+                    <span className="text-xs font-semibold num">
+                      {day.calories.toLocaleString("ru-RU")} ккал
+                    </span>
+                  </div>
+
+                  <ul className="divide-y divide-border/60">
+                    {day.meals.map((m) => {
+                      const MealIcon = MEAL_ART[m.mealType].icon;
+                      return (
+                        <li key={m.mealType} className="flex items-start gap-2.5 px-4 py-2.5">
+                          <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary-container/70 text-on-secondary-container">
+                            <MealIcon className="size-3" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                {MEAL_TYPE_LABELS[m.mealType]}
+                              </span>
+                              <span className="shrink-0 text-xs font-medium num">
+                                {m.calories} ккал
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm font-medium leading-snug">
+                              {m.name}
+                            </p>
+                            <p className="mt-1 flex gap-2.5 text-[10px] text-muted-foreground num">
+                              <span>Б {m.protein}</span>
+                              <span>У {m.carbs}</span>
+                              <span>Ж {m.fat}</span>
+                            </p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="border-t px-4 py-3">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <motion.div
+                        className="h-full rounded-full bg-gradient-to-r from-brand to-brand-deep"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{
+                          duration: 0.7,
+                          ease: "easeOut",
+                          delay: 0.08 * dIdx,
+                        }}
+                      />
+                    </div>
+                    <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
+                      <span>Б {day.protein} г</span>
+                      <span>У {day.carbs} г</span>
+                      <span>Ж {day.fat} г</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Meal cards — M3 filled cards с placeholder-иллюстрациями */}
       <section className="grid gap-4 sm:grid-cols-2">
@@ -998,11 +1132,17 @@ export default function Meals() {
       <Dialog open={showPlan} onOpenChange={setShowPlan}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Предложенный план на сегодня</DialogTitle>
-            <DialogDescription>
-              Сгенерирован под вашу цель {targets.calories.toLocaleString("ru-RU")} ккал.
-              После добавления всё можно отредактировать.
-            </DialogDescription>
+            <div className="flex items-start gap-3">
+              <DishScene className="hidden size-12 shrink-0 sm:block" />
+              <div className="min-w-0">
+                <DialogTitle>Предложенный план на сегодня</DialogTitle>
+                <DialogDescription>
+                  Меню под цель «{GOAL_LABELS[activeMenuGoal].toLowerCase()}» —
+                  {targets.calories.toLocaleString("ru-RU")} ккал. Блюда совпадают с первым
+                  днём недельного меню. После добавления всё можно отредактировать.
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
 
           {plan && (
@@ -1016,6 +1156,7 @@ export default function Meals() {
                       </p>
                       <p className="text-xs font-medium num">{m.calories} ккал</p>
                     </div>
+                    <p className="mt-1 text-sm font-medium leading-snug">{m.name}</p>
                     <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground num">
                       <span>Б {m.protein}</span>
                       <span>У {m.carbs}</span>
