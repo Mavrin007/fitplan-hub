@@ -8,6 +8,7 @@ import {
   fitnessGoalValidator,
   genderValidator,
   limitationValidator,
+  trainingStyleValidator,
 } from "./schema";
 import { assertMaxItems, assertRange } from "./validation";
 
@@ -53,6 +54,7 @@ export const upsertProfile = mutation({
     equipment: v.optional(v.array(equipmentValidator)),
     limitations: v.optional(v.array(limitationValidator)),
     preferredTrainingDays: v.optional(v.number()),
+    trainingStyle: v.optional(trainingStyleValidator),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -106,6 +108,7 @@ export const upsertProfile = mutation({
           (LIMITATION_KEYS as readonly string[]).includes(l),
       ),
       preferredTrainingDays: args.preferredTrainingDays,
+      trainingStyle: args.trainingStyle,
       updatedAt: Date.now(),
     };
 

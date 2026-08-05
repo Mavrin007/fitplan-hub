@@ -13,8 +13,20 @@ export type FitnessGoal =
   | "lose_weight"
   | "maintain"
   | "gain_muscle"
-  | "improve_endurance";
+  | "improve_endurance"
+  | "strength";
 export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
+
+/** Предпочтение стиля тренировок — то, КАК пользователю комфортнее
+ *  тренироваться, независимо от цели. Влияет на повторы, отдых и характер
+ *  нагрузки внутри выбранного плана: power — низкие повторы и длинный отдых,
+ *  hypertrophy — объёмные сеты, functional — короткий отдых и комбинированные
+ *  движения, balanced — классические диапазоны. */
+export type TrainingStyle =
+  | "power"
+  | "hypertrophy"
+  | "functional"
+  | "balanced";
 
 /** Ограничения/травмы, которые влияют на подбор упражнений в плане тренировок. */
 export type Limitation = "lower_back" | "knees" | "shoulders";
@@ -51,6 +63,8 @@ export const GOAL_ADJUSTMENTS: Record<FitnessGoal, number> = {
   maintain: 0,
   gain_muscle: 0.1,
   improve_endurance: 0,
+  // Силовой рост идёт на поддержании/лёгком профиците — калории не срезаем.
+  strength: 0,
 };
 
 export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
@@ -66,6 +80,22 @@ export const GOAL_LABELS: Record<FitnessGoal, string> = {
   maintain: "Поддержание веса",
   gain_muscle: "Набор мышечной массы",
   improve_endurance: "Выносливость",
+  strength: "Сила",
+};
+
+export const TRAINING_STYLE_LABELS: Record<TrainingStyle, string> = {
+  power: "Силовой стиль",
+  hypertrophy: "Объёмный стиль",
+  functional: "Функциональный",
+  balanced: "Сбалансированный",
+};
+
+/** Краткая расшифровка стиля для подсказок на форме профиля. */
+export const TRAINING_STYLE_HINTS: Record<TrainingStyle, string> = {
+  power: "3–6 повторов, отдых 2–3 мин, базовые движения",
+  hypertrophy: "10–15 повторов, отдых 45–75 с, больше объёма",
+  functional: "круги, короткий отдых, комбинированная нагрузка",
+  balanced: "классические диапазоны повторов и отдыха",
 };
 
 export const GENDER_LABELS: Record<Gender, string> = {
@@ -97,6 +127,22 @@ export const LIMITATION_DESCRIPTIONS: Record<Limitation, string> = {
   shoulders: "Плечи — без жимов над головой, укрепление ротаторов",
 };
 
+/** Норма воды: миллилитров на килограмм веса в день (~33 мл/кг). */
+export const WATER_ML_PER_KG = 33;
+
+/** Минимальная дневная норма воды, даже для лёгкого веса. */
+export const WATER_MIN_ML = 1500;
+
+/** Дневная цель по воде: ~33 мл на кг веса, округлено до 250 мл,
+ *  минимум 1500 мл. Единый источник правды для Overview и других
+ *  поверхностей, показывающих норму воды. */
+export function waterGoal(weightKg: number): number {
+  return Math.max(
+    WATER_MIN_ML,
+    Math.round((weightKg * WATER_ML_PER_KG) / 250) * 250,
+  );
+}
+
 /** Mifflin–St Jeor basal metabolic rate. */
 export function computeBmr(p: ProfileInput): number {
   const base = 10 * p.weightKg + 6.25 * p.heightCm - 5 * p.age;
@@ -120,9 +166,11 @@ export function computeTargets(p: ProfileInput): Targets {
       ? 2
       : p.fitnessGoal === "lose_weight"
         ? 1.9
-        : p.fitnessGoal === "improve_endurance"
-          ? 1.6
-          : 1.6;
+        : p.fitnessGoal === "strength"
+          ? 1.8
+          : p.fitnessGoal === "improve_endurance"
+            ? 1.6
+            : 1.6;
   const protein = Math.round(p.weightKg * proteinPerKg);
   const fat = Math.round((calories * 0.25) / 9);
   const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));

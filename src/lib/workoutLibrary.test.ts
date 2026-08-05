@@ -348,6 +348,155 @@ describe("generateWorkoutTemplate — структура плана", () => {
   });
 });
 
+describe("generateWorkoutTemplate — цель «Сила»", () => {
+  it("средний уровень: силовой сплит, низкие повторы, темп 3-0-2", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ fitnessGoal: "strength", experienceLevel: "intermediate" }),
+    );
+    expect(plan.splitType).toBe("Силовой сплит");
+    // Базовые движения — низкие повторы и длинный отдых.
+    const squat = plan.days
+      .flatMap((d) => d.exercises)
+      .find((e) => e.name === "Приседания со штангой");
+    expect(squat?.sets).toBe(5);
+    expect(squat?.reps).toBe("5");
+    expect(squat?.restSeconds).toBeGreaterThanOrEqual(240);
+    const weighted = plan.days
+      .flatMap((d) => d.exercises)
+      .find((e) => e.weightKg !== undefined);
+    expect(weighted?.tempo).toBe("3-0-2");
+  });
+
+  it("новичок: силовой фулбоди, 3 тренировки по умолчанию", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        fitnessGoal: "strength",
+        experienceLevel: "beginner",
+        preferredTrainingDays: undefined,
+      }),
+    );
+    expect(plan.splitType).toBe("Силовой фулбоди");
+    expect(plan.sessionsPerWeek).toBe(3);
+    expect(plan.days).toHaveLength(3);
+  });
+
+  it("средний уровень: 4 тренировки по умолчанию", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        fitnessGoal: "strength",
+        experienceLevel: "intermediate",
+        preferredTrainingDays: undefined,
+      }),
+    );
+    expect(plan.sessionsPerWeek).toBe(4);
+  });
+
+  it("объясняет цель и стиль в «как считается» и сводке", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ fitnessGoal: "strength" }),
+    );
+    const bullets = plan.howCalculated ?? [];
+    expect(bullets.some((b) => b.toLowerCase().includes("сила"))).toBe(true);
+    expect(plan.adaptedFor).toContain("фокус на силовые показатели");
+  });
+
+  it("при ограничениях силовой план тоже заменяет рискованные движения", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({
+        fitnessGoal: "strength",
+        experienceLevel: "intermediate",
+        limitations: ["lower_back"],
+      }),
+    );
+    const names = allExerciseNames(plan);
+    expect(names).not.toContain("Становая тяга");
+    expect(names).toContain("Румынская тяга");
+  });
+});
+
+describe("generateWorkoutTemplate — стиль тренировок", () => {
+  const repsOf = (plan: ReturnType<typeof generateWorkoutTemplate>, name: string) =>
+    plan.days
+      .flatMap((d) => d.exercises)
+      .find((e) => e.name === name)?.reps;
+  const restOf = (plan: ReturnType<typeof generateWorkoutTemplate>, name: string) =>
+    plan.days
+      .flatMap((d) => d.exercises)
+      .find((e) => e.name === name)?.restSeconds;
+
+  it("по умолчанию (без стиля) план не меняется", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ trainingStyle: undefined }),
+    );
+    expect(repsOf(plan, "Жим лёжа")).toBe("6–8");
+    expect(restOf(plan, "Жим лёжа")).toBe(120);
+  });
+
+  it("силовой стиль: повторы вниз, отдых длиннее", () => {
+    const plan = generateWorkoutTemplate(baseProfile({ trainingStyle: "power" }));
+    expect(repsOf(plan, "Жим лёжа")).toBe("4–6");
+    expect(restOf(plan, "Жим лёжа")).toBe(150);
+  });
+
+  it("объёмный стиль: повторы вверх, отдых короче", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ trainingStyle: "hypertrophy" }),
+    );
+    expect(repsOf(plan, "Жим лёжа")).toBe("8–10");
+    expect(restOf(plan, "Жим лёжа")).toBe(105);
+  });
+
+  it("функциональный стиль: короткий отдых, повторы вверх", () => {
+    const plan = generateWorkoutTemplate(
+      baseProfile({ trainingStyle: "functional" }),
+    );
+    expect(repsOf(plan, "Жим лёжа")).toBe("7–9");
+    expect(restOf(plan, "Жим лёжа")).toBe(105);
+  });
+
+  it("тайминги и кардио стилем не трогаются", () => {
+    const balanced = generateWorkoutTemplate(
+      baseProfile({ trainingStyle: "balanced" }),
+    );
+    const power = generateWorkoutTemplate(baseProfile({ trainingStyle: "power" }));
+    const plank = (plan: ReturnType<typeof generateWorkoutTemplate>) =>
+      plan.days.flatMap((d) => d.exercises).find((e) => e.name === "Планка");
+    expect(plank(power)?.reps).toBe(plank(balanced)?.reps);
+  });
+
+  it("кардио («30–40 мин») не сдвигается по стилю", () => {
+    const balanced = generateWorkoutTemplate(
+      baseProfile({
+        fitnessGoal: "lose_weight",
+        experienceLevel: "beginner",
+        trainingStyle: "balanced",
+      }),
+    );
+    const power = generateWorkoutTemplate(
+      baseProfile({
+        fitnessGoal: "lose_weight",
+        experienceLevel: "beginner",
+        trainingStyle: "power",
+      }),
+    );
+    const cardio = (plan: ReturnType<typeof generateWorkoutTemplate>) =>
+      plan.days.flatMap((d) => d.exercises).find((e) => e.name === "Ходьба / бег");
+    expect(cardio(power)?.reps).toBe("30–40 мин");
+    expect(cardio(power)?.reps).toBe(cardio(balanced)?.reps);
+    expect(cardio(power)?.restSeconds).toBe(cardio(balanced)?.restSeconds);
+  });
+
+  it("стиль попадает в «как считается» и сигнатуру профиля", () => {
+    const plan = generateWorkoutTemplate(baseProfile({ trainingStyle: "power" }));
+    const bullets = plan.howCalculated ?? [];
+    expect(bullets.some((b) => b.includes("силовой"))).toBe(true);
+    expect(plan.adaptedFor).toContain("стиль: силовой");
+    expect(
+      profileSignature(baseProfile({ trainingStyle: "power" })),
+    ).not.toBe(profileSignature(baseProfile({ trainingStyle: "balanced" })));
+  });
+});
+
 describe("applyProgression — 4-недельный цикл", () => {
   it("строит PLAN_WEEKS недель с фазами", () => {
     const plan = generateWorkoutTemplate(baseProfile());
