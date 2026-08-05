@@ -74,6 +74,9 @@
 /* Material Design 3: Roboto, tonal палитра, elevation-уровни. */
 @theme {
   --font-sans: "Roboto", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Display-гарнитура для заголовков (Onest — современная, с полной
+     кириллицей; фолбэк Roboto при офлайне). */
+  --font-display: "Onest", "Roboto", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   /* M3 elevation 0–5 */
   --shadow-elev-0: none;
@@ -241,6 +244,13 @@
   h2,
   h3 {
     text-wrap: balance;
+    /* Акцентная display-гарнитура: придаёт заголовкам характер и иерархию.
+       Вес и трекинг ниже — ФОЛБЭК для заголовков без M3-классов (напр. 
+       DialogTitle): у элементов с .m3-* приоритет за классами (utilities
+       слой побеждает base), поэтому типографика M3 не меняется. */
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.012em;
   }
   /* Стандартное фокус-кольцо для клавиатурной навигации */
   :focus-visible {
@@ -337,22 +347,14 @@
       );
   }
 
-  /* Тонкая точечная сетка (контролируем плотность через background-size). */
-  .bg-dots {
-    background-image: radial-gradient(
-      color-mix(in oklch, var(--foreground) 7%, transparent) 1px,
-      transparent 1px
-    );
-    background-size: 22px 22px;
+  /* Тонкая текстурная пыль (SVG-шум): добавляет «живость» плоским фонам.
+     Светлая тема — чёрный шум, тёмная — белый, оба едва заметны. */
+  .bg-noise {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/></svg>");
+    background-size: 160px 160px;
   }
-
-  /* Крупная диагональная штриховка — для «эскизных» зон и CTA. */
-  .bg-diagonal {
-    background-image: repeating-linear-gradient(
-      -45deg,
-      color-mix(in oklch, var(--foreground) 4%, transparent) 0 1px,
-      transparent 1px 12px
-    );
+  .dark .bg-noise {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.09'/><rect width='100%25' height='100%25' fill='white' opacity='0.035'/></svg>");
   }
 
   /* Мягкое свечение вокруг объекта (цвет задаётся через --glow). */

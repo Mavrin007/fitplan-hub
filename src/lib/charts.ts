@@ -79,7 +79,15 @@ export const tooltipStyle = {
   borderRadius: 8,
   fontSize: 12,
   color: "var(--foreground)",
+  boxShadow: "0 8px 24px -8px oklch(0 0 0 / 0.3)",
+  padding: "8px 12px",
 } as const;
+
+/** Подсветка ячейки под курсором для столбчатых графиков. */
+export const tooltipCursor = { fill: "var(--muted)" } as const;
+
+/** Скругление верха столбцов: [верхний-левый, верхний-правый, 0, 0]. */
+export const barRadius: [number, number, number, number] = [4, 4, 0, 0];
 
 /**
  * Анимация плавной «прорисовки» линий и областей (`Area`, `Line`).

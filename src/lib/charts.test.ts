@@ -37,13 +37,15 @@ describe("charts — единый стиль графиков", () => {
     });
   });
 
-  it("тултип: фон popover, рамка border, скругление 8, текст 12px", () => {
+  it("тултип: фон popover, рамка border, скругление 8, текст 12px, тень и отступы", () => {
     expect(tooltipStyle).toEqual({
       background: "var(--popover)",
       border: "1px solid var(--border)",
       borderRadius: 8,
       fontSize: 12,
       color: "var(--foreground)",
+      boxShadow: "0 8px 24px -8px oklch(0 0 0 / 0.3)",
+      padding: "8px 12px",
     });
   });
 

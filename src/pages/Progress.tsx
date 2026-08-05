@@ -16,12 +16,15 @@ import {
 } from "recharts";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
+import { ChartScene } from "@/components/illustrations";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import {
   axisProps,
   gridProps,
   tooltipStyle,
+  tooltipCursor,
+  barRadius,
   lineAnim,
   barAnim,
   goalLabel,
@@ -225,6 +228,7 @@ export default function Progress() {
             />
           </div>
           <PeriodToggle value={period} onChange={setPeriod} />
+          <ChartScene className="hidden h-20 w-32 shrink-0 sm:block" />
         </div>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
           Ваши данные в графиках. Последовательность окупается — маленькие
@@ -412,7 +416,7 @@ export default function Progress() {
                   <YAxis width={34} {...axisProps} />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    cursor={{ fill: "var(--muted)" }}
+                    cursor={tooltipCursor}
                   />
                   <ReferenceLine
                     y={targets.calories}
@@ -423,8 +427,9 @@ export default function Progress() {
                   <Bar
                     dataKey="calories"
                     name="ккал"
+                    radius={barRadius}
+                    maxBarSize={32}
                     fill="var(--foreground)"
-                    radius={[2, 2, 0, 0]}
                     {...barAnim}
                   />
                 </BarChart>
@@ -457,7 +462,7 @@ export default function Progress() {
                   <YAxis width={30} {...axisProps} />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    cursor={{ fill: "var(--muted)" }}
+                    cursor={tooltipCursor}
                   />
                   <Bar
                     dataKey="Белки"
@@ -476,7 +481,7 @@ export default function Progress() {
                     dataKey="Жиры"
                     stackId="m"
                     fill="var(--border)"
-                    radius={[2, 2, 0, 0]}
+                    radius={barRadius}
                     {...barAnim}
                   />
                 </BarChart>
@@ -503,13 +508,14 @@ export default function Progress() {
                   <YAxis width={30} allowDecimals={false} {...axisProps} />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    cursor={{ fill: "var(--muted)" }}
+                    cursor={tooltipCursor}
                   />
                   <Bar
                     dataKey="sessions"
                     name="Тренировки"
                     fill="var(--foreground)"
-                    radius={[2, 2, 0, 0]}
+                    radius={barRadius}
+                    maxBarSize={32}
                     {...barAnim}
                   />
                 </BarChart>
