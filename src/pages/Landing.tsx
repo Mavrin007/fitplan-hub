@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { FitnessHero } from "@/components/illustrations";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -618,7 +619,11 @@ export default function Landing() {
             </motion.div>
           </div>
 
-          <MockDashboard />
+          <div className="relative">
+            {/* декоративная фитнес-сцена поверх макета дашборда */}
+            <FitnessHero className="animate-float pointer-events-none absolute -top-10 -right-2 z-10 hidden size-40 drop-shadow-lg sm:block lg:-right-6 lg:size-48" />
+            <MockDashboard />
+          </div>
         </div>
       </section>
 

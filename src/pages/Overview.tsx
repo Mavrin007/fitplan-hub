@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { animate, motion } from "framer-motion";
-import { computeTargets } from "@/lib/nutrition";
+import { WATER_ML_PER_KG, computeTargets, waterGoal } from "@/lib/nutrition";
 import { projectGoal } from "@/lib/projection";
 import {
   todayKey,
@@ -21,6 +21,7 @@ import { Separator } from "@/components/ui/separator";
 import { ProgressRing } from "@/components/progress-ring";
 import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
+import { ChartScene } from "@/components/illustrations";
 import { EmptyState } from "@/components/empty-state";
 import {
   Activity,
@@ -249,18 +250,17 @@ export default function Overview() {
 
   const calPct = targets ? formatPct(calories, targets.calories) : 0;
 
-  // Вода: цель ~33 мл на кг веса, кратно 250, минимум 1500 мл
-  const waterGoal = profile
-    ? Math.max(1500, Math.round((profile.weightKg * 33) / 250) * 250)
-    : 2000;
+  // Вода: цель ~33 мл на кг веса (общий хелпер из lib/nutrition);
+  // без профиля — дефолт 2 л.
+  const waterTarget = profile ? waterGoal(profile.weightKg) : 2000;
   const waterMl = water?.amountMl ?? 0;
-  const waterPct = formatPct(waterMl, waterGoal);
+  const waterPct = formatPct(waterMl, waterTarget);
 
   const handleWater = async (delta: number) => {
     const prev = waterMl;
     try {
       await addWater({ date: todayKey(), amountMl: delta });
-      if (prev < waterGoal && prev + delta >= waterGoal) {
+      if (prev < waterTarget && prev + delta >= waterTarget) {
         toast.success("Цель по воде достигнута! 🎉");
       }
     } catch (err) {
@@ -363,15 +363,18 @@ export default function Overview() {
       }}
     >
       <PageAurora />
-      <motion.header variants={fadeUp}>
-        <p className="label-overline text-muted-foreground">
-          {prettyDate(todayKey())}
-        </p>
-        <h1 className="m3-headline-large mt-2">Сегодня</h1>
-        <div
-          aria-hidden
-          className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
-        />
+      <motion.header variants={fadeUp} className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="label-overline text-muted-foreground">
+            {prettyDate(todayKey())}
+          </p>
+          <h1 className="m3-headline-large mt-2">Сегодня</h1>
+          <div
+            aria-hidden
+            className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+          />
+        </div>
+        <ChartScene className="hidden h-24 w-40 shrink-0 sm:block" />
       </motion.header>
 
       {noProfile ? (
@@ -500,13 +503,13 @@ export default function Overview() {
                   <CountUp value={waterMl} />
                   <span className="text-xl text-muted-foreground">
                     {" "}
-                    / {waterGoal} мл
+                    / {waterTarget} мл
                   </span>
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {waterPct >= 100
                     ? "Цель достигнута — отлично!"
-                    : `Осталось ${(waterGoal - waterMl).toLocaleString("ru-RU")} мл`}
+                    : `Осталось ${(waterTarget - waterMl).toLocaleString("ru-RU")} мл`}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -547,7 +550,7 @@ export default function Overview() {
               />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Цель рассчитана из вашего веса: ~33 мл на кг.
+              Цель рассчитана из вашего веса: ~{WATER_ML_PER_KG} мл на кг.
             </p>
           </motion.section>
 
