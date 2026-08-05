@@ -118,6 +118,62 @@ describe("keyOf — setQuery находит useQuery при любом поря�
   });
 });
 
+describe("queryResults — снимки значений setQuery/useQuery", () => {
+  beforeEach(() => {
+    resetConvexMock();
+  });
+
+  it("мутация фикстуры после setQuery не портит стор мока", () => {
+    const fixture = { entries: [{ name: "Обед", calories: 500 }] };
+    setQuery(api.mealLog.getByDate, { date: "2026-01-01" }, fixture);
+
+    // Тест «по ошибке» правит фикстуру уже после установки — стор обязан
+    // помнить состояние на момент setQuery (как закэшированный ответ сервера).
+    fixture.entries[0].calories = 9999;
+    fixture.entries.push({ name: "Лишнее", calories: 1 });
+
+    expect(useQuery(api.mealLog.getByDate, { date: "2026-01-01" })).toEqual({
+      entries: [{ name: "Обед", calories: 500 }],
+    });
+  });
+
+  it("мутация данных, полученных из useQuery, не портит стор", () => {
+    setQuery(api.profiles.getMyProfile, undefined, { name: "Кирилл", age: 30 });
+
+    const first = useQuery(api.profiles.getMyProfile) as {
+      name: string;
+      age: number;
+    };
+    // Компонент «по ошибке» мутирует объект, который ему вернул хук.
+    first.age = 99;
+
+    // Повторный вызов возвращает исходные данные — стор не задет.
+    const second = useQuery(api.profiles.getMyProfile) as {
+      name: string;
+      age: number;
+    };
+    expect(second).toEqual({ name: "Кирилл", age: 30 });
+    // Каждый вызов отдаёт независимый снимок, а не ссылку на стор.
+    expect(second).not.toBe(first);
+  });
+
+  it("вложенные структуры снимка глубоко развязаны (мутация на любом уровне)", () => {
+    setQuery(api.workouts.getMyPlan, undefined, {
+      days: [{ focus: "Фулбоди", exercises: [{ name: "Приседания", sets: 3 }] }],
+    });
+
+    const plan = useQuery(api.workouts.getMyPlan) as {
+      days: { focus: string; exercises: { name: string; sets: number }[] }[];
+    };
+    plan.days[0].exercises[0].sets = 99;
+    plan.days[0].focus = "Изменено";
+
+    expect(useQuery(api.workouts.getMyPlan)).toEqual({
+      days: [{ focus: "Фулбоди", exercises: [{ name: "Приседания", sets: 3 }] }],
+    });
+  });
+});
+
 describe("mutationCalls — args записываются без мутации", () => {
   beforeEach(() => {
     resetConvexMock();
