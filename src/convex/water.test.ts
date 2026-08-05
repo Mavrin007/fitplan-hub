@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { addWater } from "./water";
+import { addWater, getByDate } from "./water";
 import {
   errorMessage,
   makeConvexDb,
@@ -30,6 +30,52 @@ const runAddWater = (
     _handler: (ctx: { db: ConvexDbMock }, args: AddWaterArgs) => Promise<unknown>;
   }
 )._handler;
+
+const runGetByDate = (
+  getByDate as unknown as {
+    _handler: (
+      ctx: { db: ConvexDbMock },
+      args: { date: string },
+    ) => Promise<unknown>;
+  }
+)._handler;
+
+describe("getByDate", () => {
+  beforeEach(() => {
+    vi.mocked(getAuthUserId).mockReset();
+    vi.mocked(getAuthUserId).mockResolvedValue(USER_ID);
+  });
+
+  it("без сессии возвращает null", async () => {
+    vi.mocked(getAuthUserId).mockResolvedValue(null);
+    const { db } = makeConvexDb();
+    await expect(
+      runGetByDate({ db }, { date: "2026-08-04" }),
+    ).resolves.toBeNull();
+  });
+
+  it("без записи за дату возвращает null", async () => {
+    const { db } = makeConvexDb();
+    await expect(
+      runGetByDate({ db }, { date: "2026-08-04" }),
+    ).resolves.toBeNull();
+  });
+
+  it("возвращает запись пользователя за дату (и не чужую)", async () => {
+    const { db } = makeConvexDb({
+      waterEntries: [
+        { _id: "w1", _creationTime: 0, userId: "user-1", date: "2026-08-04", amountMl: 750 },
+        { _id: "w2", _creationTime: 0, userId: "user-2", date: "2026-08-04", amountMl: 900 },
+      ],
+    });
+    const result = (await runGetByDate(
+      { db },
+      { date: "2026-08-04" },
+    )) as { _id: string; amountMl: number };
+    expect(result._id).toBe("w1");
+    expect(result.amountMl).toBe(750);
+  });
+});
 
 describe("addWater", () => {
   beforeEach(() => {
