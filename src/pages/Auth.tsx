@@ -39,6 +39,9 @@ import { AnimatePresence, motion } from "framer-motion";
 
 interface AuthProps {
   redirectAfterAuth?: string;
+  /** Клиентский cooldown повторной отправки кода (сек). В проде 30; в тестах
+   *  прокидывается 1, чтобы не ждать полминуты реального времени. */
+  resendCooldownSec?: number;
 }
 
 function resolveRedirectAfterAuth(
@@ -56,6 +59,32 @@ function resolveRedirectAfterAuth(
 // не резолвится и не падает — кнопка зависла бы в loading навсегда.
 // Ограничиваем ожидание, чтобы пользователь увидел ошибку, а не вечный спиннер.
 const AUTH_TIMEOUT_MS = 15000;
+
+// Клиентский cooldown повторной отправки кода — защита от спама кнопкой.
+// Сервер жёстче: 60 с (otpRateLimit). Если кликнуть до истечения серверного
+// окна, сервер вернёт «Повторите через N сек.» — таймер пересинхронизируется
+// на N (cooldownFromError), так что расхождение само себя чинит.
+const RESEND_COOLDOWN_SEC = 30;
+
+// Если сервер вернул «Код уже отправлен. Повторите через N сек.» — берём N
+// (уважаем серверный лимит), иначе клиентский cooldown по умолчанию.
+function cooldownFromError(message: string, fallbackSec: number): number {
+  const match = message.match(/через (\d+) сек/);
+  return match ? Math.max(1, Number(match[1])) : fallbackSec;
+}
+
+// Convex-клиент оборачивает серверные ошибки в длинный префикс:
+// «[CONVEX A(auth:signIn)] [Request ID: …] Server Error\nUncaught Error: …».
+// Пользователю показываем только человекочитаемое сообщение после
+// «Uncaught Error: » (оно и есть текст, брошенный в emailOtp.ts/rate-limit).
+function readableError(error: unknown): string {
+  if (error instanceof Error) {
+    const match = error.message.match(/Uncaught Error:\s*([^\n]+)/);
+    // Защита от пустой группы («Uncaught Error: \n»): тогда берём исходник.
+    return match && match[1] ? match[1].trim() : error.message;
+  }
+  return String(error);
+}
 
 function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -75,7 +104,7 @@ function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
   });
 }
 
-function Auth({ redirectAfterAuth }: AuthProps = {}) {
+function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -87,6 +116,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Обратный отсчёт до повторной отправки кода (0 = можно отправлять).
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   // Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
   // и мы показываем их прямо в форме вместо письма. Хук вызывается всегда
@@ -104,6 +135,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
+  // Тикающий отсчёт кнопки «Отправить ещё раз»: раз в секунду до нуля.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -112,14 +150,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       const formData = new FormData(event.currentTarget);
       await withAuthTimeout(signIn("email-otp", formData));
       setStep({ email: formData.get("email") as string });
+      // Сразу после отправки включаем отсчёт — повторная отправка недоступна.
+      setResendCooldown(resendCooldownSec);
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Не удалось отправить код подтверждения. Попробуйте ещё раз.",
-      );
+      setError(readableError(error));
       setIsLoading(false);
     }
   };
@@ -140,6 +176,32 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
+  // Повторная отправка кода без выхода с OTP-шага: снова зовём signIn с тем же
+  // email (серверный otpRateLimit не даст чаще 1 раза в 60с), очищаем ввод и
+  // ошибку. Dev-блок ниже перечитает devOtp.getByEmail и покажет новый код.
+  const handleResendCode = async () => {
+    // Кнопка живёт только на OTP-шаге, но step — объединение типов: сужаем.
+    if (step === "signIn") return;
+    const email = step.email;
+    setIsLoading(true);
+    setError(null);
+    setOtp("");
+    try {
+      await withAuthTimeout(signIn("email-otp", { email }));
+      // Остаёмся на OTP-шаге — devOtpCode обновится через useQuery. Новый
+      // код отправлен: отсчёт заново, чтобы сразу не слать третий раз.
+      setResendCooldown(resendCooldownSec);
+      setIsLoading(false);
+    } catch (error) {
+      console.error("OTP resend error:", error);
+      const message = readableError(error);
+      setError(message);
+      // Отклонение (rate-limit) тоже ставит таймер — на серверный интервал.
+      setResendCooldown(cooldownFromError(message, resendCooldownSec));
+      setIsLoading(false);
+    }
+  };
+
   const handleGuestLogin = async () => {
     setIsLoading(true);
     setError(null);
@@ -148,11 +210,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (error) {
       console.error("Guest login error:", error);
-      setError(
-        `Не удалось войти как гость: ${
-          error instanceof Error ? error.message : "Неизвестная ошибка"
-        }`,
-      );
+      setError(`Не удалось войти как гость: ${readableError(error)}`);
       setIsLoading(false);
     }
   };
@@ -173,11 +231,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       // ?code= — вход завершает клиент auth, и useEffect ниже редиректит.
     } catch (error) {
       console.error("Google sign-in error:", error);
-      setError(
-        `Не удалось войти через Google: ${
-          error instanceof Error ? error.message : "Неизвестная ошибка"
-        }`,
-      );
+      setError(`Не удалось войти через Google: ${readableError(error)}`);
       setIsLoading(false);
     }
   };
@@ -356,10 +410,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       Не получили код?{" "}
                       <button
                         type="button"
-                        onClick={() => setStep("signIn")}
-                        className="underline underline-offset-4 hover:text-foreground"
+                        onClick={handleResendCode}
+                        disabled={isLoading || resendCooldown > 0}
+                        className="underline underline-offset-4 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                       >
-                        Попробовать снова
+                        {resendCooldown > 0
+                          ? `Повторить через ${resendCooldown} с`
+                          : "Отправить ещё раз"}
                       </button>
                     </div>
                   </form>
