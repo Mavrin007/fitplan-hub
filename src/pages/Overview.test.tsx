@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 
 // Мок convex-слоя: стабильные ссылки на функции вместо anyApi-Proxy.
 vi.mock("convex/react", () => import("@/test/convex-react-mock"));
@@ -66,6 +67,45 @@ describe("Overview", () => {
       "href",
       "/dashboard/profile",
     );
+  });
+
+  it("переход: пустое состояние с EmptyState → дашборд после появления профиля", () => {
+    // Данные дня заданы, но профиля ещё нет (null) — страница должна
+    // показать EmptyState, а не скелетон и не дашборд.
+    setQuery(api.profiles.getMyProfile, undefined, null);
+    setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
+    setQuery(api.weightEntries.listMyWeights, {}, []);
+    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
+    setQuery(api.activity.getActivityDays, activityRange(), []);
+    const view = renderWithRouter(<Overview />);
+
+    // До: пустое состояние (заголовок «Сегодня» рендерится всегда — он над
+    // условием; отличаем дашборд по кольцам макросов и водным целям).
+    expect(screen.getByText("Настройте профиль, чтобы начать")).toBeInTheDocument();
+    expect(screen.queryByText("Белки")).not.toBeInTheDocument();
+    expect(screen.queryByText(`/ ${WATER_GOAL} мл`)).not.toBeInTheDocument();
+
+    // Профиль «пришёл» (useQuery перечитывает Map мока) — перерисовываем.
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    view.rerender(
+      <MemoryRouter>
+        <Overview />
+      </MemoryRouter>,
+    );
+
+    // После: дашборд с заголовком, кольцами макросов и пересчитанными целями.
+    expect(screen.queryByText("Настройте профиль, чтобы начать")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Сегодня" })).toBeInTheDocument();
+    for (const label of ["Белки", "Углеводы", "Жиры"]) {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    }
+    // Пересчитанные цели из фикстуры (80 кг, похудение):
+    // калории = round(1780 × 1.55 × 0.85) = 2345 → «/ 2 345»;
+    // вода = max(1500, round(80·33/250)·250) = 2750 мл.
+    expect(screen.getByText("/ 2 345")).toBeInTheDocument();
+    expect(screen.getByText(`/ ${WATER_GOAL} мл`)).toBeInTheDocument();
+    expect(screen.getByText("Цель рассчитана из вашего веса: ~33 мл на кг.")).toBeInTheDocument();
   });
 
   it("с профилем показывает цели, воду, макросы и быстрые действия", () => {

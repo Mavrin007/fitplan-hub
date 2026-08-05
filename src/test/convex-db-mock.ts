@@ -21,7 +21,7 @@ export type ConvexDoc = { _id: string; _creationTime: number } & Record<
 >;
 
 /** Цепочка запросов: withIndex/eq/gte/lte/order возвращают её же (как в
- *  реальном билдере), first/collect/take завершают. */
+ *  реальном билдере), first/unique/collect/take завершают. */
 export interface ConvexQueryChain {
   withIndex: (name: string, fn: (q: ConvexQueryChain) => void) => ConvexQueryChain;
   eq: (f: string, val: unknown) => ConvexQueryChain;
@@ -29,6 +29,7 @@ export interface ConvexQueryChain {
   lte: (f: string, val: unknown) => ConvexQueryChain;
   order: (dir: "asc" | "desc") => ConvexQueryChain;
   first: () => ConvexDoc | undefined;
+  unique: () => ConvexDoc | null;
   collect: () => ConvexDoc[];
   take: (n: number) => ConvexDoc[];
 }
@@ -56,6 +57,7 @@ const DEFAULT_TABLES = [
   "foods",
   "profiles",
   "users",
+  "otpRateLimits",
 ];
 
 export function makeConvexDb(
@@ -112,6 +114,10 @@ export function makeConvexDb(
         // появлении order().first() это надо учесть здесь.
         first() {
           return store[table].filter(match)[0];
+        },
+        // Как реальный Convex: ровно одна строка по фильтру или null.
+        unique() {
+          return store[table].filter(match)[0] ?? null;
         },
         collect() {
           const rows = store[table].filter(match);
