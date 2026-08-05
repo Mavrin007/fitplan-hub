@@ -37,16 +37,58 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Сырой текст файла, включая UTF-8 BOM (если он есть). */
+async function rawText(): Promise<string> {
+  expect(capturedBlob).not.toBeNull();
+  return await capturedBlob!.text();
+}
+
 /** Текст созданного файла без UTF-8 BOM (префикс для Excel). */
 async function csvText(): Promise<string> {
-  expect(capturedBlob).not.toBeNull();
-  return (await capturedBlob!.text()).replace(/^\uFEFF/, "");
+  return (await rawText()).replace(/^\uFEFF/, "");
 }
 
 function downloadedFilename(): string {
   expect(clickedAnchor).not.toBeNull();
   return clickedAnchor!.download;
 }
+
+describe("Excel-совместимость", () => {
+  it("файл начинается с UTF-8 BOM — Excel читает кириллицу без «кракозябр»", async () => {
+    exportWeights([{ date: "2026-08-01", weightKg: 80 }]);
+    expect(capturedBlob).not.toBeNull();
+    const bytes = new Uint8Array(await capturedBlob!.arrayBuffer());
+    // EF BB BF — байты UTF-8 BOM. Через blob.text() его не увидеть:
+    // алгоритм UTF-8 decode по спецификации снимает ведущий BOM.
+    expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]);
+  });
+
+  it("точки в текстовых полях (названия продуктов) не превращаются в запятые", async () => {
+    exportMeals([
+      {
+        date: "2026-08-04",
+        mealType: "lunch",
+        name: "Чай. Липтон",
+        quantity: 1,
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+      },
+    ]);
+    expect(await csvText()).toContain("Чай. Липтон");
+  });
+
+  it("десятичная запятая — только у чисел (даты и целые не меняются)", async () => {
+    exportWeights([
+      { date: "2026-08-01", weightKg: 80.5 },
+      { date: "2026-08-04", weightKg: 79 },
+    ]);
+    expect(await csvText()).toBe(
+      "Дата;Вес (кг)\n2026-08-01;80,5\n2026-08-04;79",
+    );
+  });
+});
 
 describe("exportWeights", () => {
   it("пишет заголовки и веса с десятичной запятой, имя файла — kilo-вес-дата.csv", async () => {
