@@ -2,6 +2,10 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 
+/** Один день активности: дата + число записей (медианы итогов дня).
+ *  Единственный источник правды для фикстур тестов (fixtures.ts). */
+export type ActivityDay = { date: string; count: number };
+
 /** Days with any logged activity (meals, water, workouts or weight check-ins)
  *  inside an inclusive date range, oldest first, with the number of log entries
  *  per day. Powers the "streak + activity calendar" block on the overview page. */

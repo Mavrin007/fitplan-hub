@@ -14,7 +14,25 @@ import type {
   WaterEntryFields,
   WeightEntryFields,
 } from "@/convex/schema";
+import type { ActivityDay } from "@/convex/activity";
 import { todayKey } from "@/lib/dates";
+
+/** Аргументы мутации water.addWater: дата + объём (без служебных полей). */
+export type WaterAddArgs = Pick<WaterEntryFields, "date" | "amountMl">;
+
+/** Поля записи дневника, передаваемые в мутации mealLog (addEntry,
+ *  addEntries, updateEntry) — без служебных полей документа. */
+export type MealLogArgs = Omit<MealLogEntryFields, "userId" | "createdAt">;
+
+/** Аргументы updateEntry: те же поля + id обновляемой записи (не из схемы). */
+export type MealLogUpdateArgs = MealLogArgs & { id: string };
+
+/** Поля продукта для foods.addFood — без служебных полей документа. */
+export type FoodArgs = Omit<FoodFields, "userId" | "createdAt">;
+
+// ActivityDay — из convex/activity.ts (реальный тип возврата getActivityDays),
+// чтобы изменение агрегации (новое поле и т.п.) ловилось на компиляции.
+export type { ActivityDay };
 
 /** Профиль: рост 180, вес 80, цель — похудение. Цель по калориям ~2345 ккал.
  *  userId — брендированный Id<"users">, фикстура использует поддельный. */

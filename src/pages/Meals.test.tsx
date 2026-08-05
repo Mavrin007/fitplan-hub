@@ -9,7 +9,14 @@ vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
-import { profile, type FoodEntry, type MealEntry } from "@/test/fixtures";
+import {
+  profile,
+  type FoodArgs,
+  type FoodEntry,
+  type MealEntry,
+  type MealLogArgs,
+  type MealLogUpdateArgs,
+} from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
 import Meals from "./Meals";
 
@@ -127,7 +134,11 @@ describe("Meals", () => {
     const user = userEvent.setup();
     const yesterday = toDateKey(addDays(new Date(), -1));
     setupMeals();
-    setQuery(api.mealLog.getByDate, { date: yesterday }, [        {
+    setQuery(
+      api.mealLog.getByDate,
+      { date: yesterday },
+      [
+        {
           _id: "y1",
           userId: "u1",
           createdAt: 0,
@@ -139,8 +150,9 @@ describe("Meals", () => {
           protein: 20,
           carbs: 0,
           fat: 13,
-        },
-    ]);
+        } satisfies MealEntry,
+      ],
+    );
     renderWithRouter(<Meals />);
 
     expect(screen.getByText(/Готово к копированию: 1 запись/)).toBeInTheDocument();
@@ -153,11 +165,13 @@ describe("Meals", () => {
         args: [
           {
             entries: expect.arrayContaining([
-              expect.objectContaining({
-                date: todayKey(),
-                mealType: "dinner",
-                name: "Лосось (запечённый)",
-              }),
+              expect.objectContaining(
+                {
+                  date: todayKey(),
+                  mealType: "dinner",
+                  name: "Лосось (запечённый)",
+                } satisfies Partial<MealLogArgs>,
+              ),
             ]),
           },
         ],
@@ -185,6 +199,8 @@ describe("Meals", () => {
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
         path: "mealLog.addEntry",
+        // Литерал проверяется MealLogArgs из схемы — дрейф полей дневника
+        // (смена типа, новое обязательное поле) ломает компиляцию.
         args: [
           {
             date: todayKey(),
@@ -195,7 +211,7 @@ describe("Meals", () => {
             protein: 46.5,
             carbs: 0,
             fat: 5.4,
-          },
+          } satisfies MealLogArgs,
         ],
       }),
     );
@@ -223,7 +239,7 @@ describe("Meals", () => {
             protein: 0,
             carbs: 0,
             fat: 0,
-          },
+          } satisfies FoodArgs,
         ],
       }),
     );
@@ -319,7 +335,11 @@ describe("Meals", () => {
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
         path: "mealLog.updateEntry",
-        args: [expect.objectContaining({ id: "e1", name: "Яйца", calories: 200 })],
+        args: [
+          expect.objectContaining(
+            { id: "e1", name: "Яйца", calories: 200 } satisfies Partial<MealLogUpdateArgs>,
+          ),
+        ],
       }),
     );
     expect(toast.success).toHaveBeenCalledWith("Запись обновлена");

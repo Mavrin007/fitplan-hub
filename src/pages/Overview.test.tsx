@@ -10,7 +10,14 @@ vi.mock("sonner", () => import("@/test/sonner-mock"));
 
 import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
-import { profile, waterEntry, type MealEntry, type WeightEntry } from "@/test/fixtures";
+import {
+  profile,
+  waterEntry,
+  type ActivityDay,
+  type MealEntry,
+  type WaterAddArgs,
+  type WeightEntry,
+} from "@/test/fixtures";
 import { addDays, lastNDays, toDateKey, todayKey } from "@/lib/dates";
 import Overview from "./Overview";
 
@@ -144,7 +151,9 @@ describe("Overview", () => {
 
     expect(convexMock.mutationCalls).toContainEqual({
       path: "water.addWater",
-      args: [{ date: todayKey(), amountMl: 250 }],
+      // Аргумент типизируется WaterAddArgs из схемы — дрейф полей водной
+      // таблицы (смена типа amountMl и т.п.) ломает компиляцию.
+      args: [{ date: todayKey(), amountMl: 250 } satisfies WaterAddArgs],
     });
     expect(toast.success).toHaveBeenCalledWith("Цель по воде достигнута! 🎉");
   });
@@ -159,7 +168,7 @@ describe("Overview", () => {
 
     expect(convexMock.mutationCalls).toContainEqual({
       path: "water.addWater",
-      args: [{ date: todayKey(), amountMl: 250 }],
+      args: [{ date: todayKey(), amountMl: 250 } satisfies WaterAddArgs],
     });
     expect(toast.error).toHaveBeenCalledWith("Не удалось обновить воду");
   });
@@ -217,7 +226,7 @@ describe("Overview", () => {
     setQuery(api.workouts.listLogs, {}, []);
     setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
     setQuery(api.activity.getActivityDays, activityRange(), [
-      { date: todayKey(), count: 1 },
+      { date: todayKey(), count: 1 } satisfies ActivityDay,
     ]);
     renderWithRouter(<Overview />);
 
