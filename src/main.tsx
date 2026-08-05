@@ -31,8 +31,9 @@ function RouteLoading() {
 }
 
 /** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
- *  crashing the whole app (e.g. hook errors in WebContainer environment). */
-class ToolbarErrorBoundary extends React.Component<
+ *  crashing the whole app (e.g. hook errors in WebContainer environment).
+ *  Экспортируется для юнит-тестов. */
+export class ToolbarErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean }
 > {
@@ -49,8 +50,9 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-/** Hard guard so runtime errors never leave the preview as a blank page. */
-class RootErrorBoundary extends React.Component<
+/** Hard guard so runtime errors never leave the preview as a blank page.
+ *  Экспортируется для юнит-тестов. */
+export class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; message: string; stack: string }
 > {
@@ -91,8 +93,9 @@ class RootErrorBoundary extends React.Component<
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 const sentryEnabled = !!SENTRY_DSN;
 
-/** Маскирует персональные данные в строках: почты, JWT, длинные токены. */
-function redactPii(value: string): string {
+/** Маскирует персональные данные в строках: почты, JWT, длинные токены.
+ *  Экспортируется для юнит-тестов (src/main.test.tsx). */
+export function redactPii(value: string): string {
   return value
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
     .replace(
@@ -103,8 +106,9 @@ function redactPii(value: string): string {
     .replace(/\b(?:sk|pk|token|secret)[-_]?[A-Za-z0-9_-]{12,}\b/gi, "[secret]");
 }
 
-/** Рекурсивно маскирует почты/токены в объектах произвольной формы. */
-function scrubPii(value: unknown, seen = new Set<object>()): unknown {
+/** Рекурсивно маскирует почты/токены в объектах произвольной формы.
+ *  Экспортируется для юнит-тестов. */
+export function scrubPii(value: unknown, seen = new Set<object>()): unknown {
   if (typeof value === "string") return redactPii(value);
   if (Array.isArray(value)) return value.map((v) => scrubPii(v, seen));
   if (value && typeof value === "object") {
@@ -116,8 +120,11 @@ function scrubPii(value: unknown, seen = new Set<object>()): unknown {
   return value;
 }
 
-/** beforeSend: убираем PII до того, как событие уйдёт в Sentry. */
-function sanitizeBeforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
+/** beforeSend: убираем PII до того, как событие уйдёт в Sentry.
+ *  Экспортируется для юнит-тестов. */
+export function sanitizeBeforeSend(
+  event: Sentry.ErrorEvent,
+): Sentry.ErrorEvent | null {
   // Пользователь: оставляем только обезличенные поля, без почты/IP/имени.
   if (event.user && typeof event.user === "object") {
     const safe: Record<string, unknown> = {};
