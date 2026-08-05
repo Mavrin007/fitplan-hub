@@ -17,6 +17,7 @@ import type * as foods from "../foods.js";
 import type * as guestStats from "../guestStats.js";
 import type * as http from "../http.js";
 import type * as mealLog from "../mealLog.js";
+import type * as otpRateLimit from "../otpRateLimit.js";
 import type * as profiles from "../profiles.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   guestStats: typeof guestStats;
   http: typeof http;
   mealLog: typeof mealLog;
+  otpRateLimit: typeof otpRateLimit;
   profiles: typeof profiles;
   users: typeof users;
   validation: typeof validation;
