@@ -15,10 +15,14 @@ function csvCell(value: string | number): string {
   return s;
 }
 
-/** Собирает CSV из строк объектов. Ключи — заголовки, значения — ячейки. */
-function toCsv(rows: Record<string, string | number>[]): string {
-  if (rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
+/** Собирает CSV из строк объектов. Заголовки передаются явно и пишутся
+ *  всегда — даже при нуле записей пользователь видит пустой файл с
+ *  колонками, а не «пустоту» из одного BOM. Колонки детерминированы:
+ *  порядок не зависит от порядка ключей в объекте. */
+function toCsv(
+  headers: string[],
+  rows: Record<string, string | number>[],
+): string {
   const lines = [
     headers.join(";"),
     ...rows.map((r) => headers.map((h) => csvCell(r[h] ?? "")).join(";")),
@@ -47,7 +51,10 @@ export function exportWeights(
 ): void {
   download(
     `kilo-вес-${new Date().toISOString().slice(0, 10)}.csv`,
-    toCsv(rows.map((w) => ({ Дата: w.date, "Вес (кг)": w.weightKg }))),
+    toCsv(
+      ["Дата", "Вес (кг)"],
+      rows.map((w) => ({ Дата: w.date, "Вес (кг)": w.weightKg })),
+    ),
   );
 }
 
@@ -67,6 +74,7 @@ export function exportMeals(
   download(
     `kilo-питание-${new Date().toISOString().slice(0, 10)}.csv`,
     toCsv(
+      ["Дата", "Приём", "Продукт", "Порций", "ккал", "Белки (г)", "Углеводы (г)", "Жиры (г)"],
       rows.map((e) => ({
         Дата: e.date,
         "Приём": e.mealType,
@@ -104,7 +112,10 @@ export function exportWorkouts(
   }
   download(
     `kilo-тренировки-${new Date().toISOString().slice(0, 10)}.csv`,
-    toCsv(flat),
+    toCsv(
+      ["Дата", "Тренировка", "Упражнение", "Подходы", "Повторы", "Вес (кг)"],
+      flat,
+    ),
   );
 }
 
@@ -112,7 +123,10 @@ export function exportWorkouts(
 export function exportWater(rows: { date: string; amountMl: number }[]): void {
   download(
     `kilo-вода-${new Date().toISOString().slice(0, 10)}.csv`,
-    toCsv(rows.map((w) => ({ Дата: w.date, "Вода (мл)": w.amountMl }))),
+    toCsv(
+      ["Дата", "Вода (мл)"],
+      rows.map((w) => ({ Дата: w.date, "Вода (мл)": w.amountMl })),
+    ),
   );
 }
 
@@ -131,6 +145,7 @@ export function exportFoods(
   download(
     `kilo-продукты-${new Date().toISOString().slice(0, 10)}.csv`,
     toCsv(
+      ["Название", "Порция", "Ед.", "ккал", "Белки (г)", "Углеводы (г)", "Жиры (г)"],
       rows.map((f) => ({
         Название: f.name,
         "Порция": f.amount,

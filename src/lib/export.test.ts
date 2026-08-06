@@ -111,9 +111,11 @@ describe("exportWeights", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:fake");
   });
 
-  it("пустой список — файл без строк CSV (только BOM)", async () => {
+  it("пустой список — строка заголовков пишется даже без данных", async () => {
+    // Пустой экспорт не должен быть «пустотой из одного BOM»: Excel и Sheets
+    // открывают файл с колонками, в которые сразу можно вносить данные.
     exportWeights([]);
-    expect(await csvText()).toBe("");
+    expect(await csvText()).toBe("Дата;Вес (кг)");
   });
 });
 
@@ -195,6 +197,38 @@ describe("exportWorkouts", () => {
     expect(await csvText()).toBe(
       "Дата;Тренировка;Упражнение;Подходы;Повторы;Вес (кг)\n" +
         '2026-08-02;"Тяга; круговая";Тяга в наклоне;4;8;42,5',
+    );
+  });
+});
+
+describe("пустые экспорты", () => {
+  it("все функции пишут свои заголовки при нуле записей", async () => {
+    exportWeights([]);
+    expect(await csvText()).toBe("Дата;Вес (кг)");
+
+    exportMeals([]);
+    expect(await csvText()).toBe(
+      "Дата;Приём;Продукт;Порций;ккал;Белки (г);Углеводы (г);Жиры (г)",
+    );
+
+    exportWorkouts([]);
+    expect(await csvText()).toBe(
+      "Дата;Тренировка;Упражнение;Подходы;Повторы;Вес (кг)",
+    );
+
+    exportWater([]);
+    expect(await csvText()).toBe("Дата;Вода (мл)");
+
+    exportFoods([]);
+    expect(await csvText()).toBe(
+      "Название;Порция;Ед.;ккал;Белки (г);Углеводы (г);Жиры (г)",
+    );
+  });
+
+  it("тренировки без упражнений всё равно дают заголовки", async () => {
+    exportWorkouts([{ date: "2026-08-03", workoutName: "Тяговая", exercises: [] }]);
+    expect(await csvText()).toBe(
+      "Дата;Тренировка;Упражнение;Подходы;Повторы;Вес (кг)",
     );
   });
 });
