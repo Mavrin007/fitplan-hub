@@ -603,7 +603,7 @@ export default function Profile() {
                 value={form.gender}
                 onValueChange={(v) => set("gender", v as Gender)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Пол" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -668,7 +668,7 @@ export default function Profile() {
                 value={form.activityLevel}
                 onValueChange={(v) => set("activityLevel", v as ActivityLevel)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Уровень активности" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -686,7 +686,7 @@ export default function Profile() {
                 value={form.fitnessGoal}
                 onValueChange={(v) => set("fitnessGoal", v as FitnessGoal)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Цель" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -706,7 +706,7 @@ export default function Profile() {
                   set("experienceLevel", v as ExperienceLevel)
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Уровень подготовки" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -729,7 +729,7 @@ export default function Profile() {
                   set("preferredTrainingDays", Number(v))
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Тренировок в неделю" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -753,7 +753,7 @@ export default function Profile() {
                 value={form.trainingStyle}
                 onValueChange={(v) => set("trainingStyle", v as TrainingStyle)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Стиль тренировок" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -928,8 +928,8 @@ export default function Profile() {
                     bmiInfo.tone === "ok"
                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                       : bmiInfo.tone === "low"
-                        ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                        ? "bg-sky-500/15 text-sky-700 dark:text-sky-400"
+                        : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
                   )}
                 >
                   {bmiInfo.label}
@@ -943,7 +943,7 @@ export default function Profile() {
               {/* Цепочка расчёта */}
               <div className="mt-5 flex flex-wrap items-center gap-2 text-sm">
                 <div className="rounded-md bg-secondary-container px-3 py-2 text-center">
-                  <p className="text-[10px] uppercase tracking-wider text-on-secondary-container/70">
+                  <p className="text-[10px] uppercase tracking-wider text-on-secondary-container">
                     BMR
                   </p>
                   <p className="font-semibold num text-on-secondary-container">
@@ -952,7 +952,7 @@ export default function Profile() {
                 </div>
                 <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
                 <div className="rounded-md bg-surface-variant px-3 py-2 text-center">
-                  <p className="text-[10px] uppercase tracking-wider text-on-surface-variant/70">
+                  <p className="text-[10px] uppercase tracking-wider text-on-surface-variant">
                     ×{ACTIVITY_MULTIPLIERS[form.activityLevel].toFixed(2)} активность
                   </p>
                   <p className="font-semibold num text-on-surface-variant">
@@ -974,10 +974,10 @@ export default function Profile() {
                     className={cn(
                       "text-[10px] uppercase tracking-wider",
                       GOAL_ADJUSTMENTS[form.fitnessGoal] < 0
-                        ? "text-on-error-container/70"
+                        ? "text-on-error-container"
                         : GOAL_ADJUSTMENTS[form.fitnessGoal] > 0
-                          ? "text-on-tertiary-container/70"
-                          : "text-on-secondary-container/70",
+                          ? "text-on-tertiary-container"
+                          : "text-on-secondary-container",
                     )}
                   >
                     {GOAL_ADJUSTMENTS[form.fitnessGoal] < 0

@@ -467,7 +467,7 @@ export default function Workouts() {
               ) : null}
             </p>
             {plan?.adaptedFor && (
-              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                 <Info className="size-3.5 shrink-0" />
                 {plan.adaptedFor}
               </p>
@@ -648,7 +648,7 @@ export default function Workouts() {
                                     </span>
                                   )}
                                   {ex.tempo && (
-                                    <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                    <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-secondary-foreground">
                                       темп {ex.tempo}
                                     </span>
                                   )}
@@ -694,7 +694,7 @@ export default function Workouts() {
                                   {ex.weightKg != null ? `${ex.weightKg} кг · ` : ""}
                                   {ex.sets} × {ex.reps}
                                 </p>
-                                <p className="mt-0.5 flex items-center justify-end gap-1 text-xs text-muted-foreground/70">
+                                <p className="mt-0.5 flex items-center justify-end gap-1 text-xs text-muted-foreground">
                                   <Timer className="size-3" />
                                   {ex.restSeconds > 0 ? `${ex.restSeconds} с` : "—"}
                                 </p>
@@ -837,7 +837,7 @@ export default function Workouts() {
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-lg font-semibold num text-amber-600 dark:text-amber-400">
+                    <p className="text-lg font-semibold num text-amber-700 dark:text-amber-400">
                       {pr.weightKg}
                     </p>
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground">

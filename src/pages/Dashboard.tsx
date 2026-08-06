@@ -182,7 +182,7 @@ export default function Dashboard() {
         {/* Main content */}
         <div className="min-w-0 flex-1">
           {/* Mobile top bar */}
-          <div className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur lg:hidden">
+          <header className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur lg:hidden">
             <div className="flex items-center justify-between px-4 py-3">
               <NavLink to="/" className="flex items-baseline gap-1.5">
                 <span className="text-sm font-semibold tracking-[0.28em] uppercase">
@@ -212,11 +212,11 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-          </div>
+          </header>
 
           {/* Desktop header: greeting + assistant (переключатель темы живёт
               в рейле — не дублируем его здесь) */}
-          <div className="bg-noise sticky top-0 z-10 hidden items-center justify-between border-b bg-background/70 px-8 py-4 backdrop-blur lg:flex lg:px-12">
+          <header className="bg-noise sticky top-0 z-10 hidden items-center justify-between border-b bg-background/70 px-8 py-4 backdrop-blur lg:flex lg:px-12">
             <div>
               <p className="text-sm font-medium">{greeting()}</p>
               <p className="label-overline mt-0.5 text-muted-foreground">{todayLabel()}</p>
@@ -231,7 +231,7 @@ export default function Dashboard() {
                 Спросить ассистента
               </button>
             </div>
-          </div>
+          </header>
 
           <main className="px-5 pt-8 pb-28 sm:px-8 lg:px-12 lg:py-12">
             <Outlet />
