@@ -195,6 +195,25 @@ describe("emailOtp.sendVerificationRequest", () => {
     });
   });
 
+  it("повторная отправка пишет новый код, старый не переиспользуется", async () => {
+    process.env.VLY_EMAIL_DEV_CAPTURE = "1";
+
+    // Две отправки на один адрес (вторая — в новом окне rate-limit 60с,
+    // поэтому rateLimitCheck оба раза разрешает).
+    await send({ identifier: "a@b.c", token: "111111" }, { runMutation });
+    await send({ identifier: "a@b.c", token: "222222" }, { runMutation });
+
+    const inserts = runMutation.mock.calls
+      .filter(([fn]) => fn === devOtpInsert)
+      .map(([, args]) => args as { email: string; code: string; createdAt: number });
+    expect(inserts).toHaveLength(2);
+    expect(inserts.map((a) => a.code)).toEqual(["111111", "222222"]);
+    // Оба раза — один и тот же адрес, но разные коды: старый не отправляется
+    // заново и не переиспользуется при повторной отправке.
+    expect(inserts[0]!.email).toBe(inserts[1]!.email);
+    expect(inserts[0]!.code).not.toBe(inserts[1]!.code);
+  });
+
   it("неуспешный ответ шлюза (success:false) бросает ошибку шлюза", async () => {
     process.env.VLY_INTEGRATION_KEY = "test-key";
     sendMock.mockResolvedValue({ success: false, error: "domain not verified" });

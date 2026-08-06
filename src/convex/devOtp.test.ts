@@ -100,6 +100,20 @@ describe("devOtp", () => {
     expect(store.devOtpCodes.map((d) => d._id)).toEqual(["fresh", "devOtpCodes:1"]);
   });
 
+  it("повторная отправка делает старый код недоступным (одноразовость перехвата)", async () => {
+    const { db, store } = makeConvexDb();
+    // Отправка №1.
+    await runInsert({ db }, { email: "a@b.c", code: "111111", createdAt: 1000 });
+    // Отправка №2 — как после 60-секундного rate-limit в реальном флоу.
+    await runInsert({ db }, { email: "a@b.c", code: "222222", createdAt: 2000 });
+
+    // UI и любой читатель видят только последний код: старый недостижим, даже
+    // несмотря на то, что строка ещё физически жива (её уберёт чистка через 15
+    // минут). Это dev-слой одноразовости: сама верификация — в @convex-dev/auth.
+    await expect(runGet({ db }, { email: "a@b.c" })).resolves.toBe("222222");
+    expect(store.devOtpCodes.map((d) => d.code)).toEqual(["111111", "222222"]);
+  });
+
   it("getByEmail возвращает последний код адреса", async () => {
     const { db } = makeConvexDb({
       devOtpCodes: [
