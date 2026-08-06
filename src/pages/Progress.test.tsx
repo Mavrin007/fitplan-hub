@@ -58,11 +58,19 @@ function weightEntry(date: string, weightKg: number): WeightEntry {
   return { _id: `w-${date}`, userId: "u1", createdAt: 0, date, weightKg };
 }
 
+/** Пустые списки воды и своих продуктов (кнопки экспорта «Вода (0)» и
+ *  «Продукты (0)» без них ушли бы в скелетон). */
+function seedEmptyWaterAndFoods() {
+  setQuery(api.water.listMyWater, {}, []);
+  setQuery(api.foods.listMyFoods, {}, []);
+}
+
 /** Профиль + пустые данные: все графики показывают EmptyChart. */
 function setupEmpty() {
   setQuery(api.profiles.getMyProfile, undefined, profile);
   setQuery(api.weightEntries.listMyWeights, {}, []);
   setQuery(api.workouts.listLogs, {}, []);
+  seedEmptyWaterAndFoods();
   seedMealRanges([]);
 }
 
@@ -80,6 +88,7 @@ describe("Progress", () => {
     setQuery(api.profiles.getMyProfile, undefined, null);
     setQuery(api.weightEntries.listMyWeights, {}, []);
     setQuery(api.workouts.listLogs, {}, []);
+    seedEmptyWaterAndFoods();
     seedMealRanges([]);
     renderWithRouter(<Progress />);
 
@@ -112,10 +121,12 @@ describe("Progress", () => {
     expect(screen.getByText("Приёмов пищи")).toBeInTheDocument();
     expect(screen.getByText("Тренировок")).toBeInTheDocument();
     expect(screen.getByText("Замеров веса")).toBeInTheDocument();
-    // Кнопки экспорта показывают количество записей.
+    // Кнопки экспорта показывают количество записей — все пять типов.
     expect(screen.getByRole("button", { name: /Вес \(0\)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Питание \(0\)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Тренировки \(0\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Вода \(0\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Продукты \(0\)/ })).toBeInTheDocument();
   });
 
   it("с данными рисует графики: вес, калории, макросы, дельту и прогноз", () => {
@@ -128,6 +139,7 @@ describe("Progress", () => {
     setQuery(api.profiles.getMyProfile, undefined, profile);
     setQuery(api.weightEntries.listMyWeights, {}, recent);
     setQuery(api.workouts.listLogs, {}, []);
+    seedEmptyWaterAndFoods();
     const meals = [
       mealEntry("m1", toDateKey(new Date(now.getTime() - 1 * 86400000)), 500),
       mealEntry("m2", todayKey(), 700),
@@ -185,6 +197,7 @@ describe("Progress", () => {
       weightEntry(todayKey(), 79.5),
     ]);
     setQuery(api.workouts.listLogs, {}, []);
+    seedEmptyWaterAndFoods();
     seedMealRanges([]);
     renderWithRouter(<Progress />);
 

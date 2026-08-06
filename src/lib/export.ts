@@ -107,3 +107,39 @@ export function exportWorkouts(
     toCsv(flat),
   );
 }
+
+/** Вода: дата, итог за день (мл). Одна строка на дату — как в таблице. */
+export function exportWater(rows: { date: string; amountMl: number }[]): void {
+  download(
+    `kilo-вода-${new Date().toISOString().slice(0, 10)}.csv`,
+    toCsv(rows.map((w) => ({ Дата: w.date, "Вода (мл)": w.amountMl }))),
+  );
+}
+
+/** Свои продукты: название, порция и единица, ккал, БЖУ. */
+export function exportFoods(
+  rows: {
+    name: string;
+    amount: number;
+    unit: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  }[],
+): void {
+  download(
+    `kilo-продукты-${new Date().toISOString().slice(0, 10)}.csv`,
+    toCsv(
+      rows.map((f) => ({
+        Название: f.name,
+        "Порция": f.amount,
+        "Ед.": f.unit,
+        "ккал": f.calories,
+        "Белки (г)": f.protein,
+        "Углеводы (г)": f.carbs,
+        "Жиры (г)": f.fat,
+      })),
+    ),
+  );
+}

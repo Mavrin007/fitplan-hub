@@ -11,11 +11,19 @@ vi.mock("@/lib/export", () => ({
   exportWeights: vi.fn(),
   exportMeals: vi.fn(),
   exportWorkouts: vi.fn(),
+  exportWater: vi.fn(),
+  exportFoods: vi.fn(),
 }));
 
 import { api, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter } from "@/test/utils";
-import { exportMeals, exportWeights, exportWorkouts } from "@/lib/export";
+import {
+  exportMeals,
+  exportWeights,
+  exportWorkouts,
+  exportWater,
+  exportFoods,
+} from "@/lib/export";
 import { GuestSignOutOverlay } from "./guest-sign-out-overlay";
 
 /** Широкий диапазон дат, которым оверлей запрашивает дневник питания. */
@@ -25,6 +33,8 @@ const EXPORT_RANGE = { from: "0000-01-01", to: "9999-12-31" };
 const exportWeightsMock = vi.mocked(exportWeights);
 const exportMealsMock = vi.mocked(exportMeals);
 const exportWorkoutsMock = vi.mocked(exportWorkouts);
+const exportWaterMock = vi.mocked(exportWater);
+const exportFoodsMock = vi.mocked(exportFoods);
 
 const onCancel = vi.fn();
 const onAttach = vi.fn();
@@ -75,6 +85,20 @@ function setExportData() {
       exercises: [{ name: "Приседания", sets: 1, reps: 8, weightKg: 0 }],
     },
   ]);
+  setQuery(api.water.listMyWater, {}, [
+    { date: "2026-08-05", amountMl: 1750 },
+  ]);
+  setQuery(api.foods.listMyFoods, {}, [
+    {
+      name: "Творог 5%",
+      amount: 150,
+      unit: "г",
+      calories: 165,
+      protein: 20,
+      carbs: 4,
+      fat: 7,
+    },
+  ]);
 }
 
 function renderWithData(count: number) {
@@ -90,6 +114,8 @@ describe("GuestSignOutOverlay", () => {
     exportWeightsMock.mockClear();
     exportMealsMock.mockClear();
     exportWorkoutsMock.mockClear();
+    exportWaterMock.mockClear();
+    exportFoodsMock.mockClear();
   });
 
   it("с записями (hasData=true) показывает количество и кнопку «Привязать почту»", async () => {
@@ -141,7 +167,7 @@ describe("GuestSignOutOverlay", () => {
     ).toBeInTheDocument();
   });
 
-  it("клик по «Скачать свои данные» выгружает все три CSV с реальными строками", async () => {
+  it("клик по «Скачать свои данные» выгружает все пять CSV с реальными строками", async () => {
     const user = userEvent.setup();
     setExportData();
     renderWithData(3);
@@ -172,6 +198,20 @@ describe("GuestSignOutOverlay", () => {
         date: "2026-08-05",
         workoutName: "Фулбоди A",
         exercises: [{ name: "Приседания", sets: 1, reps: 8, weightKg: 0 }],
+      },
+    ]);
+    expect(exportWaterMock).toHaveBeenCalledWith([
+      { date: "2026-08-05", amountMl: 1750 },
+    ]);
+    expect(exportFoodsMock).toHaveBeenCalledWith([
+      {
+        name: "Творог 5%",
+        amount: 150,
+        unit: "г",
+        calories: 165,
+        protein: 20,
+        carbs: 4,
+        fat: 7,
       },
     ]);
     // Скачивание не выходит из сессии и не закрывает диалог.

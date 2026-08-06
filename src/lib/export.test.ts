@@ -6,7 +6,13 @@
  * удвоение кавычек), разворачивание упражнений и имя файла.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exportMeals, exportWeights, exportWorkouts } from "./export";
+import {
+  exportMeals,
+  exportWeights,
+  exportWorkouts,
+  exportWater,
+  exportFoods,
+} from "./export";
 
 let capturedBlob: Blob | null = null;
 let clickedAnchor: HTMLAnchorElement | null = null;
@@ -189,6 +195,42 @@ describe("exportWorkouts", () => {
     expect(await csvText()).toBe(
       "Дата;Тренировка;Упражнение;Подходы;Повторы;Вес (кг)\n" +
         '2026-08-02;"Тяга; круговая";Тяга в наклоне;4;8;42,5',
+    );
+  });
+});
+
+describe("exportWater", () => {
+  it("пишет дату и дневной итог воды, имя файла — kilo-вода-дата.csv", async () => {
+    exportWater([
+      { date: "2026-08-05", amountMl: 1750 },
+      { date: "2026-08-06", amountMl: 2000 },
+    ]);
+    expect(await csvText()).toBe(
+      "Дата;Вода (мл)\n2026-08-05;1750\n2026-08-06;2000",
+    );
+    expect(downloadedFilename()).toMatch(/^kilo-вода-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+});
+
+describe("exportFoods", () => {
+  it("пишет название, порцию с единицей и БЖУ своих продуктов", async () => {
+    exportFoods([
+      {
+        name: "Творог 5%; жирный",
+        amount: 150,
+        unit: "г",
+        calories: 165,
+        protein: 20,
+        carbs: 4,
+        fat: 7,
+      },
+    ]);
+    expect(await csvText()).toBe(
+      "Название;Порция;Ед.;ккал;Белки (г);Углеводы (г);Жиры (г)\n" +
+        '"Творог 5%; жирный";150;г;165;20;4;7',
+    );
+    expect(downloadedFilename()).toMatch(
+      /^kilo-продукты-\d{4}-\d{2}-\d{2}\.csv$/,
     );
   });
 });

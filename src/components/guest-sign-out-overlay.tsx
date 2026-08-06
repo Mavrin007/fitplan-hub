@@ -4,7 +4,13 @@ import { Download, Link2, Loader2, LogOut, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import { pluralRecords } from "@/lib/dates";
-import { exportMeals, exportWeights, exportWorkouts } from "@/lib/export";
+import {
+  exportMeals,
+  exportWeights,
+  exportWorkouts,
+  exportWater,
+  exportFoods,
+} from "@/lib/export";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -79,25 +85,46 @@ export function GuestSignOutOverlay({
     api.workouts.listLogs,
     exportTick > 0 ? {} : "skip",
   );
+  const waterLogs = useQuery(
+    api.water.listMyWater,
+    exportTick > 0 ? {} : "skip",
+  );
+  const foods = useQuery(
+    api.foods.listMyFoods,
+    exportTick > 0 ? {} : "skip",
+  );
   const exportLoading =
     exportTick > 0 &&
-    (weights === undefined || meals === undefined || logs === undefined);
+    (weights === undefined ||
+      meals === undefined ||
+      logs === undefined ||
+      waterLogs === undefined ||
+      foods === undefined);
 
-  // Когда все три запроса ответили — отдаём файлы (три CSV: вес, питание,
-  // тренировки). Функции экспорта сами создают Blob и запускают скачивание.
-  // Гард exportedRef делает выгрузку строго разовой на один клик: повторные
-  // рендеры с теми же ссылками данных не экспортируют заново.
+  // Когда все пять запросов ответили — отдаём файлы (пять CSV: вес, питание,
+  // тренировки, вода, свои продукты). Функции экспорта сами создают Blob и
+  // запускают скачивание. Гард exportedRef делает выгрузку строго разовой на
+  // один клик: повторные рендеры с теми же ссылками данных не экспортируют
+  // заново.
   useEffect(() => {
     if (exportTick === 0) return;
-    if (weights === undefined || meals === undefined || logs === undefined)
+    if (
+      weights === undefined ||
+      meals === undefined ||
+      logs === undefined ||
+      waterLogs === undefined ||
+      foods === undefined
+    )
       return;
     if (exportedRef.current) return;
     exportedRef.current = true;
     exportWeights(weights);
     exportMeals(meals);
     exportWorkouts(logs);
-    toast.success("Данные выгружены — три CSV-файла");
-  }, [exportTick, weights, meals, logs]);
+    exportWater(waterLogs);
+    exportFoods(foods);
+    toast.success("Данные выгружены — пять CSV-файлов");
+  }, [exportTick, weights, meals, logs, waterLogs, foods]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
