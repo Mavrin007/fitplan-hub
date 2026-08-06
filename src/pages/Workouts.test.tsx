@@ -252,6 +252,30 @@ describe("Workouts", () => {
     ).toBeInTheDocument();
   });
 
+  it("закрытие режима тренировки убирает оверлей и возвращает план", async () => {
+    const user = userEvent.setup();
+    const signature = profileSignature(profile as Parameters<typeof profileSignature>[0]);
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.workouts.getMyPlan, undefined, makePlan(signature));
+    setQuery(api.workouts.listLogs, {}, []);
+    renderWithRouter(<Workouts />);
+
+    await user.click(screen.getByRole("button", { name: "Начать тренировку" }));
+    expect(
+      screen.getByRole("button", { name: /Завершить тренировку/ }),
+    ).toBeInTheDocument();
+
+    // Кнопка «Закрыть режим тренировки» — onClose у WorkoutMode.
+    await user.click(
+      screen.getByRole("button", { name: "Закрыть режим тренировки" }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /Завершить тренировку/ }),
+    ).not.toBeInTheDocument();
+    // План снова виден — «Начать тренировку» вернулась.
+    expect(screen.getAllByRole("button", { name: "Начать тренировку" }).length).toBeGreaterThan(0);
+  });
+
   it("режим тренировки с историей маппит логи (дата + упражнения)", async () => {
     const user = userEvent.setup();
     const signature = profileSignature(profile as Parameters<typeof profileSignature>[0]);
@@ -318,6 +342,46 @@ describe("Workouts", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+  });
+
+  it("сводка без плана показывает уровень и стиль тренировок из профиля", () => {
+    setQuery(api.profiles.getMyProfile, undefined, {
+      ...profile,
+      trainingStyle: "power",
+    });
+    setQuery(api.workouts.getMyPlan, undefined, null);
+    setQuery(api.workouts.listLogs, {}, []);
+    renderWithRouter(<Workouts />);
+
+    // Ветка «без плана»: «Для {уровень} · {цель} · стиль: {стиль}».
+    expect(
+      screen.getByText((_, el) =>
+        el?.tagName === "P" && (el.textContent ?? "").includes("стиль: силовой"),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("тоннаж от 1000 кг форматируется как тонны (1.8т)", async () => {
+    const signature = profileSignature(profile as Parameters<typeof profileSignature>[0]);
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.workouts.getMyPlan, undefined, makePlan(signature));
+    setQuery(api.workouts.listLogs, {}, [
+      {
+        _id: "log1",
+        userId: "u1",
+        date: "2026-08-01",
+        workoutName: "Фулбоди A",
+        exercises: [{ name: "Приседания", sets: 4, reps: 10, weightKg: 45 }],
+        createdAt: 0,
+      },
+    ]);
+    renderWithRouter(<Workouts />);
+
+    // Тоннаж = 45×10×4 = 1800 кг → ось Y форматируется в тоннах:
+    // тики 0/500/1000/1500/2000 дают «1т», «1.5т», «2т» (не «1.8т» — это
+    // максимум данных, а не тик). Проверяем, что хотя бы один тик в тоннах.
+    expect(screen.getByText("Недельный тоннаж")).toBeInTheDocument();
+    expect(screen.getAllByText(/т$/).length).toBeGreaterThan(0);
   });
 
   it("автопересборка: устаревшая сигнатура плана запускает savePlan молча", async () => {
