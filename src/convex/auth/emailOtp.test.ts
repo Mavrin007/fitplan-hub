@@ -32,7 +32,7 @@ vi.mock("../_generated/api", () => ({
 
 // internal из _generated/api — это anyApi, он не тянет convex-рантайм; в тестах
 // достаточно убедиться, что runMutation получил ref внутренней функции и args.
-import { emailOtp } from "./emailOtp";
+import { emailOtp, generateVerificationToken } from "./emailOtp";
 
 // sendVerificationRequest типизирован как EmailConfig["sendVerificationRequest"]
 // (сигнатура Auth.js), но наша реализация — (params, ctx). Приводим к тестовой
@@ -50,6 +50,30 @@ const runMutation = vi.fn((fn: unknown, args: unknown) => {
   if (fn === rateLimitCheck) return rateLimitCheck(args);
   if (fn === devOtpInsert) return devOtpInsert(args);
   return Promise.resolve(undefined);
+});
+
+describe("generateVerificationToken — 6-значный цифровой OTP", () => {
+  it("по умолчанию возвращает 6-значный код", () => {
+    const token = generateVerificationToken();
+    expect(token).toMatch(/^\d{6}$/);
+    expect(token).toHaveLength(6);
+  });
+
+  it("код состоит только из цифр (без букв и спецсимволов)", () => {
+    for (let i = 0; i < 50; i++) {
+      expect(generateVerificationToken()).toMatch(/^\d+$/);
+    }
+  });
+
+  it("уважает переданную длину кода", () => {
+    expect(generateVerificationToken(4)).toMatch(/^\d{4}$/);
+    expect(generateVerificationToken(8)).toMatch(/^\d{8}$/);
+    expect(generateVerificationToken(1)).toMatch(/^\d{1}$/);
+  });
+
+  it("не вырождается: два кода подряд не совпадают (P(коллизии) ≈ 1e-6)", () => {
+    expect(generateVerificationToken()).not.toBe(generateVerificationToken());
+  });
 });
 
 describe("emailOtp.sendVerificationRequest", () => {
