@@ -116,8 +116,12 @@ describe("addWater", () => {
   it("границы диапазона (±5000) принимаются", async () => {
     const { db, store } = makeConvexDb();
     await runAddWater({ db }, { date: "2026-08-04", amountMl: 5000 });
-    await runAddWater({ db }, { date: "2026-08-05", amountMl: -5000 });
-    expect(store.waterEntries).toHaveLength(2);
+    // Отрицательная граница валидна, но без существующей записи не создаёт
+    // строку (0 мл = записи нет) — исключение не бросается.
+    await expect(
+      runAddWater({ db }, { date: "2026-08-05", amountMl: -5000 }),
+    ).resolves.toBeNull();
+    expect(store.waterEntries).toHaveLength(1);
   });
 
   it("создаёт запись, если её ещё нет", async () => {
@@ -132,10 +136,12 @@ describe("addWater", () => {
     expect(id).toBe(store.waterEntries[0]._id);
   });
 
-  it("при отсутствии записи отрицательная добавка клампится до 0", async () => {
+  it("при отсутствии записи отрицательная добавка не создаёт запись", async () => {
     const { db, store } = makeConvexDb();
     await runAddWater({ db }, { date: "2026-08-04", amountMl: -250 });
-    expect(store.waterEntries[0].amountMl).toBe(0);
+    // 0 мл = записи нет: строка с нулём не создаётся, иначе счётчик
+    // «Вода (N)» и CSV показывали бы «выпито 0 мл» как отдельную запись.
+    expect(store.waterEntries).toHaveLength(0);
   });
 
   it("суммирует с существующей записью (upsert)", async () => {
@@ -150,14 +156,26 @@ describe("addWater", () => {
     expect(store.waterEntries[0].amountMl).toBe(750);
   });
 
-  it("не уводит итог в минус при переборе (−250 при 200 → 0)", async () => {
+  it("не уводит итог в минус при переборе: обнуление удаляет запись", async () => {
     const { db, store } = makeConvexDb({
       waterEntries: [
         { _id: "w1", _creationTime: 0, userId: "user-1", date: "2026-08-04", amountMl: 200 },
       ],
     });
     await runAddWater({ db }, { date: "2026-08-04", amountMl: -250 });
-    expect(store.waterEntries[0].amountMl).toBe(0);
+    // Итог 0 → запись дня удалена, а не сохранена со значением 0.
+    expect(store.waterEntries).toHaveLength(0);
+  });
+
+  it("обнуление до нуля возвращает id удалённой записи", async () => {
+    const { db, store } = makeConvexDb({
+      waterEntries: [
+        { _id: "w1", _creationTime: 0, userId: "user-1", date: "2026-08-04", amountMl: 200 },
+      ],
+    });
+    const id = await runAddWater({ db }, { date: "2026-08-04", amountMl: -200 });
+    expect(id).toBe("w1");
+    expect(store.waterEntries).toHaveLength(0);
   });
 
   it("не трогает чужие даты и пользователей (фильтр по userId + date)", async () => {
