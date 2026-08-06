@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
+import { readableError } from "@/lib/errors";
 import { FitnessHero } from "@/components/illustrations";
 import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
 
@@ -62,10 +63,12 @@ function resolveRedirectAfterAuth(
 const AUTH_TIMEOUT_MS = 15000;
 
 // Клиентский cooldown повторной отправки кода — защита от спама кнопкой.
-// Сервер жёстче: 60 с (otpRateLimit). Если кликнуть до истечения серверного
-// окна, сервер вернёт «Повторите через N сек.» — таймер пересинхронизируется
-// на N (cooldownFromError), так что расхождение само себя чинит.
-const RESEND_COOLDOWN_SEC = 30;
+// Равен серверному окну otpRateLimit (OTP_RESEND_INTERVAL_MS = 60 с): кнопка
+// деактивирована ровно на серверный интервал, и лишний клик не уходит на
+// бэкенд. Если сервер всё же ответит «Повторите через N сек.» (расхождение
+// часов или смена интервала) — таймер пересинхронизируется на N
+// (cooldownFromError), так что расхождение само себя чинит.
+const RESEND_COOLDOWN_SEC = 60;
 
 // Если сервер вернул «Код уже отправлен. Повторите через N сек.» — берём N
 // (уважаем серверный лимит), иначе клиентский cooldown по умолчанию.
@@ -74,17 +77,11 @@ function cooldownFromError(message: string, fallbackSec: number): number {
   return match ? Math.max(1, Number(match[1])) : fallbackSec;
 }
 
-// Convex-клиент оборачивает серверные ошибки в длинный префикс:
-// «[CONVEX A(auth:signIn)] [Request ID: …] Server Error\nUncaught Error: …».
-// Пользователю показываем только человекочитаемое сообщение после
-// «Uncaught Error: » (оно и есть текст, брошенный в emailOtp.ts/rate-limit).
-function readableError(error: unknown): string {
-  if (error instanceof Error) {
-    const match = error.message.match(/Uncaught Error:\s*([^\n]+)/);
-    // Защита от пустой группы («Uncaught Error: \n»): тогда берём исходник.
-    return match && match[1] ? match[1].trim() : error.message;
-  }
-  return String(error);
+// «Слишком много попыток»: час при долгой блокировке (>= 60 мин), иначе —
+// минуты. 720 сек = 1 попытка в 12 мин при лимите 5/час — покажем «12 мин».
+function formatAttemptWait(sec: number): string {
+  const minutes = Math.max(1, Math.ceil(sec / 60));
+  return minutes >= 60 ? "час" : `${minutes} мин`;
 }
 
 function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -164,10 +161,29 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
 
   const handleOtpSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // FormData строится ДО await'ов: React обнуляет event.currentTarget после
+    // возврата из обработчика, и после pre-check'а ниже он был бы null.
+    const formData = new FormData(event.currentTarget);
     setIsLoading(true);
     setError(null);
     try {
-      const formData = new FormData(event.currentTarget);
+      // Прокси встроенного лимита попыток ввода (@convex-dev/auth, таблица
+      // authRateLimits): при исчерпании библиотека вернула бы generic
+      // «Could not verify code», неотличимый от неверного кода. Пред-проверяем
+      // и показываем понятное сообщение, не тратя попытку на signIn.
+      if (step !== "signIn") {
+        const rate = (await withAuthTimeout(
+          convex.query(api.otpRateLimit.canAttempt, { email: step.email }),
+        )) as { allowed: boolean; retryAfterSec: number } | null | undefined;
+        if (rate && !rate.allowed) {
+          setError(
+            `Слишком много попыток. Подождите ${formatAttemptWait(rate.retryAfterSec)}`,
+          );
+          setIsLoading(false);
+          setOtp("");
+          return;
+        }
+      }
       await withAuthTimeout(signIn("email-otp", formData));
       navigate(redirect);
     } catch (error) {
@@ -218,6 +234,15 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
       setResendCooldown(cooldownFromError(message, resendCooldownSec));
       setIsLoading(false);
     }
+  };
+
+  // Вернуться с OTP-шага на шаг email: сброс ввода, ошибки и отсчёта, чтобы
+  // отправить код на другой адрес («Попробовать снова»).
+  const handleBackToEmail = () => {
+    setStep("signIn");
+    setOtp("");
+    setError(null);
+    setResendCooldown(0);
   };
 
   const handleGuestLogin = async () => {
@@ -436,6 +461,16 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
                         {resendCooldown > 0
                           ? `Повторить через ${resendCooldown} с`
                           : "Отправить ещё раз"}
+                      </button>
+                    </div>
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={handleBackToEmail}
+                        disabled={isLoading}
+                        className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        Попробовать снова
                       </button>
                     </div>
                   </form>

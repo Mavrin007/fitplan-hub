@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConvexError } from "convex/values";
-import { formatConvexError } from "./errors";
+import { formatConvexError, readableError } from "./errors";
 
 describe("formatConvexError", () => {
   it("берёт message из data ConvexError (объект)", () => {
@@ -67,5 +67,35 @@ describe("formatConvexError", () => {
       "Сервер временно недоступен. Попробуйте ещё раз.",
     );
     expect(formatConvexError(42)).toBe("42");
+  });
+});
+
+describe("readableError", () => {
+  it("вытаскивает текст из обёртки Convex-клиента (Uncaught Error: …)", () => {
+    const err = new Error(
+      "[CONVEX A(auth:signIn)] [Request ID: xyz] Server Error\nUncaught Error: Код уже отправлен. Повторите через 45 сек.\n\n  Called by client",
+    );
+    expect(readableError(err)).toBe("Код уже отправлен. Повторите через 45 сек.");
+  });
+
+  it("пустая группа («Uncaught Error: \n») — возвращает исходное сообщение", () => {
+    const err = new Error(
+      "[CONVEX A(auth:signIn)] Server Error\nUncaught Error: \n  Called by client",
+    );
+    expect(readableError(err)).toBe(err.message);
+  });
+
+  it("обычный Error без обёртки — возвращает message", () => {
+    expect(readableError(new Error("Сервер не отвечает"))).toBe(
+      "Сервер не отвечает",
+    );
+  });
+
+  it("не-Error (строки, числа, null, undefined, объект) — String()", () => {
+    expect(readableError("Просто текст")).toBe("Просто текст");
+    expect(readableError(42)).toBe("42");
+    expect(readableError(null)).toBe("null");
+    expect(readableError(undefined)).toBe("undefined");
+    expect(readableError({ foo: 1 })).toBe("[object Object]");
   });
 });

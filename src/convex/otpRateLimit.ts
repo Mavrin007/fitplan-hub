@@ -17,6 +17,11 @@ import { v } from "convex/values";
  */
 export const OTP_RESEND_INTERVAL_MS = 60 * 1000; // 60 секунд
 
+/** Максимум неудачных попыток ВВОДА кода в час — должен совпадать с
+ *  signIn.maxFailedAttempsPerHour в auth.ts (таблица authRateLimits,
+ *  попытки восстанавливаются линейно: 5 на 60 минут). */
+export const MAX_FAILED_ATTEMPTS_PER_HOUR = 5;
+
 /**
  * Read-only проверка «можно ли слать код на email прямо сейчас» — БЕЗ записи.
  *
@@ -47,6 +52,53 @@ export const canSend = query({
       };
     }
     return { allowed: true, retryAfterSec: 0 };
+  },
+});
+
+/**
+ * Read-only прокси встроенного лимита попыток ВВОДА кода.
+ *
+ * Лимит реализует @convex-dev/auth (таблица authRateLimits, формула из
+ * rateLimit.js): attemptsLeft убывает на каждую неудачную попытку и линейно
+ * восстанавливается (maxAttempts на час). При исчерпании библиотека возвращает
+ * из verifyCodeAndSignIn null с generic-ошибкой «Could not verify code» —
+ * клиент не может отличить блокировку от неверного кода.
+ *
+ * Этот запрос повторяет ту же формулу и отдаёт клиенту, можно ли пробовать
+ * код сейчас и сколько ждать — UI показывает «Слишком много попыток» вместо
+ * «код неверен» и не тратит попытку на signIn.
+ */
+export const canAttempt = query({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const now = Date.now();
+    // authRateLimits не входит в типизированные таблицы схемы (authTables
+    // библиотеки) — описываем нужную форму строки локально.
+    const row = (await ctx.db
+      .query("authRateLimits")
+      .withIndex("identifier", (q) => q.eq("identifier", email))
+      .unique()) as
+      | { _id: string; attemptsLeft: number; lastAttemptTime: number }
+      | null;
+    if (row === null) {
+      return {
+        allowed: true,
+        retryAfterSec: 0,
+        attemptsLeft: MAX_FAILED_ATTEMPTS_PER_HOUR,
+      };
+    }
+    // Та же формула, что в rateLimit.js: попытки восстанавливаются линейно.
+    const refillPerMs = MAX_FAILED_ATTEMPTS_PER_HOUR / (60 * 60 * 1000);
+    const attemptsLeft = Math.min(
+      MAX_FAILED_ATTEMPTS_PER_HOUR,
+      row.attemptsLeft + (now - row.lastAttemptTime) * refillPerMs,
+    );
+    if (attemptsLeft >= 1) {
+      return { allowed: true, retryAfterSec: 0, attemptsLeft };
+    }
+    // Секунды до следующей доступной попытки: не хватает (1 - attemptsLeft).
+    const waitSec = Math.ceil((1 - attemptsLeft) / refillPerMs / 1000);
+    return { allowed: false, retryAfterSec: waitSec, attemptsLeft };
   },
 });
 

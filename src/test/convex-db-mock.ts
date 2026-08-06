@@ -88,6 +88,8 @@ const DEFAULT_TABLES = [
   "users",
   "otpRateLimits",
   "devOtpCodes",
+  "authRateLimits", // таблица лимита попыток @convex-dev/auth
+  "authVerificationCodes", // коды верификации (ищет verifyCodeOnly)
 ];
 
 export function makeConvexDb(

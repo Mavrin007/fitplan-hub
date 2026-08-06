@@ -72,7 +72,10 @@ export const api = {
     countMyData: ref("guestStats.countMyData"),
   },
   devOtp: { getByEmail: ref("devOtp.getByEmail") },
-  otpRateLimit: { canSend: ref("otpRateLimit.canSend") },
+  otpRateLimit: {
+    canSend: ref("otpRateLimit.canSend"),
+    canAttempt: ref("otpRateLimit.canAttempt"),
+  },
   users: { currentUser: ref("users.currentUser") },
   assistant: {
     chat: ref("assistant.chat"),

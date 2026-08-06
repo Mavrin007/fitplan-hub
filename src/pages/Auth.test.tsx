@@ -112,6 +112,93 @@ describe("Auth", () => {
     ).toBeEnabled();
   });
 
+  it("rate-limit при отправке кода: signIn отклонён, ошибка показана на шаге email", async () => {
+    const user = userEvent.setup();
+    // Первый вызов signIn (email-шаг) — отклонение с обёрткой Convex-клиента.
+    authMocks.signIn.mockImplementation(async () => {
+      throw new Error(
+        "[CONVEX A(auth:signIn)] [Request ID: x] Server Error\n" +
+          "Uncaught Error: Код уже отправлен. Повторите через 45 сек.\n" +
+          "\n  Called by client",
+      );
+    });
+    renderAuth();
+
+    await user.type(
+      screen.getByPlaceholderText("name@example.com"),
+      "test@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    // Только человекочитаемый текст, без [CONVEX …]/Uncaught Error.
+    expect(
+      await screen.findByText("Код уже отправлен. Повторите через 45 сек."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Uncaught Error/)).not.toBeInTheDocument();
+    // Остаёмся на шаге email — OTP-шаг не открылся.
+    expect(
+      screen.getByRole("heading", { name: "Вход в Кило" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Проверьте почту" }),
+    ).not.toBeInTheDocument();
+    // Форма жива: loading снят, можно попробовать снова.
+    expect(
+      screen.getByRole("button", { name: "Продолжить" }),
+    ).toBeEnabled();
+    expect(authMocks.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("исчерпан лимит попыток: прокси-проверка показывает «Подождите час» и не зовёт signIn", async () => {
+    const user = userEvent.setup();
+    // Прокси лимита попыток ввода: запас исчерпан (attemptsLeft < 1), до
+    // следующей попытки — час. Библиотека в этом случае вернула бы generic
+    // «Could not verify code» — мы должны показать понятное сообщение.
+    setQuery(
+      api.otpRateLimit.canAttempt,
+      { email: "test@example.com" },
+      { allowed: false, retryAfterSec: 3600, attemptsLeft: 0 },
+    );
+    renderAuth();
+    await gotoOtpStep(user);
+
+    await user.type(screen.getByRole("textbox"), "123456");
+    await user.click(screen.getByRole("button", { name: /Подтвердить код/ }));
+
+    expect(
+      await screen.findByText("Слишком много попыток. Подождите час"),
+    ).toBeInTheDocument();
+    // Попытка ввода НЕ отправлялась: signIn вызван только один раз (шаг email).
+    expect(authMocks.signIn).toHaveBeenCalledTimes(1);
+    // Остаёмся на OTP-шаге, generic-ошибка про неверный код не показана.
+    expect(
+      screen.getByRole("heading", { name: "Проверьте почту" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Введённый код подтверждения неверен."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("блокировка с частичным ожиданием показывает минуты", async () => {
+    const user = userEvent.setup();
+    // 720 сек = 12 минут до следующей попытки (1 попытка в 12 мин при 5/час).
+    setQuery(
+      api.otpRateLimit.canAttempt,
+      { email: "test@example.com" },
+      { allowed: false, retryAfterSec: 720, attemptsLeft: 0 },
+    );
+    renderAuth();
+    await gotoOtpStep(user);
+
+    await user.type(screen.getByRole("textbox"), "123456");
+    await user.click(screen.getByRole("button", { name: /Подтвердить код/ }));
+
+    expect(
+      await screen.findByText("Слишком много попыток. Подождите 12 мин"),
+    ).toBeInTheDocument();
+    expect(authMocks.signIn).toHaveBeenCalledTimes(1);
+  });
+
   it("отправка кода зовёт signIn с FormData кода, ошибка не роняет сессию", async () => {
     const user = userEvent.setup();
     renderWithRouter(<Auth />);
@@ -127,6 +214,19 @@ describe("Auth", () => {
     expect(secondCall).toBeInstanceOf(FormData);
     expect(secondCall.get("code")).toBe("123456");
     expect(secondCall.get("email")).toBe("test@example.com");
+  });
+
+  it("после отправки кода кнопка показывает «Повторить через 60 с» и отключена (серверный интервал)", async () => {
+    const user = userEvent.setup();
+    // Без пропа resendCooldownSec — дефолтный серверный интервал 60 с.
+    renderWithRouter(<Auth />);
+    await gotoOtpStep(user);
+
+    // Сразу после отправки кода — автосчётчик от серверного интервала,
+    // кнопка деактивирована до истечения 60 с.
+    expect(
+      screen.getByRole("button", { name: "Повторить через 60 с" }),
+    ).toBeDisabled();
   });
 
   it("«Отправить ещё раз»: таймер блокирует кнопку, затем повторно зовёт signIn", async () => {
@@ -259,6 +359,54 @@ describe("Auth", () => {
     expect(
       screen.getByRole("heading", { name: "Проверьте почту" }),
     ).toBeInTheDocument();
+  });
+
+  it("«Попробовать снова»: возврат на шаг email и повторная отправка с новым адресом очищают ошибку", async () => {
+    const user = userEvent.setup();
+    renderAuth();
+    await gotoOtpStep(user); // первый signIn — test@example.com
+
+    // Показываем ошибку на OTP-шаге (неверный код).
+    await user.type(screen.getByRole("textbox"), "111111");
+    await user.click(screen.getByRole("button", { name: /Подтвердить код/ }));
+    expect(
+      await screen.findByText("Введённый код подтверждения неверен."),
+    ).toBeInTheDocument();
+
+    // Возврат на шаг email: ошибка и ввод кода сброшены.
+    await user.click(screen.getByRole("button", { name: "Попробовать снова" }));
+    expect(
+      await screen.findByRole("heading", { name: "Вход в Кило" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Введённый код подтверждения неверен."),
+    ).not.toBeInTheDocument();
+
+    // Повторная отправка на НОВЫЙ email — второй signIn с новым адресом.
+    await user.type(
+      screen.getByPlaceholderText("name@example.com"),
+      "new@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    // OTP-шаг для нового адреса, ошибки нет.
+    expect(
+      await screen.findByRole("heading", { name: "Проверьте почту" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Мы отправили код на new@example.com."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Введённый код подтверждения неверен."),
+    ).not.toBeInTheDocument();
+    // Три signIn: первый (email), второй (неверный код), третий (новый email).
+    expect(authMocks.signIn).toHaveBeenCalledTimes(3);
+    const firstCall = authMocks.signIn.mock.calls[0][1] as FormData;
+    const failedCall = authMocks.signIn.mock.calls[1][1] as FormData;
+    const retryCall = authMocks.signIn.mock.calls[2][1] as FormData;
+    expect(firstCall.get("email")).toBe("test@example.com");
+    expect(failedCall.get("code")).toBe("111111");
+    expect(retryCall.get("email")).toBe("new@example.com");
   });
 
   it("успешный код уводит на /dashboard и не показывает ошибку", async () => {

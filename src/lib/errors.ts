@@ -58,6 +58,28 @@ export function formatConvexError(err: unknown, fallback?: string): string {
   return text;
 }
 
+/**
+ * Быстрый человекочитаемый разбор ошибки auth/action-вызовов (Auth.tsx).
+ *
+ * Convex-клиент оборачивает серверные ошибки в длинный префикс:
+ * «[CONVEX A(auth:signIn)] [Request ID: …] Server Error\nUncaught Error: …».
+ * Пользователю показываем только текст после «Uncaught Error: » — это и есть
+ * сообщение, брошенное в emailOtp.ts / otpRateLimit.ts. От formatConvexError
+ * отличается намеренно: не переводит служебные сообщения и не подменяет
+ * пустой результат fallback'ом (для auth-флоу важно показать исходный текст,
+ * например серверный rate-limit «Код уже отправлен…»).
+ */
+export function readableError(error: unknown): string {
+  if (error instanceof Error) {
+    // Группа — всё до конца строки после «Uncaught Error: ». Если текста на
+    // строке нет (пустая группа, дальше стек), trim даёт пустоту → исходник.
+    const match = error.message.match(/Uncaught Error:([^\n]*)/);
+    const text = match ? match[1].trim() : "";
+    return text || error.message;
+  }
+  return String(error);
+}
+
 function messageFromData(data: unknown): string | null {
   if (typeof data === "string") {
     return data.trim() || null;
