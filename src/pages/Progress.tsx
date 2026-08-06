@@ -78,8 +78,11 @@ function PeriodToggle({
 
 function EmptyChart({ icon, text }: { icon: ReactNode; text: string }) {
   return (
-    <div className="flex h-[220px] flex-col items-center justify-center gap-2 text-muted-foreground">
-      {icon}
+    <div className="flex h-[220px] flex-col items-center justify-center gap-2.5 text-muted-foreground">
+      <ChartScene className="h-16 w-24 opacity-90" />
+      <span className="flex size-9 items-center justify-center rounded-full bg-secondary/60">
+        {icon}
+      </span>
       <p className="max-w-[220px] text-center text-xs">{text}</p>
     </div>
   );

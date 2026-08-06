@@ -15,6 +15,9 @@ interface EmptyStateProps {
   action?: ReactNode;
   className?: string;
   compact?: boolean;
+  /** Своя иллюстрация вместо фигуры с гантелью (например, тематическая сцена
+   *  из illustrations.tsx — график, фитнес, еда). */
+  illustration?: ReactNode;
 }
 
 /** Минималистичная иллюстрация: фигура с поднятой гантелью + декоративные
@@ -95,6 +98,7 @@ export function EmptyState({
   action,
   className,
   compact,
+  illustration,
 }: EmptyStateProps) {
   return (
     <div
@@ -105,7 +109,7 @@ export function EmptyState({
       )}
     >
       <div className="relative">
-        <EmptyIllustration />
+        {illustration ?? <EmptyIllustration />}
         {Icon && (
           <span className="absolute -right-1 bottom-1 flex size-7 items-center justify-center rounded-full border bg-background text-primary shadow-sm">
             <Icon className="size-3.5" />

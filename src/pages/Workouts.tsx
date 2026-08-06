@@ -727,6 +727,7 @@ export default function Workouts() {
       ) : (
         <EmptyState
           icon={Dumbbell}
+          illustration={<FitnessHero className="h-24 w-32" />}
           title="Плана тренировок пока нет"
           description={
             <>
@@ -766,6 +767,7 @@ export default function Workouts() {
               <EmptyState
                 compact
                 icon={Dumbbell}
+                illustration={<FitnessHero className="h-20 w-24" />}
                 title="Пока нет графика объёма"
                 description="Запишите пару тренировок в режиме «Начать тренировку» — недельный тоннаж появится здесь."
               />
