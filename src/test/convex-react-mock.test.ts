@@ -13,6 +13,7 @@ import {
   convexMock,
   resetConvexMock,
   setQuery,
+  stableKey,
   stableStringify,
   useMutation,
   useQuery,
@@ -85,6 +86,33 @@ describe("stableStringify — порядок ключей args", () => {
     const args = deepFreeze({ ids: [1, 2, 3] });
     expect(() => stableStringify(args)).not.toThrow();
     expect(args).toEqual({ ids: [1, 2, 3] });
+  });
+});
+
+describe("stableKey — канонический ключ args", () => {
+  it("разный порядок свойств даёт один и тот же ключ", () => {
+    expect(stableKey({ a: 1, b: 2 })).toBe(stableKey({ b: 2, a: 1 }));
+  });
+
+  it("undefined нормализуется в null (запрос без args)", () => {
+    expect(stableKey(undefined)).toBe("null");
+    expect(stableKey(null)).toBe("null");
+  });
+
+  it("вложенные объекты сортируются рекурсивно", () => {
+    expect(stableKey({ meta: { z: 1, a: 2 }, date: "2026-01-01" })).toBe(
+      stableKey({ date: "2026-01-01", meta: { a: 2, z: 1 } }),
+    );
+  });
+
+  it("значение совпадает с составным ключом keyOf (путь + stableKey)", () => {
+    // setQuery/useQuery строят ключ как `path:stableKey(args)` — проверяем,
+    // что stableKey — это ровно та каноническая половина.
+    setQuery(api.water.getByDate, { date: "2026-01-01", amountMl: 250 }, 1);
+    setQuery(api.water.getByDate, { amountMl: 250, date: "2026-01-01" }, 2);
+    // Второй setQuery перезаписал тот же ключ — порядок свойств не создал
+    // второй записи, а stableKey их отождествил.
+    expect(useQuery(api.water.getByDate, { date: "2026-01-01", amountMl: 250 })).toBe(2);
   });
 });
 
