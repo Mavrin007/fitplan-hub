@@ -309,13 +309,20 @@ describe("Profile", () => {
     expect(convexMock.mutationCalls).toHaveLength(0);
   });
 
-  it("удаление записи веса вызывает deleteWeight с id записи", async () => {
+  it("удаление записи веса: двухкликовое подтверждение → deleteWeight с id записи", async () => {
     const user = userEvent.setup();
     setupFilled();
     renderWithRouter(<Profile />);
 
-    // Список последних записей: три замера из фикстуры.
-    await user.click(screen.getAllByRole("button", { name: "Удалить запись" })[0]);
+    // Первый клик взводит кнопку («Точно удалить?»), второй — подтверждает.
+    const deleteBtn = screen.getAllByRole("button", { name: "Удалить запись" })[0];
+    await user.click(deleteBtn);
+    expect(
+      screen.getByRole("button", { name: "Точно удалить?" }),
+    ).toBeInTheDocument();
+    expect(convexMock.mutationCalls).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Точно удалить?" }));
 
     expect(convexMock.mutationCalls).toContainEqual({
       path: "weightEntries.deleteWeight",

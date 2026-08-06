@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { ConfirmDelete } from "@/components/confirm-delete";
 import { PageAurora } from "@/components/page-aurora";
 import { SVGAreaChart } from "@/lib/charts";
 import {
@@ -62,7 +63,6 @@ import {
   Plus,
   Scale,
   Target,
-  Trash2,
   Weight,
   Activity,
   ArrowRight,
@@ -1147,14 +1147,11 @@ export default function Profile() {
                 >
                   <span className="text-muted-foreground">{shortDate(w.date)}</span>
                   <span className="font-medium num">{w.weightKg.toFixed(1)} кг</span>
-                  <button
-                    type="button"
-                    onClick={() => deleteWeight({ id: w._id })}
-                    className="text-muted-foreground transition-colors hover:text-destructive"
-                    aria-label="Удалить запись"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
+                  <ConfirmDelete
+                    iconOnly
+                    label="Удалить запись"
+                    onConfirm={() => void deleteWeight({ id: w._id })}
+                  />
                 </div>
               ))}
             </div>
