@@ -358,6 +358,96 @@ function MockWorkout() {
   );
 }
 
+/* Мини-макет недельного меню с ценами — «почему Кило» */
+function MockWeeklyMenu() {
+  const days = [
+    { d: "Пн", meal1: "Овсянка с бананом", meal2: "Борщ с говядиной", price: "≈ 11,4 byn" },
+    { d: "Вт", meal1: "Яичница с тостами", meal2: "Куриный суп с лапшой", price: "≈ 9,8 byn" },
+    { d: "Ср", meal1: "Сырники со сметаной", meal2: "Пшённая каша с тыквой", price: "≈ 10,2 byn" },
+    { d: "Чт", meal1: "Овсяная каша с яблоком", meal2: "Гречка с курицей", price: "≈ 12,6 byn" },
+    { d: "Пт", meal1: "Творог с мёдом", meal2: "Паста с курицей", price: "≈ 13,1 byn" },
+    { d: "Сб", meal1: "Яйца вкрутую", meal2: "Кефир с хлебцами", price: "≈ 7,4 byn" },
+    { d: "Вс", meal1: "Бутерброды с индейкой", meal2: "Овощное рагу", price: "≈ 10,9 byn" },
+  ];
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="flex items-center justify-between border-b px-4 py-2.5">
+        <p className="label-overline text-muted-foreground">Недельное меню · под цель</p>
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <UtensilsCrossed className="size-3" /> 7 дней без повторов
+        </span>
+      </div>
+      <div className="divide-y">
+        {days.map((r, i) => (
+          <motion.div
+            key={r.d}
+            initial={{ opacity: 0, y: 6 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.35, delay: i * 0.05, ease: EASE }}
+            className="flex items-center justify-between gap-3 px-4 py-2"
+          >
+            <span className="w-6 shrink-0 text-[10px] font-semibold text-muted-foreground">
+              {r.d}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs">{r.meal1}</p>
+              <p className="truncate text-[10px] text-muted-foreground">{r.meal2}</p>
+            </div>
+            <span className="shrink-0 text-[10px] num text-muted-foreground">{r.price}</span>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Мини-макет персонализированного плана тренировок — «почему Кило» */
+function MockWorkoutPlan() {
+  const exercises = [
+    { name: "Приседания с опорой", detail: "3 × 8–12", note: "замена · колени", priority: false },
+    { name: "Жим гантелей", detail: "3 × 8–12", note: "7,5 кг", priority: false },
+    { name: "Тяга блока к поясу", detail: "3 × 10–12", note: "приоритет", priority: true },
+    { name: "Планка на коленях", detail: "3 × 30–45с", note: "щадящий вариант", priority: false },
+  ];
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="flex items-center justify-between border-b px-4 py-2.5">
+        <p className="label-overline text-muted-foreground">План тренировок · ваш профиль</p>
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Dumbbell className="size-3" /> 3 раза в неделю
+        </span>
+      </div>
+      <div className="divide-y">
+        {exercises.map((ex, i) => (
+          <motion.div
+            key={ex.name}
+            initial={{ opacity: 0, y: 6 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.35, delay: i * 0.06, ease: EASE }}
+            className="flex items-center justify-between gap-3 px-4 py-2.5"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm">{ex.name}</p>
+              <p className="text-[10px] text-muted-foreground num">{ex.detail}</p>
+            </div>
+            <span
+              className={
+                ex.priority
+                  ? "shrink-0 rounded-sm bg-foreground/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                  : "shrink-0 rounded-sm bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+              }
+            >
+              {ex.note}
+            </span>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* Мини-макет графика прогресса */
 function MockProgress() {
   return (
@@ -493,6 +583,33 @@ const STEPS = [
   { n: "1", title: "Расскажите о себе", body: "Возраст, рост, вес, активность и цель." },
   { n: "2", title: "Получите свои цифры", body: "Дневные калории и макросы, рассчитанные точно." },
   { n: "3", title: "Ешьте, тренируйтесь, повторяйте", body: "Ведите дневник, следуйте плану, следите за трендом." },
+];
+
+const WHY_KILO = [
+  {
+    index: "01",
+    icon: Scale,
+    title: "Цели считаются по вашим цифрам",
+    body: "Калории и макросы зависят от пола, возраста, роста, веса, активности и цели — а не от усреднённого шаблона.",
+  },
+  {
+    index: "02",
+    icon: UtensilsCrossed,
+    title: "Меню, которое реально съесть",
+    body: "Борщ, куриный суп с лапшой, каши на ужин и бюджетные перекусы — без «креветок с картофелем на завтрак». Рядом с каждым блюдом — примерная цена порции.",
+  },
+  {
+    index: "03",
+    icon: Dumbbell,
+    title: "Тренировки под ваш профиль",
+    body: "Инвентарь, ограничения и травмы учитываются: рискованные движения заменяются безопасными аналогами с объяснением.",
+  },
+  {
+    index: "04",
+    icon: TrendingUp,
+    title: "Прогрессия без догадок",
+    body: "4-недельный цикл с весами, повторами и разгрузкой — стартовые веса подстраиваются под прошлые тренировки и оценку усилия.",
+  },
 ];
 
 export default function Landing() {
@@ -677,6 +794,67 @@ export default function Landing() {
                 <span className="absolute bottom-0 left-0 h-px w-0 bg-foreground transition-all duration-300 group-hover:w-full" />
               </motion.div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Why Kilo */}
+      <section className="relative border-t">
+        <div
+          aria-hidden
+          className="bg-grid mask-fade-radial pointer-events-none absolute inset-0 -z-10 opacity-40"
+        />
+        <div className="mx-auto w-full max-w-6xl px-6 py-20">
+          <motion.p {...fade} className="label-overline text-muted-foreground">
+            Почему Кило
+          </motion.p>
+          <motion.h2
+            {...fade}
+            transition={{ ...fade.transition, delay: 0.06 }}
+            className="mt-4 max-w-2xl m3-headline-large"
+          >
+            Не ещё один трекер — система, которая подстраивается под вас.
+          </motion.h2>
+
+          <div className="mt-14 grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
+            {/* Причины */}
+            <div className="space-y-8">
+              {WHY_KILO.map((w, i) => (
+                <motion.div
+                  key={w.index}
+                  initial={{ opacity: 0, y: 16 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: "-60px" }}
+                  transition={{ duration: 0.5, delay: i * 0.07, ease: EASE }}
+                  className="flex gap-4"
+                >
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-card">
+                      <w.icon className="size-4" />
+                    </span>
+                    <span className="text-[9px] num text-muted-foreground">{w.index}</span>
+                  </div>
+                  <div>
+                    <h3 className="m3-title-medium">{w.title}</h3>
+                    <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
+                      {w.body}
+                    </p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Превью реальных фич: меню + план */}
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.98 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true, margin: "-80px" }}
+              transition={{ duration: 0.7, delay: 0.1, ease: EASE }}
+              className="space-y-4"
+            >
+              <MockWeeklyMenu />
+              <MockWorkoutPlan />
+            </motion.div>
           </div>
         </div>
       </section>
