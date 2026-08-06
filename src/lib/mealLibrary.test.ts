@@ -34,6 +34,18 @@ const bulkTargets = computeTargets({
   fitnessGoal: "gain_muscle",
 });
 
+/** Профиль «поддержание веса» из превью: мужчина 30 лет, 175 см, 75 кг,
+ *  умеренная активность — именно у него недельное меню раньше не добирало
+ *  углеводы (Вс–Ср были на 71–80% от цели). */
+const maintainTargets = computeTargets({
+  age: 30,
+  gender: "male",
+  heightCm: 175,
+  weightKg: 75,
+  activityLevel: "moderate",
+  fitnessGoal: "maintain",
+});
+
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
 /** «Ужинные» белки, которых не должно быть в завтраках и перекусах. */
@@ -193,6 +205,36 @@ describe("generateWeeklyMealPlan", () => {
         expect(protein, `${meal.name} без белка`).toBeGreaterThanOrEqual(floor);
       }
       expect(day.protein).toBeGreaterThanOrEqual(bulkTargets.protein * 0.7);
+    }
+  });
+
+  it("неделя «поддержания»: все 7 дней ≥90% по каждому макросу КБЖУ", () => {
+    // Регрессия: углеводы цели поддержания — самые объёмные (374 г при
+    // 2633 ккал), и без высокоуглеводных блюд в пуле жаждущий распределитель
+    // оставлял дни Вс–Ср на 71–80% углеводов. Теперь в пуле достаточно
+    // углеводных завтраков/ужинов, а веса ошибки подчёркивают углеводы —
+    // каждый день недели дотягивает до 90%+ по всем четырём метрикам.
+    const week = generateWeeklyMealPlan("maintain", maintainTargets);
+    expect(week.days).toHaveLength(7);
+    for (const day of week.days) {
+      const pct = (key: "calories" | "protein" | "carbs" | "fat") =>
+        (day[key] / maintainTargets[key]) * 100;
+      expect(
+        pct("calories"),
+        `${day.dateKey}: калории ${day.calories} / ${maintainTargets.calories}`,
+      ).toBeGreaterThanOrEqual(90);
+      expect(
+        pct("protein"),
+        `${day.dateKey}: белки ${day.protein} / ${maintainTargets.protein}`,
+      ).toBeGreaterThanOrEqual(90);
+      expect(
+        pct("carbs"),
+        `${day.dateKey}: углеводы ${day.carbs} / ${maintainTargets.carbs}`,
+      ).toBeGreaterThanOrEqual(90);
+      expect(
+        pct("fat"),
+        `${day.dateKey}: жиры ${day.fat} / ${maintainTargets.fat}`,
+      ).toBeGreaterThanOrEqual(90);
     }
   });
 });
