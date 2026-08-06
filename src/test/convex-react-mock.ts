@@ -111,10 +111,17 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(sortKeys(value));
 }
 
-// args сериализуются стабильно (stableStringify) — порядок свойств не влияет
-// на ключ, поэтому setQuery() и вызов useQuery() компонентом всегда совпадают.
+/** Канонический ключ args: стабильная сериализация с сортировкой ключей,
+ *  undefined нормализуется в null (запрос без args). Единая точка, где args
+ *  превращаются в строку — используйте её для ключей и прямых сравнений. */
+export function stableKey(args: unknown): string {
+  return stableStringify(args ?? null);
+}
+
+// Ключ запроса = путь + канонический ключ args: порядок свойств не влияет на
+// ключ, поэтому setQuery() и вызов useQuery() компонентом всегда совпадают.
 function keyOf(path: string, args: unknown): string {
-  return `${path}:${stableStringify(args ?? null)}`;
+  return `${path}:${stableKey(args)}`;
 }
 
 /**
