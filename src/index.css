@@ -420,6 +420,31 @@
     }
   }
 
+  /* ===== Доступность: уменьшение движения =====
+     При системной настройке prefers-reduced-motion отключаем декоративные
+     бесконечные анимации (aurora, парение, блик) и hover-подъём карточек:
+     они не несут информации и могут вызывать дискомфорт (укачивание,
+     вестибулярные реакции). Плавный скролл тоже выключаем — вместо него
+     мгновенный переход. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-aurora,
+    .animate-float,
+    .animate-shine::after,
+    .animate-pulse {
+      animation: none !important;
+    }
+    .card-lift {
+      transition: none;
+    }
+    .card-lift:hover {
+      transform: none;
+      box-shadow: var(--shadow-elev-1);
+    }
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
   /* ===== M3 type scale (Roboto) ===== */
   .m3-display-large { font-size: 3.5625rem; line-height: 4rem; font-weight: 400; letter-spacing: -0.015625em; }
   .m3-display-medium { font-size: 2.8125rem; line-height: 3.25rem; font-weight: 400; letter-spacing: 0; }

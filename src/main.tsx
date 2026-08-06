@@ -5,6 +5,7 @@ import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import * as Sentry from "@sentry/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
+import { MotionConfig } from "framer-motion";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
@@ -200,7 +201,13 @@ function RouteSyncer() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RootErrorBoundary>
+    {/* reducedMotion="user" — framer-motion анимации (появление карточек,
+        счётчики, кольца) уважают системную настройку prefers-reduced-motion:
+        при включённом уменьшении движения они пропускают анимацию и сразу
+        показывают конечное состояние. CSS-анимации (aurora/float) выключены
+        в index.css тем же медиа-запросом. */}
+    <MotionConfig reducedMotion="user">
+      <RootErrorBoundary>
       <ToolbarErrorBoundary>
         <VlyToolbar />
       </ToolbarErrorBoundary>
@@ -235,6 +242,7 @@ createRoot(document.getElementById("root")!).render(
         </BrowserRouter>
         <Toaster />
       </ConvexAuthProvider>
-    </RootErrorBoundary>
+      </RootErrorBoundary>
+    </MotionConfig>
   </StrictMode>,
 );
