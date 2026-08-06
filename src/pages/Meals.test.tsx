@@ -6,6 +6,17 @@ import userEvent from "@testing-library/user-event";
 vi.mock("convex/react", () => import("@/test/convex-react-mock"));
 vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
 vi.mock("sonner", () => import("@/test/sonner-mock"));
+// Частичный мок mealLibrary: по умолчанию работают реальные генераторы, но
+// тест duplicate-key может подменить generateWeeklyMealPlan фиксированным
+// планом с двумя одинаковыми перекусами в одном дне.
+vi.mock("@/lib/mealLibrary", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mealLibrary")>();
+  return {
+    ...actual,
+    generateWeeklyMealPlan: vi.fn(actual.generateWeeklyMealPlan),
+    generateMealPlan: vi.fn(actual.generateMealPlan),
+  };
+});
 
 import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
@@ -18,6 +29,14 @@ import {
   type MealLogUpdateArgs,
 } from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
+import {
+  generateMealPlan,
+  generateWeeklyMealPlan,
+  type MealType,
+  type PlannedMeal,
+  type WeeklyDay,
+  type WeeklyMealPlan,
+} from "@/lib/mealLibrary";
 import Meals from "./Meals";
 
 /** Список продуктов типизируется FoodEntry (поля из foodsFieldsValidator
@@ -31,6 +50,10 @@ function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: F
 describe("Meals", () => {
   beforeEach(() => {
     resetMocks();
+    // Частичный мок mealLibrary по умолчанию вызывает оригиналы —
+    // возвращаем их после теста, который подменял план на фиксированный.
+    vi.mocked(generateWeeklyMealPlan).mockRestore();
+    vi.mocked(generateMealPlan).mockRestore();
   });
 
   it("без профиля предлагает перейти в профиль", () => {
@@ -359,6 +382,76 @@ describe("Meals", () => {
       }),
     );
     expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
+  });
+
+  // Бывший источник duplicate-key: ключ недельного меню — `${mealType}-${name}`,
+  // поэтому два snack в один день с ОДИНАКОВЫМ названием давали бы дубликат
+  // React-ключа. Тест подменяет generateWeeklyMealPlan фиксированным планом
+  // «набора массы» с двумя одинаковыми перекусами в дне и требует, чтобы
+  // рендер не уронил duplicate-key предупреждение в консоль.
+  it("5-приёмное меню «Набор массы»: два одинаковых перекуса в дне не дают duplicate-key", async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      setupMeals();
+
+      // План недели из 5 приёмов в день; в первом дне два snack
+      // с одинаковым именем «Протеиновый батончик» — ключ `snack-…`
+      // совпадал бы дважды.
+      const meal = (mealType: MealType, name: string): PlannedMeal => ({
+        mealType,
+        name,
+        foods: [],
+        calories: 100,
+        protein: 10,
+        carbs: 20,
+        fat: 5,
+        priceByn: 1,
+      });
+      const day = (i: number): WeeklyDay => {
+        const meals: PlannedMeal[] = [
+          meal("breakfast", "Овсянка с бананом"),
+          meal("lunch", "Курица с рисом"),
+          meal("dinner", "Гречка с говядиной"),
+          meal("snack", "Протеиновый батончик"),
+          meal("snack", i === 0 ? "Протеиновый батончик" : "Кефир с бананом"),
+        ];
+        return {
+          dateKey: toDateKey(addDays(new Date(), i)),
+          weekday: i,
+          meals,
+          calories: meals.reduce((s, m) => s + m.calories, 0),
+          protein: 40,
+          carbs: 80,
+          fat: 20,
+        };
+      };
+      const plan: WeeklyMealPlan = {
+        goal: "gain_muscle",
+        days: Array.from({ length: 7 }, (_, i) => day(i)),
+      };
+      vi.mocked(generateWeeklyMealPlan).mockReturnValue(plan);
+
+      renderWithRouter(<Meals />);
+
+      // Переключаем недельное меню на «Набор массы» — 5 приёмов в день.
+      await user.click(screen.getByRole("button", { name: "Набор мышечной массы" }));
+      expect(screen.getByText(/5 приёмов/)).toBeInTheDocument();
+      expect(vi.mocked(generateWeeklyMealPlan)).toHaveBeenCalledWith(
+        "gain_muscle",
+        expect.anything(),
+      );
+
+      // Два одинаковых перекуса отрендерены в первом дне (2 + 1×6 = 8 раз),
+      // без duplicate-key предупреждений React.
+      expect(screen.getAllByText("Протеиновый батончик")).toHaveLength(8);
+      const dupKeyErrors = errorSpy.mock.calls.filter((args) =>
+        /same key|duplicate key/i.test(String(args[0] ?? "")),
+      );
+      expect(dupKeyErrors).toHaveLength(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("редактирует запись: диалог предзаполнен, изменения сохраняются", async () => {

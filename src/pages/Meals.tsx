@@ -701,13 +701,15 @@ export default function Meals() {
                   </div>
 
                   <ul className="divide-y divide-border/60">
-                    {day.meals.map((m) => {
+                    {day.meals.map((m, mi) => {
                       const MealIcon = MEAL_ART[m.mealType].icon;
                       return (
                         // key должен быть уникальным: при «наборе массы» в дне два
-                        // перекуса (mealType «snack»), одного типа недостаточно.
+                        // перекуса (mealType «snack»), одного типа недостаточно,
+                        // а одинаковых названий в дне тоже не исключить — поэтому
+                        // добавляем индекс приёма в ключ.
                         <li
-                          key={`${m.mealType}-${m.name}`}
+                          key={`${day.dateKey}-${mi}-${m.mealType}-${m.name}`}
                           className="flex items-start gap-2.5 px-4 py-2.5"
                         >
                           <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary-container/70 text-on-secondary-container">
@@ -1210,10 +1212,12 @@ export default function Meals() {
           {plan && (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
-                {plan.meals.map((m: PlannedMeal) => (
-                  // key: тип + название — при «наборе массы» перекусов два.
+                {plan.meals.map((m: PlannedMeal, mi) => (
+                  // key: тип + название + индекс — при «наборе массы» перекусов
+                  // два, и одинаковых названий в один день тоже нельзя
+                  // исключить на 100% (защита от duplicate-key).
                   <div
-                    key={`${m.mealType}-${m.name}`}
+                    key={`${mi}-${m.mealType}-${m.name}`}
                     className="rounded-xl border bg-card p-4 shadow-elev-1"
                   >
                     <div className="flex items-baseline justify-between gap-2">
