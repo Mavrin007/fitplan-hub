@@ -546,7 +546,7 @@ export default function Meals() {
               label="Белки"
               value={totals.protein}
               target={targets.protein}
-              color="var(--foreground)"
+              color="var(--macro-protein)"
               delay={0.15}
               center="percent"
             />
@@ -554,7 +554,7 @@ export default function Meals() {
               label="Углеводы"
               value={totals.carbs}
               target={targets.carbs}
-              color="var(--muted-foreground)"
+              color="var(--macro-carbs)"
               delay={0.25}
               center="percent"
             />
@@ -562,7 +562,7 @@ export default function Meals() {
               label="Жиры"
               value={totals.fat}
               target={targets.fat}
-              color="var(--border)"
+              color="var(--macro-fat)"
               delay={0.35}
               center="percent"
             />

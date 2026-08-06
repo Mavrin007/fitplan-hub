@@ -118,6 +118,10 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  /* Кольца макросов: белки — мятный, углеводы — янтарный, жиры — фиолетовый */
+  --macro-protein: oklch(0.5 0.12 184);
+  --macro-carbs: oklch(0.68 0.15 82);
+  --macro-fat: oklch(0.55 0.2 300);
   --sidebar: oklch(0.97 0.004 195);
   --sidebar-foreground: oklch(0.16 0.005 195);
   --sidebar-primary: oklch(0.45 0.11 185);
@@ -185,6 +189,10 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+  /* Кольца макросов: белки — мятный, углеводы — янтарный, жиры — фиолетовый */
+  --macro-protein: oklch(0.75 0.13 184);
+  --macro-carbs: oklch(0.8 0.16 82);
+  --macro-fat: oklch(0.72 0.18 300);
   --sidebar: oklch(0.2 0.006 195);
   --sidebar-foreground: oklch(0.93 0.005 195);
   --sidebar-primary: oklch(0.78 0.09 185);

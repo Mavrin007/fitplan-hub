@@ -249,6 +249,12 @@ export default function Overview() {
   const fat = (todayLog ?? []).reduce((s, e) => s + e.fat, 0);
 
   const calPct = targets ? formatPct(calories, targets.calories) : 0;
+  // Перебор калорий: на сколько процентов превысили цель (для кольца).
+  const overCalPct =
+    targets && calories > targets.calories
+      ? ((calories / targets.calories) - 1) * 100
+      : 0;
+  const isCalOver = overCalPct > 0;
 
   // Вода: цель ~33 мл на кг веса (общий хелпер из lib/nutrition);
   // без профиля — дефолт 2 л.
@@ -410,9 +416,13 @@ export default function Overview() {
                   </span>
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {calories > targets!.calories
-                    ? "Превышение нормы"
-                    : `Осталось ${(targets!.calories - calories).toLocaleString("ru-RU")} ккал`}
+                  {calories > targets!.calories ? (
+                    <span className="font-medium text-destructive">
+                      Превышение нормы
+                    </span>
+                  ) : (
+                    `Осталось ${(targets!.calories - calories).toLocaleString("ru-RU")} ккал`
+                  )}
                 </p>
               </div>
               <ProgressRing
@@ -421,19 +431,36 @@ export default function Overview() {
                 size={120}
                 stroke={9}
                 color="var(--brand)"
+                overColor="var(--destructive)"
                 delay={0.1}
               >
-                <span className="text-2xl font-semibold num">
-                  <CountUp value={calPct} />%
-                </span>
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                  от цели
-                </span>
+                {isCalOver ? (
+                  <>
+                    <span className="text-2xl font-semibold num text-destructive">
+                      +{overCalPct < 1 ? overCalPct.toFixed(1) : Math.round(overCalPct)}%
+                    </span>
+                    <span className="text-[9px] font-semibold uppercase tracking-wider text-destructive">
+                      сверх нормы
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-semibold num">
+                      <CountUp value={calPct} />%
+                    </span>
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                      от цели
+                    </span>
+                  </>
+                )}
               </ProgressRing>
             </div>
             <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <motion.div
-                className="h-full rounded-full bg-brand"
+                className={cn(
+                  "h-full rounded-full",
+                  isCalOver ? "bg-destructive" : "bg-brand",
+                )}
                 initial={{ width: 0 }}
                 animate={{ width: `${calPct}%` }}
                 transition={{ duration: 0.9, ease: "easeOut", delay: 0.15 }}
@@ -446,9 +473,9 @@ export default function Overview() {
             variants={fadeUp}
             className="card-lift grid grid-cols-3 gap-4 rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
           >
-            <MacroRing label="Белки" value={protein} target={targets!.protein} color="var(--foreground)" delay={0.2} />
-            <MacroRing label="Углеводы" value={carbs} target={targets!.carbs} color="var(--muted-foreground)" delay={0.3} />
-            <MacroRing label="Жиры" value={fat} target={targets!.fat} color="var(--border)" delay={0.4} />
+            <MacroRing label="Белки" value={protein} target={targets!.protein} color="var(--macro-protein)" delay={0.2} />
+            <MacroRing label="Углеводы" value={carbs} target={targets!.carbs} color="var(--macro-carbs)" delay={0.3} />
+            <MacroRing label="Жиры" value={fat} target={targets!.fat} color="var(--macro-fat)" delay={0.4} />
           </motion.section>
 
           {/* Активность: серия дней + календарь */}

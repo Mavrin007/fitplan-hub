@@ -9,8 +9,13 @@ describe("ProgressRing", () => {
     expect(screen.getByRole("img", { name: "50% от цели" })).toBeInTheDocument();
   });
 
-  it("клампит значение сверху (150/100 → 100%)", () => {
+  it("при переборе (150/100) сигналит превышение в aria-label", () => {
     render(<ProgressRing value={150} max={100} />);
+    expect(screen.getByRole("img", { name: "Превышение на 50%" })).toBeInTheDocument();
+  });
+
+  it("при переборе не клампит дугу в aria-label (100% ровно — от цели)", () => {
+    render(<ProgressRing value={100} max={100} />);
     expect(screen.getByRole("img", { name: "100% от цели" })).toBeInTheDocument();
   });
 
@@ -49,8 +54,16 @@ describe("MacroRing", () => {
     expect(screen.getByRole("img", { name: "0% от цели" })).toBeInTheDocument();
   });
 
-  it("клампит процент на 100", () => {
+  it("при переборе показывает перебор (+100%) и красную подсветку", () => {
     render(<MacroRing label="Белки" value={200} target={100} color="#f00" center="percent" />);
-    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("+100%")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Превышение на 100%" })).toBeInTheDocument();
+    // Значение в центре подсвечивается красным (деструктивный цвет).
+    expect(screen.getByText("200").className).toContain("text-destructive");
+  });
+
+  it("в режиме target при переборе показывает перебор в граммах (+100 г)", () => {
+    render(<MacroRing label="Белки" value={200} target={100} color="#f00" />);
+    expect(screen.getByText("+100 г")).toBeInTheDocument();
   });
 });
