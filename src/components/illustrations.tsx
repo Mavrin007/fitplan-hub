@@ -173,3 +173,43 @@ export function ChartScene({ className }: { className?: string }) {
     </svg>
   );
 }
+
+/** Сцена ИИ-ассистента: диалоговое окно с пузырём сообщения и искрой —
+ *  для пустого чата и подсказок ассистента. */
+export function AssistantScene({ className }: { className?: string }) {
+  const uid = useId();
+  const gradId = `asst-${uid}`;
+  return (
+    <svg viewBox="0 0 200 120" className={className} role="presentation" aria-hidden>
+      <defs>{useGradient(gradId, "var(--primary)", "var(--brand)", 0.2, 0.04)}</defs>
+
+      {/* мягкий фон-пятно */}
+      <circle cx="100" cy="60" r="50" fill={`url(#${gradId})`} />
+
+      {/* окно чата: карточка + пузырь сообщения с хвостиком */}
+      <g
+        stroke="var(--foreground)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        opacity="0.9"
+      >
+        <rect x="52" y="34" width="96" height="46" rx="10" fill="var(--background)" />
+        {/* три точки-сообщения */}
+        <circle cx="68" cy="57" r="3" fill="var(--muted-foreground)" />
+        <circle cx="80" cy="57" r="3" fill="var(--muted-foreground)" />
+        <circle cx="92" cy="57" r="3" fill="var(--muted-foreground)" />
+        {/* пузырь ответа */}
+        <path d="M104 57 h24 a6 6 0 0 1 6 6 v8 q-4 -4 -8 -4 h-22 a6 6 0 0 1 -6 -6 v-4 a6 6 0 0 1 6 -6 z" fill="var(--brand)" stroke="var(--brand)" opacity="0.85" />
+      </g>
+
+      {/* искра-акцент */}
+      <g stroke="var(--brand)" strokeWidth="2.2" strokeLinecap="round" opacity="0.9">
+        <path d="M144 40 l3.5 3.5 M151 40 l-3.5 3.5" />
+        <path d="M56 84 l2.5 2.5 M61 84 l-2.5 2.5" opacity="0.7" />
+      </g>
+    </svg>
+  );
+}
+

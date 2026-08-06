@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
+import { AssistantScene } from "@/components/illustrations";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -240,7 +241,8 @@ export function AssistantChat() {
           >
             {!canChat ? (
               <div className="rounded-lg border border-dashed p-4 text-center">
-                <p className="label-overline text-muted-foreground">Кило AI</p>
+                <AssistantScene className="mx-auto h-20 w-32" />
+                <p className="label-overline mt-2 text-muted-foreground">Кило AI</p>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   Ассистент видит ваши данные — калории, макросы, тренировки и
                   вес. Войдите, чтобы начать общение и записывать всё через чат.
@@ -258,7 +260,8 @@ export function AssistantChat() {
               <>
                 {showIntro && (
                   <div className="rounded-lg border border-dashed p-4 text-center">
-                    <p className="label-overline text-muted-foreground">Кило AI</p>
+                    <AssistantScene className="mx-auto h-20 w-32" />
+                    <p className="label-overline mt-2 text-muted-foreground">Кило AI</p>
                     <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                       Спросите про калории, макросы, план питания или тренировки.
                       <br />

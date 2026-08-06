@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/input-otp";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
+import { FitnessHero } from "@/components/illustrations";
 import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
 
 /** Официальная 4-цветная эмблема Google (встроенный SVG — без внешних иконок). */
@@ -279,7 +280,8 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
               transition={{ duration: 0.28, ease: "easeOut" }}
             >
               <div className="text-center">
-                <p className="label-overline text-muted-foreground">
+                <FitnessHero className="mx-auto h-20 w-28" />
+                <p className="label-overline mt-2 text-muted-foreground">
                   {isOtp ? "Подтверждение" : "Начать"}
                 </p>
                 <h1 className="m3-headline-small mt-3">
