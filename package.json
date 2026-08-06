@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@auth/core": "^0.41.3",
     "@convex-dev/auth": "^0.0.94",
     "@oslojs/crypto": "^1.0.1",
     "@radix-ui/react-dialog": "^1.1.15",

@@ -12,6 +12,7 @@ This project uses the following tech stack:
 - Lucide Icons (for icons)
 - Convex (for backend & database)
 - Convex Auth (for authentication)
+- Auth.js Core (`@auth/core`, direct dependency for OAuth providers like Google)
 - Framer Motion (for animations)
 
 All relevant files live in the 'src' directory.
@@ -112,7 +113,17 @@ locally (see `.freebuff/run.md`):
 - `AUTH_GOOGLE_SECRET` → OAuth Client Secret
 
 These are read automatically by `@auth/core/providers/google` (Auth.js
-convention: `AUTH_<PROVIDER_ID>_ID` / `AUTH_<PROVIDER_ID>_SECRET`).
+convention: `AUTH_<PROVIDER_ID>_ID` / `AUTH_<PROVIDER_ID>_SECRET`;
+`@auth/core` is a **direct** dependency — `src/convex/auth.ts` imports
+`Google` from `@auth/core/providers/google`).
+
+Register the OAuth client in Google Cloud Console with these redirect URIs
+(`<SITE_URL>/api/auth/callback/google` — the callback route is served by
+Convex Auth):
+
+- Local dev: `http://127.0.0.1:3211/api/auth/callback/google` (port 3211 is
+  the local `CONVEX_SITE_URL`)
+- Production: `https://<your-domain>/api/auth/callback/google`
 
 Do **NOT** set `VLY_EMAIL_DEV_CAPTURE` in production — the dev OTP capture is
 for local work only. Guest sign-in works immediately; email OTP sends the code
