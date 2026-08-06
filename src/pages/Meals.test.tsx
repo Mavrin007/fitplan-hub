@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // Мок convex-слоя: стабильные ссылки на функции вместо anyApi-Proxy.
@@ -7,7 +7,7 @@ vi.mock("convex/react", () => import("@/test/convex-react-mock"));
 vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
 vi.mock("sonner", () => import("@/test/sonner-mock"));
 
-import { api, convexMock, setQuery } from "@/test/convex-react-mock";
+import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
 import {
   profile,
@@ -403,5 +403,491 @@ describe("Meals", () => {
       }),
     );
     expect(toast.success).toHaveBeenCalledWith("Запись обновлена");
+  });
+
+  it("показывает скелетон, пока профиль и дневник загружаются", () => {
+    // Ни одного setQuery — профиль и дневник в состоянии undefined (загрузка).
+    const { container } = renderWithRouter(<Meals />);
+
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Рацион за сегодня" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("копирование: день без записей показан как пустой и кнопка отключена", () => {
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // Пустой «вчерашний» день: подсказка и отключённая кнопка — мутация
+    // физически не может быть вызвана (защитная ветка хендлера недостижима
+    // из UI, но сообщение пользователю покрыто).
+    expect(
+      screen.getByText(/Записей за .+ нет — выберите другой день/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+    ).toBeDisabled();
+  });
+
+  it("копирование из сегодняшней даты заблокировано в UI", () => {
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // max={вчера} в JSX не мешает fireEvent — переводим дату на сегодня:
+    // кнопка отключается, подсказка меняется (сам хендлер недостижим из UI,
+    // поэтому защитный гард внутри него не вызывается — это ок, ветка
+    // `copyFromDate === todayKey()` покрывается оценкой условия в других тестах).
+    fireEvent.change(screen.getByLabelText("День"), {
+      target: { value: todayKey() },
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+    ).toBeDisabled();
+    expect(screen.getByText("Выберите прошедший день.")).toBeInTheDocument();
+  });
+
+  it("библиотека: невалидное число порций блокируется понятной ошибкой", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Поиск по библиотеке"), "курин");
+    await user.click(within(dialog).getByRole("button", { name: /Куриная грудка/ }));
+
+    const qty = within(dialog).getByLabelText("Порций");
+    await user.clear(qty);
+    await user.type(qty, "0");
+    await user.click(
+      within(dialog).getByRole("button", { name: /Добавить в завтрак/ }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Порций: укажите число больше нуля, например 1,5.",
+    );
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "mealLog.addEntry"),
+    ).toHaveLength(0);
+  });
+
+  it("библиотека: ошибка мутации показывает понятный toast", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    setMutation(api.mealLog.addEntry, () =>
+      Promise.reject(new Error("сеть упала")),
+    );
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Поиск по библиотеке"), "курин");
+    await user.click(within(dialog).getByRole("button", { name: /Куриная грудка/ }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /Добавить в завтрак/ }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось добавить продукт");
+  });
+
+  it("своё блюдо: смена приёма через Select и добавление с макросами", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+
+    // Меняем приём пищи «Завтрак» → «Обед» через Radix Select.
+    await user.click(within(dialog).getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "Обед" }));
+
+    await user.type(
+      within(dialog).getByPlaceholderText("Название продукта"),
+      "Творог 5%",
+    );
+    await user.type(within(dialog).getByPlaceholderText("ккал"), "180");
+    await user.type(within(dialog).getByPlaceholderText("Белки, г"), "18");
+    await user.type(within(dialog).getByPlaceholderText("Углеводы, г"), "6");
+    await user.type(within(dialog).getByPlaceholderText("Жиры, г"), "9");
+    await user.click(within(dialog).getByRole("button", { name: /Добавить своё/ }));
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntry",
+        args: [
+          {
+            date: todayKey(),
+            mealType: "lunch",
+            name: "Творог 5%",
+            quantity: 1,
+            calories: 180,
+            protein: 18,
+            carbs: 6,
+            fat: 9,
+          } satisfies MealLogArgs,
+        ],
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Творог 5% — добавлено");
+  });
+
+  it("своё блюдо: нулевые калории блокируются", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Название продукта"),
+      "Вода",
+    );
+    await user.type(within(dialog).getByPlaceholderText("ккал"), "0");
+    await user.click(within(dialog).getByRole("button", { name: /Добавить своё/ }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Укажите калории числом, например 250",
+    );
+  });
+
+  it("редактирование: невалидные калории и порции показывают ошибки", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      today: [
+        {
+          _id: "e1",
+          userId: "u1",
+          createdAt: 0,
+          date: todayKey(),
+          mealType: "breakfast",
+          name: "Яйца",
+          quantity: 1,
+          calories: 155,
+          protein: 13,
+          carbs: 1.1,
+          fat: 11,
+        },
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "Редактировать запись" }));
+    const dialog = screen.getByRole("dialog");
+
+    const cals = within(dialog).getByPlaceholderText("ккал");
+    await user.clear(cals);
+    await user.type(cals, "0");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Сохранить изменения" }),
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Укажите калории числом, например 250",
+    );
+
+    // Калории чиним, но порции делаем невалидными.
+    await user.clear(cals);
+    await user.type(cals, "200");
+    const qty = within(dialog).getByPlaceholderText("1");
+    await user.clear(qty);
+    await user.type(qty, "0");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Сохранить изменения" }),
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Порций: укажите число больше нуля, например 1,5.",
+    );
+  });
+
+  it("форма своего продукта: пустая отправка показывает ошибку", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Укажите название и калории");
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "foods.addFood"),
+    ).toHaveLength(0);
+  });
+
+  it("форма своего продукта: ошибка мутации показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    setMutation(api.foods.addFood, () => Promise.reject(new Error("boom")));
+    renderWithRouter(<Meals />);
+
+    // Заполняем все поля формы (включая «На», «Единица», макросы), чтобы
+    // покрыть onChange каждого инпута.
+    await user.type(screen.getByLabelText("Название"), "Кефир 2,5%");
+    await user.type(screen.getByLabelText("На"), "250");
+    await user.type(screen.getByLabelText("Единица"), "мл");
+    await user.type(screen.getByLabelText("ккал"), "150");
+    await user.type(screen.getByLabelText("Белки (г)"), "3");
+    await user.type(screen.getByLabelText("Углеводы (г)"), "4");
+    await user.type(screen.getByLabelText("Жиры (г)"), "2");
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось сохранить продукт");
+  });
+
+  it("удаляет свой продукт из библиотеки", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      foods: [
+        {
+          _id: "f1",
+          userId: "u1",
+          createdAt: 0,
+          name: "Овсянка",
+          amount: 100,
+          unit: "г",
+          calories: 350,
+          protein: 12,
+          carbs: 60,
+          fat: 6,
+        } satisfies FoodEntry,
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "Удалить Овсянка" }));
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "foods.deleteFood",
+        args: [{ id: "f1" }],
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Овсянка — удалено из моих продуктов",
+    );
+  });
+
+  it("«Записать» из своих продуктов открывает диалог с предзаполнением", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      foods: [
+        {
+          _id: "f1",
+          userId: "u1",
+          createdAt: 0,
+          name: "Овсянка",
+          amount: 100,
+          unit: "г",
+          calories: 350,
+          protein: 12,
+          carbs: 60,
+          fat: 6,
+        } satisfies FoodEntry,
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    const dialog = screen.getByRole("dialog");
+
+    // Поля предзаполнены значениями продукта, приём — «Перекус» (snack).
+    expect(within(dialog).getByPlaceholderText("ккал")).toHaveValue("350");
+    expect(within(dialog).getByPlaceholderText("Название продукта")).toHaveValue(
+      "Овсянка",
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: /Добавить своё/ }));
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntry",
+        args: [
+          expect.objectContaining(
+            {
+              mealType: "snack",
+              name: "Овсянка",
+              calories: 350,
+            } satisfies Partial<MealLogArgs>,
+          ),
+        ],
+      }),
+    );
+  });
+
+  it("Escape закрывает диалог добавления", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("ошибка копирования дня показывает понятный toast", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    setQuery(
+      api.mealLog.getByDate,
+      { date: toDateKey(addDays(new Date(), -1)) },
+      [
+        {
+          _id: "y1",
+          userId: "u1",
+          createdAt: 0,
+          date: toDateKey(addDays(new Date(), -1)),
+          mealType: "dinner",
+          name: "Лосось (запечённый)",
+          quantity: 1,
+          calories: 400,
+          protein: 20,
+          carbs: 0,
+          fat: 13,
+        } satisfies MealEntry,
+      ],
+    );
+    setMutation(api.mealLog.addEntries, () =>
+      Promise.reject(new Error("сеть упала")),
+    );
+    renderWithRouter(<Meals />);
+
+    await user.click(
+      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось скопировать записи");
+  });
+
+  it("ошибка добавления своего блюда показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    setMutation(api.mealLog.addEntry, () => Promise.reject(new Error("boom")));
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Название продукта"),
+      "Творог",
+    );
+    await user.type(within(dialog).getByPlaceholderText("ккал"), "180");
+    await user.click(within(dialog).getByRole("button", { name: /Добавить своё/ }));
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось добавить продукт");
+  });
+
+  it("ошибка обновления записи показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      today: [
+        {
+          _id: "e1",
+          userId: "u1",
+          createdAt: 0,
+          date: todayKey(),
+          mealType: "breakfast",
+          name: "Яйца",
+          quantity: 1,
+          calories: 155,
+          protein: 13,
+          carbs: 1.1,
+          fat: 11,
+        },
+      ],
+    });
+    setMutation(api.mealLog.updateEntry, () =>
+      Promise.reject(new Error("boom")),
+    );
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "Редактировать запись" }));
+    const dialog = screen.getByRole("dialog");
+    const cals = within(dialog).getByPlaceholderText("ккал");
+    await user.clear(cals);
+    await user.type(cals, "200");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Сохранить изменения" }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось обновить запись");
+  });
+
+  it("ошибка удаления записи показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      today: [
+        {
+          _id: "e1",
+          userId: "u1",
+          createdAt: 0,
+          date: todayKey(),
+          mealType: "breakfast",
+          name: "Яйца",
+          quantity: 1,
+          calories: 155,
+          protein: 13,
+          carbs: 1.1,
+          fat: 11,
+        },
+      ],
+    });
+    setMutation(api.mealLog.deleteEntry, () =>
+      Promise.reject(new Error("boom")),
+    );
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Удалить Яйца/ }));
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось удалить запись");
+  });
+
+  it("ошибка удаления своего продукта показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      foods: [
+        {
+          _id: "f1",
+          userId: "u1",
+          createdAt: 0,
+          name: "Овсянка",
+          amount: 100,
+          unit: "г",
+          calories: 350,
+          protein: 12,
+          carbs: 60,
+          fat: 6,
+        } satisfies FoodEntry,
+      ],
+    });
+    setMutation(api.foods.deleteFood, () => Promise.reject(new Error("boom")));
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "Удалить Овсянка" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось удалить продукт");
+  });
+
+  it("ошибка добавления плана в дневник показывает toast", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    setMutation(api.mealLog.addEntries, () =>
+      Promise.reject(new Error("boom")),
+    );
+    renderWithRouter(<Meals />);
+
+    await user.click(
+      screen.getByRole("button", { name: /Сгенерировать план на день/ }),
+    );
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /Добавить всё в дневник/,
+      }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith("Не удалось добавить план");
   });
 });
