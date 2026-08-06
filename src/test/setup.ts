@@ -1,10 +1,20 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterAll, afterEach } from "vitest";
 
 // RTL не подключает auto-cleanup, когда vitest работает без globals.
 afterEach(() => {
   cleanup();
+});
+
+// input-otp планирует фоновые таймеры 0/10/50 мс БЕЗ cleanup на каждый рендер
+// ввода (fake-caret, см. dist/index.mjs: ht()). Если тестовый файл завершился
+// раньше, чем они сработали, таймеры выстреливают уже после dispose
+// jsdom-окружения: React в таймере читает window → `ReferenceError: window is
+// not defined` → vitest падает с unhandled error (exit 1), хотя все тесты
+// зелёные. Даём таймерам сработать, пока окружение ещё живо (150 мс > 50 мс).
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 150));
 });
 
 // jsdom не реализует часть браузерных API, которые нужны UI-компонентам.
