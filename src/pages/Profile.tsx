@@ -16,17 +16,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ReferenceLine,
-} from "recharts";
-import { axisProps, gridProps, tooltipStyle, lineAnim, goalLabel } from "@/lib/charts";
+import { SVGAreaChart } from "@/lib/charts";
 import {
   ACTIVITY_LABELS,
   ACTIVITY_MULTIPLIERS,
@@ -1113,54 +1103,19 @@ export default function Profile() {
               </p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={weightData}>
-                <defs>
-                  <linearGradient id="weightFillProfile" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="0%"
-                      stopColor="var(--foreground)"
-                      stopOpacity={0.18}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="var(--foreground)"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...gridProps} />
-                <XAxis
-                  dataKey="date"
-                  interval={Math.max(0, Math.floor(weightData.length / 8) - 1)}
-                  {...axisProps}
-                />
-                <YAxis
-                  domain={["dataMin - 1", "dataMax + 1"]}
-                  width={34}
-                  {...axisProps}
-                />
-                <Tooltip contentStyle={tooltipStyle} />
-                {targetWeight && (
-                  <ReferenceLine
-                    y={targetWeight}
-                    stroke="var(--muted-foreground)"
-                    strokeDasharray="4 4"
-                    label={goalLabel(`Цель ${targetWeight.toFixed(1)}`)}
-                  />
-                )}
-                <Area
-                  type="monotone"
-                  dataKey="weight"
-                  name="Вес (кг)"
-                  stroke="var(--foreground)"
-                  strokeWidth={1.5}
-                  fill="url(#weightFillProfile)"
-                  activeDot={{ r: 3 }}
-                  {...lineAnim}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <SVGAreaChart
+              data={weightData}
+              xKey="date"
+              yKey="weight"
+              name="Вес (кг)"
+              height={200}
+              labelInterval={Math.max(0, Math.floor(weightData.length / 8) - 1)}
+              yDomainPad={1}
+              referenceY={targetWeight ?? undefined}
+              referenceLabel={
+                targetWeight ? `Цель ${targetWeight.toFixed(1)}` : undefined
+              }
+            />
           )}
         </ChartCard>
 
