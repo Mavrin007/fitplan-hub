@@ -44,6 +44,10 @@ interface AuthProps {
   /** Клиентский cooldown повторной отправки кода (сек). В проде 30; в тестах
    *  прокидывается 1, чтобы не ждать полминуты реального времени. */
   resendCooldownSec?: number;
+  /** Срок жизни OTP-кода (сек) для клиентского отсчёта истечения. В тестах
+   *  прокидывается 1–2, чтобы проверить истечение без 15 минут реального
+   *  времени. */
+  otpMaxAgeSec?: number;
 }
 
 function resolveRedirectAfterAuth(
@@ -69,6 +73,17 @@ const AUTH_TIMEOUT_MS = 15000;
 // часов или смена интервала) — таймер пересинхронизируется на N
 // (cooldownFromError), так что расхождение само себя чинит.
 const RESEND_COOLDOWN_SEC = 60;
+
+// Серверный срок жизни OTP-кода (@convex-dev/auth Email provider maxAge,
+// src/convex/auth/emailOtp.ts). Клиент по нему ведёт обратный отсчёт в
+// dev-блоке и предупреждает при вводе после истечения; сервер остаётся
+// источником истины для самой верификации.
+const OTP_MAX_AGE_SEC = 15 * 60; // 15 минут
+
+// «2 мин» / «45 сек» — остаток до истечения кода для подсказки в dev-блоке.
+function formatOtpRemaining(sec: number): string {
+  return sec < 60 ? `${sec} сек` : `${Math.ceil(sec / 60)} мин`;
+}
 
 // Если сервер вернул «Код уже отправлен. Повторите через N сек.» — берём N
 // (уважаем серверный лимит), иначе клиентский cooldown по умолчанию.
@@ -102,7 +117,11 @@ function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
   });
 }
 
-function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: AuthProps = {}) {
+function Auth({
+  redirectAfterAuth,
+  resendCooldownSec = RESEND_COOLDOWN_SEC,
+  otpMaxAgeSec = OTP_MAX_AGE_SEC,
+}: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
   const convex = useConvex();
   const navigate = useNavigate();
@@ -117,6 +136,9 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
   const [error, setError] = useState<string | null>(null);
   // Обратный отсчёт до повторной отправки кода (0 = можно отправлять).
   const [resendCooldown, setResendCooldown] = useState(0);
+  // Остаток секунд до истечения кода (0 = нет активного кода / истёк).
+  // Ставится на otpMaxAgeSec в момент отправки и тикает вниз раз в секунду.
+  const [otpRemainingSec, setOtpRemainingSec] = useState(0);
 
   // Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
   // и мы показываем их прямо в форме вместо письма. Хук вызывается всегда
@@ -141,6 +163,13 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
     return () => clearTimeout(timer);
   }, [resendCooldown]);
 
+  // Тикающий отсчёт истечения кода: раз в секунду до нуля.
+  useEffect(() => {
+    if (otpRemainingSec <= 0) return;
+    const timer = setTimeout(() => setOtpRemainingSec((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [otpRemainingSec]);
+
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -151,6 +180,8 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
       setStep({ email: formData.get("email") as string });
       // Сразу после отправки включаем отсчёт — повторная отправка недоступна.
       setResendCooldown(resendCooldownSec);
+      // И стартуем отсчёт истечения кода (по моменту отправки).
+      setOtpRemainingSec(otpMaxAgeSec);
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
@@ -167,6 +198,16 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
     setIsLoading(true);
     setError(null);
     try {
+      // Клиентский чек истечения кода (по моменту отправки). Сервер остаётся
+      // источником истины для самой верификации, но при явно истёкшем сроке
+      // не тратим вызов signIn и показываем отдельное сообщение вместо
+      // «код неверен».
+      if (otpRemainingSec <= 0) {
+        setError("Код истёк. Нажмите «Отправить ещё раз».");
+        setIsLoading(false);
+        setOtp("");
+        return;
+      }
       // Прокси встроенного лимита попыток ввода (@convex-dev/auth, таблица
       // authRateLimits): при исчерпании библиотека вернула бы generic
       // «Could not verify code», неотличимый от неверного кода. Пред-проверяем
@@ -223,8 +264,10 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
       }
       await withAuthTimeout(signIn("email-otp", { email }));
       // Остаёмся на OTP-шаге — devOtpCode обновится через useQuery. Новый
-      // код отправлен: отсчёт заново, чтобы сразу не слать третий раз.
+      // код отправлен: отсчёты заново, чтобы сразу не слать третий раз и
+      // чтобы срок жизни нового кода считался от его отправки.
       setResendCooldown(resendCooldownSec);
+      setOtpRemainingSec(otpMaxAgeSec);
       setIsLoading(false);
     } catch (error) {
       console.error("OTP resend error:", error);
@@ -243,6 +286,7 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
     setOtp("");
     setError(null);
     setResendCooldown(0);
+    setOtpRemainingSec(0);
   };
 
   const handleGuestLogin = async () => {
@@ -427,6 +471,11 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
                         </p>
                         <p className="num mt-1 font-mono text-2xl font-semibold tracking-[0.35em] text-foreground">
                           {devOtpCode}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-muted-foreground">
+                          {otpRemainingSec > 0
+                            ? `Код истекает через ${formatOtpRemaining(otpRemainingSec)}`
+                            : "Код истёк — запросите новый"}
                         </p>
                       </div>
                     )}

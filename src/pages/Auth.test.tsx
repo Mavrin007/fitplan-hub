@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // Мок convex-слоя: useQuery(api.devOtp.getByEmail) адресуется через мок api.
@@ -82,6 +82,66 @@ describe("Auth", () => {
     authMocks.signIn.mockClear();
     authMocks.signOut.mockClear();
     setupSignIn();
+  });
+
+  it("dev-блок показывает обратный отсчёт истечения кода", async () => {
+    // Dev-перехват кода (VLY_EMAIL_DEV_CAPTURE) — блок с кодом и подсказкой
+    // срока. Срок 90 с → подсказка «через 2 мин» (ceil(90/60)).
+    vi.stubEnv("VITE_EMAIL_DEV_CAPTURE", "1");
+    try {
+      setQuery(api.devOtp.getByEmail, { email: "test@example.com" }, "123456");
+      const user = userEvent.setup();
+      renderWithRouter(<Auth resendCooldownSec={1} otpMaxAgeSec={90} />);
+      await gotoOtpStep(user);
+
+      expect(await screen.findByText("123456")).toBeInTheDocument();
+      expect(
+        screen.getByText("Код истекает через 2 мин"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("ввод после истечения кода показывает отдельное сообщение и не зовёт signIn", async () => {
+    vi.stubEnv("VITE_EMAIL_DEV_CAPTURE", "1");
+    try {
+      setQuery(api.devOtp.getByEmail, { email: "test@example.com" }, "123456");
+      const user = userEvent.setup();
+      // Срок 2 с — дожидаемся реального истечения по тикеру.
+      renderWithRouter(<Auth resendCooldownSec={1} otpMaxAgeSec={2} />);
+      await gotoOtpStep(user);
+
+      // Dev-блок переключается на «истёк» — видимое подтверждение, что
+      // отсчёт дошёл до нуля (2 с + запас на тикер).
+      await waitFor(
+        () => {
+          expect(
+            screen.getByText("Код истёк — запросите новый"),
+          ).toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
+
+      await user.type(screen.getByRole("textbox"), "123456");
+      await user.click(screen.getByRole("button", { name: /Подтвердить код/ }));
+
+      // Отдельное сообщение об истечении, а не «код неверен».
+      expect(
+        await screen.findByText("Код истёк. Нажмите «Отправить ещё раз»."),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Введённый код подтверждения неверен."),
+      ).not.toBeInTheDocument();
+      // Верификация НЕ отправлялась — signIn вызван только на email-шаге.
+      expect(authMocks.signIn).toHaveBeenCalledTimes(1);
+      // Остаёмся на OTP-шаге, форма жива.
+      expect(
+        screen.getByRole("heading", { name: "Проверьте почту" }),
+      ).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("неверный OTP показывает ошибку и не ломает форму", async () => {
