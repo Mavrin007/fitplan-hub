@@ -303,6 +303,64 @@ describe("Meals", () => {
     expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
   });
 
+  it("переключатель цели недельного меню перестраивает план и диалог", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // Цель профиля — «Похудение»: чип выбран по умолчанию, день из 4 приёмов.
+    const loseChip = screen.getByRole("button", { name: "Похудение" });
+    expect(loseChip).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/4 приёмов/)).toBeInTheDocument();
+
+    // Переключаем недельное меню на «Набор массы».
+    await user.click(screen.getByRole("button", { name: "Набор мышечной массы" }));
+
+    expect(
+      screen.getByRole("button", { name: "Набор мышечной массы" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(loseChip).toHaveAttribute("aria-pressed", "false");
+
+    // У набора массы день из 5 приёмов (два перекуса) — сводка пересчиталась.
+    expect(screen.getByText(/5 приёмов/)).toBeInTheDocument();
+
+    // В недельном меню у каждого дня два перекуса: 7 дней × 2 = 14 строк.
+    const weekly = screen
+      .getByRole("heading", { name: "Недельное меню" })
+      .closest("section");
+    expect(weekly).not.toBeNull();
+    expect(within(weekly!).getAllByText("Перекус")).toHaveLength(14);
+
+    // Диалог «Предложенный план на сегодня» строится под выбранную цель.
+    await user.click(
+      screen.getByRole("button", { name: /Сгенерировать план на день/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText(/набор мышечной массы/i),
+    ).toBeInTheDocument();
+    expect(within(dialog).getAllByText("Перекус")).toHaveLength(2);
+
+    // Добавление плана в дневник использует приёмы выбранной цели (snack ×2).
+    await user.click(
+      within(dialog).getByRole("button", { name: /Добавить всё в дневник/ }),
+    );
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntries",
+        args: [
+          expect.objectContaining({
+            entries: expect.arrayContaining([
+              expect.objectContaining({ mealType: "snack" }),
+              expect.objectContaining({ mealType: "snack" }),
+            ]),
+          }),
+        ],
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
+  });
+
   it("редактирует запись: диалог предзаполнен, изменения сохраняются", async () => {
     const user = userEvent.setup();
     setupMeals({

@@ -74,6 +74,17 @@ describe("generateVerificationToken — 6-значный цифровой OTP", 
   it("не вырождается: два кода подряд не совпадают (P(коллизии) ≈ 1e-6)", () => {
     expect(generateVerificationToken()).not.toBe(generateVerificationToken());
   });
+
+  it("конфиг провайдера делегирует модульной функции (покрытие строки метода)", async () => {
+    // Email() кладёт оригинальный конфиг в `options` — это тот самый метод,
+    // который библиотека вызывает при генерации кода (строки 38–41 emailOtp.ts).
+    const cfg = emailOtp.options as unknown as {
+      generateVerificationToken: () => Promise<string> | string;
+    };
+    expect(cfg.generateVerificationToken).toBeDefined();
+    const token = await cfg.generateVerificationToken();
+    expect(token).toMatch(/^\d{6}$/);
+  });
 });
 
 describe("emailOtp.sendVerificationRequest", () => {
