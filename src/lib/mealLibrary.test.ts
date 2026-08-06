@@ -75,6 +75,18 @@ describe("generateWeeklyMealPlan", () => {
     for (const count of counts.values()) expect(count).toBeLessThanOrEqual(2);
   });
 
+  it("в дне с двумя перекусами (набор массы) перекусы разные", () => {
+    const week = generateWeeklyMealPlan("gain_muscle", bulkTargets);
+    for (const day of week.days) {
+      const snacks = day.meals
+        .filter((m) => m.mealType === "snack")
+        .map((m) => m.name);
+      expect(new Set(snacks).size, `${day.dateKey}: ${snacks.join(", ")}`).toBe(
+        snacks.length,
+      );
+    }
+  });
+
   it("у каждого дня целые штучные порции — никаких 0.75 батончика", () => {
     for (const goal of ["lose_weight", "gain_muscle"] as const) {
       const week = generateWeeklyMealPlan(goal, goal === "lose_weight" ? cutTargets : bulkTargets);
@@ -181,6 +193,79 @@ describe("generateWeeklyMealPlan", () => {
         expect(protein, `${meal.name} без белка`).toBeGreaterThanOrEqual(floor);
       }
       expect(day.protein).toBeGreaterThanOrEqual(bulkTargets.protein * 0.7);
+    }
+  });
+});
+
+describe("близость к целям КБЖУ", () => {
+  /** Относительное отклонение от цели. */
+  const drift = (actual: number, target: number) =>
+    Math.abs(actual - target) / target;
+
+  it("план на сегодня близок к целям: каждый макрос в пределах 12%", () => {
+    for (const [goal, targets] of [
+      ["lose_weight", cutTargets],
+      ["gain_muscle", bulkTargets],
+    ] as const) {
+      const plan = generateMealPlan(todayKey(), goal, targets);
+      expect(drift(plan.calories, targets.calories), `${goal}: калории`).toBeLessThan(0.12);
+      expect(drift(plan.protein, targets.protein), `${goal}: белки`).toBeLessThan(0.12);
+      expect(drift(plan.fat, targets.fat), `${goal}: жиры`).toBeLessThan(0.12);
+      expect(drift(plan.carbs, targets.carbs), `${goal}: углеводы`).toBeLessThan(0.12);
+    }
+  });
+
+  it("среднее за неделю по каждому макросу в пределах 12% от целей", () => {
+    for (const [goal, targets] of [
+      ["lose_weight", cutTargets],
+      ["gain_muscle", bulkTargets],
+    ] as const) {
+      const week = generateWeeklyMealPlan(goal, targets);
+      const avg = (key: "calories" | "protein" | "carbs" | "fat") =>
+        week.days.reduce((s, d) => s + d[key], 0) / week.days.length;
+      expect(drift(avg("calories"), targets.calories), `${goal}: калории`).toBeLessThan(0.12);
+      expect(drift(avg("protein"), targets.protein), `${goal}: белки`).toBeLessThan(0.12);
+      expect(drift(avg("fat"), targets.fat), `${goal}: жиры`).toBeLessThan(0.12);
+      expect(drift(avg("carbs"), targets.carbs), `${goal}: углеводы`).toBeLessThan(0.12);
+    }
+  });
+
+  it("в плане на сегодня штучные продукты тоже целые", () => {
+    for (const [goal, targets] of [
+      ["lose_weight", cutTargets],
+      ["gain_muscle", bulkTargets],
+    ] as const) {
+      const plan = generateMealPlan(todayKey(), goal, targets);
+      for (const meal of plan.meals) {
+        for (const f of meal.foods) {
+          if (f.food.unit !== "г") {
+            expect(
+              f.amountGrams % f.food.servingGrams,
+              `${f.food.name}: ${f.amountGrams} г = ${f.amountGrams / f.food.servingGrams} шт`,
+            ).toBe(0);
+          }
+        }
+      }
+    }
+  });
+
+  it("правки порций не превращают день в абсурд: не больше 6 штук любого продукта", () => {
+    // «Вменяемое состояние»: хлеб/яйца крутятся целыми ломтиками/штуками и
+    // не раздуваются до 10 бутербродов — максимум ~6 штук на приём (например
+    // 4 рисовых хлебца — это нормальная база перекуса).
+    for (const [goal, targets] of [
+      ["lose_weight", cutTargets],
+      ["gain_muscle", bulkTargets],
+    ] as const) {
+      const plan = generateMealPlan(todayKey(), goal, targets);
+      for (const meal of plan.meals) {
+        for (const f of meal.foods) {
+          if (f.food.unit !== "г") {
+            const pieces = f.amountGrams / f.food.servingGrams;
+            expect(pieces, `${f.food.name}: ${pieces} шт`).toBeLessThanOrEqual(6);
+          }
+        }
+      }
     }
   });
 });

@@ -33,7 +33,12 @@ import {
   type MealType,
   type PlannedMeal,
 } from "@/lib/mealLibrary";
-import { GOAL_LABELS, computeTargets, type FitnessGoal } from "@/lib/nutrition";
+import {
+  GOAL_LABELS,
+  computeTargets,
+  type FitnessGoal,
+  type Targets,
+} from "@/lib/nutrition";
 import { addDays, pluralRecords, shortDate, toDateKey, todayKey } from "@/lib/dates";
 import { cn, parseLocalNumber } from "@/lib/utils";
 import {
@@ -73,6 +78,40 @@ function formatPrice(byn: number): string {
 
 /** Допустимые в числовом поле символы: цифры, запятая, точка. */
 const DECIMAL_INPUT = (v: string) => v.replace(/[^\d.,]/g, "");
+
+/** Тон «соответствия цели»: зелёный в пределах 10%, янтарный до 20%, иначе красный. */
+function fitTone(drift: number): string {
+  if (drift <= 0.1) return "text-emerald-600 dark:text-emerald-400";
+  if (drift <= 0.2) return "text-amber-600 dark:text-amber-400";
+  return "text-destructive";
+}
+
+/** Строка «соответствие цели»: проценты по ккал/Б/Ж/У против целей из профиля
+ *  с цветовой индикацией — видно, насколько день близок к КБЖУ. */
+function MacroMatchRow({
+  value,
+  target,
+}: {
+  value: { calories: number; protein: number; carbs: number; fat: number };
+  target: Targets;
+}) {
+  const items: { label: string; v: number; t: number }[] = [
+    { label: "ккал", v: value.calories, t: target.calories },
+    { label: "Б", v: value.protein, t: target.protein },
+    { label: "Ж", v: value.fat, t: target.fat },
+    { label: "У", v: value.carbs, t: target.carbs },
+  ];
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
+      <span className="text-muted-foreground">К цели:</span>
+      {items.map(({ label, v, t }) => (
+        <span key={label} className={`num ${fitTone(Math.abs(v - t) / t)}`}>
+          {label} {Math.round((v / t) * 100)}%
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function Meals() {
   const profile = useQuery(api.profiles.getMyProfile);
@@ -716,10 +755,11 @@ export default function Meals() {
                       />
                     </div>
                     <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
-                      <span>Б {day.protein} г</span>
-                      <span>У {day.carbs} г</span>
-                      <span>Ж {day.fat} г</span>
+                      <span>Б {day.protein}/{targets.protein} г</span>
+                      <span>У {day.carbs}/{targets.carbs} г</span>
+                      <span>Ж {day.fat}/{targets.fat} г</span>
                     </div>
+                    <MacroMatchRow value={day} target={targets} />
                   </div>
                 </div>
               );
@@ -1230,10 +1270,11 @@ export default function Meals() {
                   />
                 </div>
                 <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
-                  <span>Б {plan.protein} г</span>
-                  <span>У {plan.carbs} г</span>
-                  <span>Ж {plan.fat} г</span>
+                  <span>Б {plan.protein}/{targets.protein} г</span>
+                  <span>У {plan.carbs}/{targets.carbs} г</span>
+                  <span>Ж {plan.fat}/{targets.fat} г</span>
                 </div>
+                <MacroMatchRow value={plan} target={targets} />
               </div>
 
               <Button className="w-full" onClick={handleAddAllPlan}>

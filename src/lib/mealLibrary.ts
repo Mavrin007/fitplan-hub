@@ -14,8 +14,11 @@
  *    при наборе массы — растут углеводы и белок;
  *  - меню разнообразно: в неделе 7 завтраков, 7 обедов, 7 ужинов и 7-9
  *    перекусов без повторов в течение недели;
- *  - расхождение с целью по калориям закрывается «стапелем» — порцией крупы
- *    или гарнира, которую реально можно добавить/убавить (шаг 25 г).
+ *  - день подгоняется ко всем целям КБЖУ (калории, белки, жиры, углеводы),
+ *    а не только к калориям: гарниры шагают по 25 г, белок — по 10 г,
+ *    жиры — по 5 г, штучные продукты — целыми штуками; порции остаются в
+ *    реалистичных пределах 0.5–2 базовой, а суммарная правка ограничена
+ *    характером цели — «500 г курицы» не появится.
  */
 
 import type { FitnessGoal, Targets } from "./nutrition";
@@ -101,23 +104,6 @@ export function formatAmount(food: FoodItem, grams: number): string {
   const pieces = safe / food.servingGrams;
   const rounded = Math.round(pieces * 2) / 2;
   return `${rounded.toLocaleString("ru-RU")} ${food.unit}`;
-}
-
-/** Простой детерминированный генератор случайных чисел — меню остаётся
- *  стабильным в течение дня и одинаковым для всех пользователей с той же
- *  целью и калорийностью. */
-function seeded(seedStr: string) {
-  let h = 1779033703;
-  for (let i = 0; i < seedStr.length; i++) {
-    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return () => {
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    h ^= h >>> 16;
-    return (h >>> 0) / 4294967296;
-  };
 }
 
 export const FOOD_LIBRARY: FoodItem[] = [
@@ -327,6 +313,19 @@ const TEMPLATES: MealTemplate[] = [
     { name: "Картофель (отварной)", g: 120 },
     { name: "Цельнозерновой хлеб", g: 40 },
   ] },
+  { name: "Плов с курицей", mealType: "lunch", ingredients: [
+    { name: "Белый рис (варёный)", g: 300, adjustable: true },
+    { name: "Куриная грудка (гриль)", g: 150 },
+    { name: "Морковь", g: 80 },
+    { name: "Лук репчатый", g: 40 },
+    { name: "Оливковое масло", g: 8 },
+  ] },
+  { name: "Макароны с говядиной и овощами", mealType: "lunch", ingredients: [
+    { name: "Паста (варёная)", g: 260, adjustable: true },
+    { name: "Постная говядина (вырезка)", g: 140 },
+    { name: "Болгарский перец", g: 80 },
+    { name: "Оливковое масло", g: 8 },
+  ] },
 
   // Ужины
   { name: "Лосось с картофелем и брокколи", mealType: "dinner", ingredients: [
@@ -389,6 +388,20 @@ const TEMPLATES: MealTemplate[] = [
     { name: "Молоко 2.5%", g: 200 },
     { name: "Яблоко", g: 180 },
     { name: "Грецкие орехи", g: 20 },
+  ] },
+  { name: "Картофельная запеканка с курицей", mealType: "dinner", ingredients: [
+    { name: "Картофель (отварной)", g: 300, adjustable: true },
+    { name: "Куриная грудка (гриль)", g: 130 },
+    { name: "Молоко 2.5%", g: 50 },
+    { name: "Лук репчатый", g: 40 },
+    { name: "Оливковое масло", g: 8 },
+  ] },
+  { name: "Гречка с говядиной и салатом", mealType: "dinner", ingredients: [
+    { name: "Гречка (варёная)", g: 280, adjustable: true },
+    { name: "Постная говядина (вырезка)", g: 130 },
+    { name: "Салатный микс", g: 80 },
+    { name: "Огурец", g: 80 },
+    { name: "Оливковое масло", g: 8 },
   ] },
 
   // Перекусы
@@ -475,17 +488,6 @@ function scale(food: FoodItem, grams: number): PlannedFood {
 
 /** Регулируемый гарнир: порцию можно менять шагами по 25 г в диапазоне
  *  0.5–2 базовой порции — как в жизни («добавьте полпорции риса»). */
-interface AdjustableSlot {
-  mealType: MealType;
-  food: FoodItem;
-  base: number;
-  grams: number;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 /** Собирает одно блюдо из шаблона с порцией под цель. */
 function mealFromTemplate(template: MealTemplate, goal: FitnessGoal): PlannedMeal {
   const foods = template.ingredients.map((ing) => {
@@ -521,11 +523,6 @@ const ADJUST_CAP: Record<FitnessGoal, number> = {
   strength: 0.3,
 };
 
-/** Подстраивает порции регулируемых гарниров, чтобы день сошёлся к цели по
- *  калориям (погрешность < 8%), но не ломая характер меню под цель:
- *  суммарная правка ограничена `ADJUST_CAP` от естественной калорийности,
- *  шаги реалистичные — по 25 г в пределах 0.5–2 базовой порции гарнира.
- *  Штучные продукты (яйца, банан, хлеб) не трогаем. */
 /** Заменяет порцию одного продукта в приёме пищи и пересчитывает макросы. */
 function replaceFoodGrams(meal: PlannedMeal, foodName: string, grams: number): PlannedMeal {
   const foods = meal.foods.map((pf) =>
@@ -542,90 +539,166 @@ function replaceFoodGrams(meal: PlannedMeal, foodName: string, grams: number): P
   };
 }
 
-/** Подстраивает порции, чтобы день сошёлся к цели по калориям (погрешность
- *  < 8%), но не ломая характер меню под цель: суммарная правка ограничена
- *  `ADJUST_CAP` от естественной калорийности. Два приёма:
- *  1. Шаги по 25 г на «регулируемых» гарнирах (крупа/хлеб/картофель) — как
- *     в жизни («добавьте полпорции риса»).
- *  2. Если гарниров не хватило (например день из сырников и запеканки) —
- *     мягкое масштабирование всех углеводных гарниров по 10% за шаг.
- *  Штучные продукты (яйца, банан, хлеб) не трогаем. */
+/** Суммы по дню. */
+function dayTotals(meals: PlannedMeal[]) {
+  return {
+    calories: meals.reduce((s, m) => s + m.calories, 0),
+    protein: meals.reduce((s, m) => s + m.protein, 0),
+    carbs: meals.reduce((s, m) => s + m.carbs, 0),
+    fat: meals.reduce((s, m) => s + m.fat, 0),
+  };
+}
+
+/** Веса ошибок: калории в приоритете (день не должен уезжать от цели по
+ *  энергии), макросы — по единице: «близко к КБЖУ» означает сходимость
+ *  по всем четырём метрикам сразу, а не только по калориям. */
+const MACRO_WEIGHTS = { calories: 2, protein: 1, carbs: 1, fat: 1 } as const;
+
+/** Суммарное относительное отклонение дня от целей КБЖУ. */
+function dayError(meals: PlannedMeal[], targets: Targets): number {
+  const t = dayTotals(meals);
+  return (
+    (Math.abs(t.calories - targets.calories) / targets.calories) * MACRO_WEIGHTS.calories +
+    (Math.abs(t.protein - targets.protein) / targets.protein) * MACRO_WEIGHTS.protein +
+    (Math.abs(t.carbs - targets.carbs) / targets.carbs) * MACRO_WEIGHTS.carbs +
+    (Math.abs(t.fat - targets.fat) / targets.fat) * MACRO_WEIGHTS.fat
+  );
+}
+
+/** Одна «крутилка» порции: продукт, базовая порция из шаблона, текущее
+ *  количество и реалистичные шаг/границы (от 0.5 до 2 базовой порции).
+ *  Штучные продукты (яйца, авокадо) крутим только целыми штуками. */
+interface PortionSlot {
+  mealIndex: number;
+  food: FoodItem;
+  base: number;
+  grams: number;
+  step: number;
+  min: number;
+  max: number;
+}
+
+/** Порция в границах слота, округлённая до шага; штучные — до целой штуки. */
+function snapToSlot(slot: PortionSlot, grams: number): number {
+  const snapped =
+    slot.food.unit === "г"
+      ? Math.round(grams / slot.step) * slot.step
+      : Math.max(1, Math.round(grams / slot.food.servingGrams)) * slot.food.servingGrams;
+  return Math.min(slot.max, Math.max(slot.min, snapped));
+}
+
+/** Собирает «крутилки» порций из шаблонов дня:
+ *  - углеводные гарниры (крупа/картофель/паста, флаг adjustable или категория
+ *    carb) — шаг 25 г, границы 0.5–2 базовой порции;
+ *  - белковые продукты и молочка (курица/рыба/творог/кефир) — шаг 10 г,
+ *    границы 0.75–2 базовой порции, яйца — поштучно;
+ *  - жиры (масло/орехи/пасты) — шаг 5 г, границы 0.5–2 базовой порции,
+ *    авокадо — поштучно.
+ *  Овощи и фрукты не трогаем: они дают объём и сытость, а не калории. */
+function collectPortionSlots(
+  meals: PlannedMeal[],
+  ingredients: TemplateIngredient[][],
+): PortionSlot[] {
+  const slots: PortionSlot[] = [];
+  meals.forEach((meal, mi) => {
+    const used = new Map(meal.foods.map((f) => [f.food.name, f.amountGrams]));
+    for (const ing of ingredients[mi]) {
+      const food = FOOD_BY_NAME.get(ing.name);
+      if (!food) continue;
+      const base = ing.g;
+      const grams = used.get(ing.name) ?? base;
+      const isPiece = food.unit !== "г";
+      let step: number;
+      let min: number;
+      let max: number;
+      if (ing.adjustable || food.category === "carb") {
+        if (isPiece) {
+          // Хлеб ломтиками: 1–1.5 базовых куска (2 → 3 ломтика максимум).
+          const pieces = Math.max(1, Math.round(base / food.servingGrams));
+          step = food.servingGrams;
+          min = Math.max(food.servingGrams, Math.floor(pieces) * food.servingGrams);
+          max = Math.ceil(pieces * 1.5) * food.servingGrams;
+        } else {
+          step = 25;
+          min = base * 0.5;
+          max = base * 2;
+        }
+      } else if (food.category === "protein" || food.category === "dairy") {
+        if (isPiece) {
+          const pieces = Math.max(1, Math.round(base / food.servingGrams));
+          step = food.servingGrams;
+          min = Math.max(food.servingGrams, Math.floor(pieces * 0.75) * food.servingGrams);
+          max = Math.ceil(pieces * 1.5) * food.servingGrams;
+        } else {
+          step = 10;
+          min = base * 0.75;
+          max = base * 2;
+        }
+      } else if (food.category === "fat") {
+        if (isPiece) {
+          step = food.servingGrams;
+          min = food.servingGrams;
+          max = food.servingGrams * 2;
+        } else {
+          step = 5;
+          min = base * 0.5;
+          max = base * 2;
+        }
+      } else {
+        continue;
+      }
+      slots.push({ mealIndex: mi, food, base, grams, step, min, max });
+    }
+  });
+  return slots;
+}
+
+/** Подгоняет день к целям КБЖУ, не ломая характер меню:
+ *  - жадный поиск: на каждом шаге применяется правка порции, сильнее всего
+ *    снижающая суммарное отклонение от целей (калории в приоритете);
+ *  - правки реалистичные: гарниры по 25 г, белок по 10 г, жиры по 5 г,
+ *    штучные продукты — целыми штуками, порции в пределах 0.5–2 базовой;
+ *  - суммарный сдвиг калорий от естественной калорийности ограничен
+ *    `ADJUST_CAP` под цель — день не превращается в «500 г курицы». */
 function adjustToTarget(
   meals: PlannedMeal[],
-  targetCal: number,
+  targets: Targets,
   goal: FitnessGoal,
-  ingredients: { name: string; g: number; adjustable?: boolean }[][],
+  ingredients: TemplateIngredient[][],
 ): PlannedMeal[] {
-  const slots: AdjustableSlot[] = [];
-  meals.forEach((meal, mi) => {
-    ingredients[mi].forEach((ing) => {
-      if (!ing.adjustable) return;
-      const food = FOOD_BY_NAME.get(ing.name);
-      if (!food || food.unit !== "г") return;
-      const used = meal.foods.find((f) => f.food.name === ing.name)?.amountGrams ?? ing.g;
-      slots.push({ mealType: meal.mealType, food, base: ing.g, grams: used });
-    });
-  });
+  const naturalCalories = meals.reduce((s, m) => s + m.calories, 0);
+  const cap = naturalCalories * ADJUST_CAP[goal];
+  const slots = collectPortionSlots(meals, ingredients);
 
-  const total = (ms: PlannedMeal[]) => ms.reduce((s, m) => s + m.calories, 0);
-  const natural = total(meals);
-  const cap = natural * ADJUST_CAP[goal];
-  let adjusted = 0; // фактически добавленные/убранные ккал (по итогу правки)
-  const withinTolerance = () =>
-    Math.abs(total(meals) - targetCal) <= targetCal * 0.08;
+  let drift = 0; // фактический сдвиг калорий от естественной калорийности
+  for (let iter = 0; iter < 120; iter++) {
+    const currentError = dayError(meals, targets);
+    let best: { slot: PortionSlot; grams: number; delta: number } | null = null;
 
-  // Проход 1: пошагово 25 г на регулируемых гарнирах. Потолок одного
-  // гарнира — 1.5 базовой порции, чтобы правка не концентрировалась в одном
-  // блюде (дальше день добирают все гарниры равномерно в проходе 2).
-  for (let iter = 0; iter < 40 && !withinTolerance(); iter++) {
-    const direction = targetCal - total(meals) > 0 ? 1 : -1;
-    let best: AdjustableSlot | null = null;
-    let bestRoom = 0;
     for (const slot of slots) {
-      const room =
-        direction > 0
-          ? Math.max(slot.base * 1.5, slot.grams) - slot.grams
-          : slot.grams - slot.base * 0.75;
-      if (room >= 25 && room > bestRoom) {
-        bestRoom = room;
-        best = slot;
+      for (const dir of [1, -1] as const) {
+        const next = snapToSlot(slot, slot.grams + dir * slot.step);
+        if (next === slot.grams) continue;
+        const mi = slot.mealIndex;
+        const before = meals[mi].calories;
+        const candidateMeal = replaceFoodGrams(meals[mi], slot.food.name, next);
+        // Не превышаем допустимый сдвиг калорий от естественной калорийности.
+        if (Math.abs(drift + (candidateMeal.calories - before)) > cap) continue;
+        const candidate = meals.slice();
+        candidate[mi] = candidateMeal;
+        const delta = dayError(candidate, targets) - currentError;
+        if (delta < -0.001 && (!best || delta < best.delta)) {
+          best = { slot, grams: next, delta };
+        }
       }
     }
+
     if (!best) break;
-
-    best.grams = Math.round((best.grams + direction * 25) / 5) * 5;
-    const mi = meals.findIndex((m) => m.mealType === best!.mealType);
-    const before = total(meals);
-    meals[mi] = replaceFoodGrams(meals[mi], best!.food.name, best!.grams);
-    adjusted += total(meals) - before;
-    if (Math.abs(adjusted) > cap) break; // не ломаем характер меню
-  }
-
-  // Проход 2: если всё ещё далеко — масштабируем углеводные гарниры по 10%.
-  for (let iter = 0; iter < 6 && !withinTolerance(); iter++) {
-    const direction = targetCal - total(meals) > 0 ? 1 : -1;
-    let changed = false;
-    const before = total(meals);
-    meals = meals.map((meal) => {
-      let next = meal;
-      for (const pf of meal.foods) {
-        if (pf.food.unit !== "г" || pf.food.category !== "carb") continue;
-        const nextGrams = clamp(
-          Math.round((pf.amountGrams * (1 + 0.1 * direction)) / 5) * 5,
-          pf.food.servingGrams * 0.5,
-          pf.food.servingGrams * 3.5,
-        );
-        // Не даём «увеличению» уменьшить порцию и наоборот.
-        if (direction > 0 && nextGrams <= pf.amountGrams) continue;
-        if (direction < 0 && nextGrams >= pf.amountGrams) continue;
-        next = replaceFoodGrams(next, pf.food.name, nextGrams);
-        changed = true;
-      }
-      return next;
-    });
-    if (!changed) break;
-    adjusted += total(meals) - before;
-    if (Math.abs(adjusted) > cap) break;
+    const mi = best.slot.mealIndex;
+    const before = meals[mi].calories;
+    meals[mi] = replaceFoodGrams(meals[mi], best.slot.food.name, best.grams);
+    drift += meals[mi].calories - before;
+    best.slot.grams = best.grams;
   }
 
   return meals;
@@ -639,50 +712,148 @@ function weekdayOf(dateKey: string): number {
   return (new Date(y, m - 1, d).getDay() + 6) % 7;
 }
 
-/** Случайные (но детерминированные) смещения по приёмам пищи — они общие для
- *  недельного меню и дневного плана, поэтому «план на сегодня» совпадает
- *  с первым днём недельного меню. */
-function mealOffsets(goal: FitnessGoal, calories: number): Record<MealType, number> {
-  const rand = seeded(`week-${goal}-${Math.round(calories)}`);
-  return {
-    breakfast: Math.floor(rand() * 7),
-    lunch: Math.floor(rand() * 7),
-    dinner: Math.floor(rand() * 7),
-    snack: Math.floor(rand() * 7),
+/** Жадное распределение шаблонов блюд по 7 дням недели так, чтобы каждый день
+ *  был близок к целям КБЖУ ещё до подгонки порций:
+ *  - для каждого приёма дня берётся неиспользованный в неделе шаблон, который
+ *    сильнее всего снижает «естественную» ошибку дня (сумму отклонений от
+ *    целей по калориям, белкам, жирам и углеводам);
+ *  - основные приёмы не повторяются (7 шаблонов на тип = 7 дней), перекусы —
+ *    не чаще двух раз (9 шаблонов на 7–9 слотов недели);
+ *  - детерминировано: порядок перебора фиксирован, при равенстве берётся
+ *    первый по порядку шаблон.
+ *  Так высококалорийным целям (набор, сила) достаются рисовые и макаронные
+ *  обеды, а «лёгким» — супы и запеканки: макросы дня сходятся к цели,
+ *  а не «как повезёт» с ротацией. */
+function computeWeekAssignments(goal: FitnessGoal, targets: Targets): MealTemplate[][] {
+  const usedMains = new Map<MealType, Set<string>>();
+  for (const mt of MEAL_ORDER) usedMains.set(mt, new Set<string>());
+  const snackUses = new Map<string, number>(); // имя перекуса → использований в неделе
+
+  const pickBest = (pool: MealTemplate[], dayMeals: PlannedMeal[]): MealTemplate => {
+    let best: MealTemplate = pool[0];
+    let bestError = Infinity;
+    for (const candidate of pool) {
+      const err = dayError([...dayMeals, mealFromTemplate(candidate, goal)], targets);
+      if (err < bestError - 1e-9) {
+        bestError = err;
+        best = candidate;
+      }
+    }
+    return best;
   };
-}
 
-/** Собирает день: по одному шаблону на приём пищи (по индексу дня недели —
- *  без повторов в течение недели) + подгонка к цели. */
-function buildDay(
-  goal: FitnessGoal,
-  targets: Targets,
-  weekday: number,
-  offsets: Record<MealType, number>,
-): { meals: PlannedMeal[]; calories: number; protein: number; carbs: number; fat: number } {
-  const pools = new Map<MealType, MealTemplate[]>();
-  for (const mt of MEAL_ORDER) pools.set(mt, TEMPLATES.filter((t) => t.mealType === mt));
+  const days: MealTemplate[][] = [];
+  const mealTypes: MealType[] =
+    goal === "gain_muscle" ? [...MEAL_ORDER, "snack"] : MEAL_ORDER;
 
-  const chosen: MealTemplate[] = [];
-  const ingredientsForAdjust: { name: string; g: number; adjustable?: boolean }[][] = [];
-  const slots: MealType[] =
-    goal === "gain_muscle"
-      ? ["breakfast", "lunch", "dinner", "snack", "snack"]
-      : MEAL_ORDER;
-  for (let i = 0; i < slots.length; i++) {
-    const mt = slots[i];
-    const pool = pools.get(mt)!;
-    // Второй перекус для набора массы — следующий шаблон по кругу: перекусы
-    // за неделю повторяются максимум дважды, основные приёмы — не повторяются.
-    const step = mt === "snack" && i > MEAL_ORDER.indexOf("snack") ? 1 : 0;
-    const template = pool[(offsets[mt] + weekday + step) % pool.length];
-    chosen.push(template);
-    ingredientsForAdjust.push(template.ingredients);
+  for (let d = 0; d < 7; d++) {
+    const day: MealTemplate[] = [];
+    const dayMeals: PlannedMeal[] = [];
+
+    // Основные приёмы: лучший по «естественной» ошибке среди неиспользованных.
+    for (const mt of ["breakfast", "lunch", "dinner"] as const) {
+      const pool = TEMPLATES.filter(
+        (t) => t.mealType === mt && !usedMains.get(mt)!.has(t.name),
+      );
+      const chosen = pickBest(pool, dayMeals);
+      day.push(chosen);
+      usedMains.get(mt)!.add(chosen.name);
+      dayMeals.push(mealFromTemplate(chosen, goal));
+    }
+
+    // Перекусы (1, а при наборе массы — 2): лучший по ошибке среди тех,
+    // что в неделе использованы менее двух раз и ещё не встречались в этом дне
+    // (два одинаковых перекуса в один день выглядели бы странно).
+    for (const mt of mealTypes) {
+      if (mt !== "snack") continue;
+      const daySnackNames = new Set(
+        day.filter((t) => t.mealType === "snack").map((t) => t.name),
+      );
+      const candidates = TEMPLATES.filter(
+        (t) =>
+          t.mealType === "snack" &&
+          !daySnackNames.has(t.name) &&
+          (snackUses.get(t.name) ?? 0) < 2,
+      );
+      const chosen = pickBest(candidates, dayMeals);
+      snackUses.set(chosen.name, (snackUses.get(chosen.name) ?? 0) + 1);
+      day.push(chosen);
+      dayMeals.push(mealFromTemplate(chosen, goal));
+    }
+
+    days.push(day);
   }
 
-  const meals = chosen.map((t) => mealFromTemplate(t, goal));
-  const adjusted = adjustToTarget(meals, targets.calories, goal, ingredientsForAdjust);
+  return refineAssignments(days, goal, targets);
+}
 
+/** «Естественная» ошибка дня из шаблонов (до подгонки порций) — критерий
+ *  распределения: порции потом доточат, но распределение должно ставить
+ *  высококалорийные дни ближе к цели уже на этом этапе. */
+function naturalDayError(templates: MealTemplate[], goal: FitnessGoal, targets: Targets): number {
+  return dayError(
+    templates.map((t) => mealFromTemplate(t, goal)),
+    targets,
+  );
+}
+
+/** Вес дня в общей ошибке недели: «план на сегодня» важнее хвоста недели,
+ *  поэтому ближние дни защищены от обмена в пользу дальних. */
+const DAY_WEIGHTS = [1, 0.96, 0.92, 0.88, 0.84, 0.8, 0.76] as const;
+
+/** Локальный поиск: жадное распределение выше близоруко — последнему дню
+ *  достаются «остатки». Обмениваем шаблоны одного и того же приёма между
+ *  парами дней, если взвешенная суммарная ошибка недели уменьшается (ближние
+ *  дни весят больше). Перестановка сохраняет мультинабор шаблонов, поэтому
+ *  гарантии не ломаются: основные приёмы не повторяются, перекусы — не чаще
+ *  двух раз. Детерминировано. */
+function refineAssignments(
+  days: MealTemplate[][],
+  goal: FitnessGoal,
+  targets: Targets,
+): MealTemplate[][] {
+  const dayErrorOf = (d: number) => naturalDayError(days[d], goal, targets);
+  const errors = days.map((_, i) => dayErrorOf(i) * DAY_WEIGHTS[i]);
+
+  for (let iter = 0; iter < 25; iter++) {
+    let improved = false;
+    for (let mi = 0; mi < days[0].length; mi++) {
+      for (let d1 = 0; d1 < 7; d1++) {
+        for (let d2 = d1 + 1; d2 < 7; d2++) {
+          if (days[d1][mi] === days[d2][mi]) continue;
+          const before = errors[d1] + errors[d2];
+          const t1 = days[d1][mi];
+          const t2 = days[d2][mi];
+          days[d1][mi] = t2;
+          days[d2][mi] = t1;
+          const e1 = dayErrorOf(d1) * DAY_WEIGHTS[d1];
+          const e2 = dayErrorOf(d2) * DAY_WEIGHTS[d2];
+          if (e1 + e2 < before - 1e-9) {
+            errors[d1] = e1;
+            errors[d2] = e2;
+            improved = true;
+          } else {
+            days[d1][mi] = t1;
+            days[d2][mi] = t2;
+          }
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return days;
+}
+
+/** Собирает день из заранее распределённых шаблонов и подгоняет порции
+ *  к целям КБЖУ. */
+function buildAssignedDay(
+  goal: FitnessGoal,
+  targets: Targets,
+  templates: MealTemplate[],
+): GeneratedPlan {
+  const ingredients = templates.map((t) => t.ingredients);
+  const meals = templates.map((t) => mealFromTemplate(t, goal));
+  const adjusted = adjustToTarget(meals, targets, goal, ingredients);
   return {
     meals: adjusted,
     calories: adjusted.reduce((s, m) => s + m.calories, 0),
@@ -692,36 +863,36 @@ function buildDay(
   };
 }
 
-/** Недельное меню на 7 дней (с сегодняшнего) под цель пользователя. Каждый
- *  приём пищи за неделю не повторяется; блюда адаптированы под цель порциями
- *  и набором (см. PORTION_SCALE). */
+/** Недельное меню на 7 дней (с сегодняшнего) под цель пользователя. Блюда
+ *  распределены по дням так, чтобы каждый день был близок к КБЖУ (см.
+ *  computeWeekAssignments), порции адаптированы под цель (см. PORTION_SCALE). */
 export function generateWeeklyMealPlan(
   goal: FitnessGoal,
   targets: Targets,
 ): WeeklyMealPlan {
-  const offsets = mealOffsets(goal, targets.calories);
+  const assignments = computeWeekAssignments(goal, targets);
   const days: WeeklyDay[] = [];
 
   for (let d = 0; d < 7; d++) {
     const dateKey = toDateKey(addDays(new Date(), d));
     const weekday = weekdayOf(dateKey);
-    const day = buildDay(goal, targets, weekday, offsets);
-    days.push({ dateKey, weekday, ...day });
+    days.push({ dateKey, weekday, ...buildAssignedDay(goal, targets, assignments[d]) });
   }
   return { goal, days };
 }
 
 /** Дневной план на конкретную дату — тот же механизм, что и недельное меню
- *  (смещения считаются от цели и калорий), поэтому план «на сегодня»
- *  совпадает с первым днём недельного меню. */
+ *  (день даты отображается на позицию в неделе от сегодняшнего), поэтому
+ *  «план на сегодня» совпадает с первым днём недельного меню. */
 export function generateMealPlan(
   dateKey: string,
   goal: FitnessGoal,
   targets: Targets,
 ): GeneratedPlan {
-  const offsets = mealOffsets(goal, targets.calories);
-  const weekday = weekdayOf(dateKey);
-  return buildDay(goal, targets, weekday, offsets);
+  const assignments = computeWeekAssignments(goal, targets);
+  const todayWeekday = weekdayOf(toDateKey(new Date()));
+  const dayIndex = (weekdayOf(dateKey) - todayWeekday + 7) % 7;
+  return buildAssignedDay(goal, targets, assignments[dayIndex]);
 }
 
 export const MEAL_TYPE_LABELS: Record<MealType, string> = {
