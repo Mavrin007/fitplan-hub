@@ -34,7 +34,7 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 import { Suspense, useEffect, useState } from "react";
-import { useQuery } from "convex/react";
+import { useConvex, useQuery } from "convex/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -107,6 +107,7 @@ function withAuthTimeout<T>(promise: Promise<T>): Promise<T> {
 
 function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  const convex = useConvex();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(
@@ -188,6 +189,22 @@ function Auth({ redirectAfterAuth, resendCooldownSec = RESEND_COOLDOWN_SEC }: Au
     setError(null);
     setOtp("");
     try {
+      // Пред-проверка серверного rate-limit (БЕЗ записи): @convex-dev/auth
+      // перевыпускает код ещё до нашего серверного чека, поэтому заблокирован-
+      // ный ресенд не должен вообще доходить до signIn — иначе старый код
+      // умрёт, а новый останется невидимым. Если окно открыто — шлём как раньше.
+      const rate = (await withAuthTimeout(
+        convex.query(api.otpRateLimit.canSend, { email }),
+      )) as { allowed: boolean; retryAfterSec: number } | null | undefined;
+      // undefined = ответа нет (тесты/старый клиент) — пропускаем пред-проверку
+      // и идём в signIn: серверный чек в emailOtp всё равно защитит шлюз.
+      if (rate && !rate.allowed) {
+        setError(`Код уже отправлен. Повторите через ${rate.retryAfterSec} сек.`);
+        // Уважаем серверный интервал: таймер пересинхронизируется на N.
+        setResendCooldown(rate.retryAfterSec);
+        setIsLoading(false);
+        return;
+      }
       await withAuthTimeout(signIn("email-otp", { email }));
       // Остаёмся на OTP-шаге — devOtpCode обновится через useQuery. Новый
       // код отправлен: отсчёт заново, чтобы сразу не слать третий раз.

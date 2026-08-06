@@ -24,7 +24,7 @@ vi.mock("@/hooks/use-auth", () => ({
   }),
 }));
 
-import { resetConvexMock } from "@/test/convex-react-mock";
+import { resetConvexMock, setQuery, api } from "@/test/convex-react-mock";
 import { renderWithRouter } from "@/test/utils";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { render } from "@testing-library/react";
@@ -198,6 +198,67 @@ describe("Auth", () => {
     expect(
       screen.getByRole("button", { name: /Повторить через \d+ с/ }),
     ).toBeDisabled();
+  });
+
+  it("заблокированный ресенд (canSend=false) НЕ зовёт signIn и не трогает старый код", async () => {
+    const user = userEvent.setup();
+    // Пред-проверка: серверное окно ещё закрыто (запись есть, с тех пор < 60с).
+    // canSend отвечает «ранее», поэтому повторная отправка должна остановиться
+    // на пред-проверке — signIn вызывается только один раз (первый email-шаг),
+    // а старый код из dev-блока остаётся на экране.
+    setQuery(
+      api.otpRateLimit.canSend,
+      { email: "test@example.com" },
+      { allowed: false, retryAfterSec: 29 },
+    );
+    renderAuth();
+    await gotoOtpStep(user);
+
+    const resend = await screen.findByRole(
+      "button",
+      { name: "Отправить ещё раз" },
+      { timeout: 3000 },
+    );
+    await user.click(resend);
+
+    // Сообщение rate-limit показано, signIn НЕ вызывался повторно (только 1-й).
+    expect(
+      await screen.findByText("Код уже отправлен. Повторите через 29 сек."),
+    ).toBeInTheDocument();
+    expect(authMocks.signIn).toHaveBeenCalledTimes(1);
+    // Остаёмся на OTP-шаге; кнопка в cooldown на серверный интервал.
+    expect(
+      screen.getByRole("heading", { name: "Проверьте почту" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Повторить через \d+ с/ }),
+    ).toBeDisabled();
+  });
+
+  it("разрешённый ресенд (canSend=true) идёт через signIn как раньше", async () => {
+    const user = userEvent.setup();
+    setQuery(
+      api.otpRateLimit.canSend,
+      { email: "test@example.com" },
+      { allowed: true, retryAfterSec: 0 },
+    );
+    renderAuth();
+    await gotoOtpStep(user);
+
+    const resend = await screen.findByRole(
+      "button",
+      { name: "Отправить ещё раз" },
+      { timeout: 3000 },
+    );
+    await user.click(resend);
+
+    // Повторный signIn с тем же email (новый код) — шаг не меняется.
+    expect(authMocks.signIn).toHaveBeenCalledTimes(2);
+    const secondCall = authMocks.signIn.mock.calls[1][1] as { email: string };
+    expect(secondCall).toEqual({ email: "test@example.com" });
+    expect(
+      screen.getByRole("heading", { name: "Проверьте почту" }),
+    ).toBeInTheDocument();
   });
 
   it("успешный код уводит на /dashboard и не показывает ошибку", async () => {

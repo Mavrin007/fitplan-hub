@@ -72,6 +72,7 @@ export const api = {
     countMyData: ref("guestStats.countMyData"),
   },
   devOtp: { getByEmail: ref("devOtp.getByEmail") },
+  otpRateLimit: { canSend: ref("otpRateLimit.canSend") },
   users: { currentUser: ref("users.currentUser") },
   assistant: {
     chat: ref("assistant.chat"),
@@ -148,6 +149,18 @@ function snapshotArgs(args: unknown[]): unknown[] {
  *  (например, в setState-обёртке) не может исказить последующие вызовы. */
 export function useQuery(ref: unknown, args?: unknown): unknown {
   return structuredClone(convexMock.queryResults.get(keyOf(pathOf(ref), args)));
+}
+
+/** useConvex из convex/react — клиент для разовых вызовов convex.query()
+ *  (используется в Auth для пред-проверки rate-limit перед signIn). Возвращает
+ *  результат из того же стора, что и useQuery, поэтому setQuery() управляет и
+ *  этим путём. */
+export function useConvex() {
+  return {
+    async query(ref: unknown, args?: unknown): Promise<unknown> {
+      return structuredClone(convexMock.queryResults.get(keyOf(pathOf(ref), args)));
+    },
+  };
 }
 
 /** useMutation из convex/react — записывает вызовы, реализацию можно задать. */
