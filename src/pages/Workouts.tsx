@@ -21,16 +21,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FitnessHero } from "@/components/illustrations";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
-import { axisProps, gridProps, tooltipStyle, barAnim } from "@/lib/charts";
+import { SVGBarChart } from "@/lib/charts";
 import {
   applyProgression,
   equipmentSummary,
@@ -773,35 +764,21 @@ export default function Workouts() {
               />
             </div>
           ) : (
-            <ResponsiveContainer key={`tonnage-${tonnageData.length}`} width="100%" height={200}>
-              <BarChart data={tonnageData} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
-                <CartesianGrid {...gridProps} />
-                <XAxis dataKey="label" interval={Math.max(0, Math.floor(tonnageData.length / 6) - 1)} {...axisProps} />
-                <YAxis
-                  width={44}
-                  tickFormatter={(v: number) =>
-                    v >= 1000 ? `${(v / 1000).toFixed(1)}т` : `${v}`
-                  }
-                  {...axisProps}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "var(--muted)" }}
-                  formatter={(value) => [
-                    `${Number(value).toLocaleString("ru-RU")} кг`,
-                    "Тоннаж",
-                  ]}
-                />
-                <Bar
-                  dataKey="tonnage"
-                  name="Тоннаж"
-                  fill="var(--foreground)"
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={36}
-                  {...barAnim}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            <SVGBarChart
+              key={`tonnage-${tonnageData.length}`}
+              data={tonnageData}
+              xKey="label"
+              series={[{ key: "tonnage", name: "Тоннаж", fill: "var(--foreground)" }]}
+              height={200}
+              labelInterval={Math.max(0, Math.floor(tonnageData.length / 6) - 1)}
+              maxBarSize={36}
+              yTickFormatter={(v: number) =>
+                v >= 1000 ? `${(v / 1000).toFixed(1)}т` : `${v}`
+              }
+              tooltipFormatter={(value: number) =>
+                `${Number(value).toLocaleString("ru-RU")} кг`
+              }
+            />
           )}
         </ChartCard>
 

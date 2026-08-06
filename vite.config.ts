@@ -36,7 +36,6 @@ export default defineConfig({
           ],
           // Heavy optional libraries - separate chunks for better lazy loading
           'framer-motion': ['framer-motion'],
-          'charts': ['recharts'],
         },
         // Optimize chunk size
         chunkFileNames: 'assets/[name]-[hash].js',

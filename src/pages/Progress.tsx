@@ -2,34 +2,12 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ReferenceLine,
-} from "recharts";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
 import { ChartScene } from "@/components/illustrations";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
-import {
-  axisProps,
-  gridProps,
-  tooltipStyle,
-  tooltipCursor,
-  barRadius,
-  lineAnim,
-  barAnim,
-  goalLabel,
-  CHART_HEIGHT,
-} from "@/lib/charts";
+import { CHART_HEIGHT, SVGAreaChart, SVGBarChart } from "@/lib/charts";
 import { computeTargets } from "@/lib/nutrition";
 import { lastNDays, shortDate, todayKey } from "@/lib/dates";
 import { projectGoal, humanizeDistance } from "@/lib/projection";
@@ -356,50 +334,20 @@ export default function Progress() {
                 }
               />
             ) : (
-              <ResponsiveContainer key={`weight-${period}`} width="100%" height={CHART_HEIGHT}>
-                <AreaChart data={weightData}>
-                  <defs>
-                    <linearGradient id="weightFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop
-                        offset="0%"
-                        stopColor="var(--foreground)"
-                        stopOpacity={0.18}
-                      />
-                      <stop
-                        offset="100%"
-                        stopColor="var(--foreground)"
-                        stopOpacity={0}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="date" interval={labelInterval} {...axisProps} />
-                  <YAxis
-                    domain={["dataMin - 1", "dataMax + 1"]}
-                    width={34}
-                    {...axisProps}
-                  />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  {targetWeight && (
-                    <ReferenceLine
-                      y={targetWeight}
-                      stroke="var(--muted-foreground)"
-                      strokeDasharray="4 4"
-                      label={goalLabel(`Цель ${targetWeight.toFixed(1)}`)}
-                    />
-                  )}
-                  <Area
-                    type="monotone"
-                    dataKey="weight"
-                    name="Вес (кг)"
-                    stroke="var(--foreground)"
-                    strokeWidth={1.5}
-                    fill="url(#weightFill)"
-                    activeDot={{ r: 3 }}
-                    {...lineAnim}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <SVGAreaChart
+                key={`weight-${period}`}
+                data={weightData}
+                xKey="date"
+                yKey="weight"
+                name="Вес (кг)"
+                height={CHART_HEIGHT}
+                labelInterval={labelInterval}
+                yDomainPad={1}
+                referenceY={targetWeight ?? undefined}
+                referenceLabel={
+                  targetWeight ? `Цель ${targetWeight.toFixed(1)}` : undefined
+                }
+              />
             )}
           </ChartCard>
 
@@ -424,31 +372,16 @@ export default function Progress() {
                 text="Записывайте приёмы пищи в дневнике — здесь появится линия калорий."
               />
             ) : (
-              <ResponsiveContainer key={`cal-${period}`} width="100%" height={CHART_HEIGHT}>
-                <BarChart data={calorieData}>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="date" interval={labelInterval} {...axisProps} />
-                  <YAxis width={34} {...axisProps} />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    cursor={tooltipCursor}
-                  />
-                  <ReferenceLine
-                    y={targets.calories}
-                    stroke="var(--muted-foreground)"
-                    strokeDasharray="4 4"
-                    label={goalLabel("Цель")}
-                  />
-                  <Bar
-                    dataKey="calories"
-                    name="ккал"
-                    radius={barRadius}
-                    maxBarSize={32}
-                    fill="var(--foreground)"
-                    {...barAnim}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                key={`cal-${period}`}
+                data={calorieData}
+                xKey="date"
+                series={[{ key: "calories", name: "ккал", fill: "var(--foreground)" }]}
+                height={CHART_HEIGHT}
+                labelInterval={labelInterval}
+                referenceY={targets.calories}
+                referenceLabel="Цель"
+              />
             )}
           </ChartCard>
 
@@ -470,37 +403,18 @@ export default function Progress() {
                 text="Записывайте еду — макросы по дням появятся здесь."
               />
             ) : (
-              <ResponsiveContainer key={`mac-${period}`} width="100%" height={CHART_HEIGHT}>
-                <BarChart data={macroData}>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="date" interval={labelInterval} {...axisProps} />
-                  <YAxis width={30} {...axisProps} />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    cursor={tooltipCursor}
-                  />
-                  <Bar
-                    dataKey="Белки"
-                    stackId="m"
-                    fill="var(--foreground)"
-                    radius={[0, 0, 0, 0]}
-                    {...barAnim}
-                  />
-                  <Bar
-                    dataKey="Углеводы"
-                    stackId="m"
-                    fill="var(--muted-foreground)"
-                    {...barAnim}
-                  />
-                  <Bar
-                    dataKey="Жиры"
-                    stackId="m"
-                    fill="var(--border)"
-                    radius={barRadius}
-                    {...barAnim}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                key={`mac-${period}`}
+                data={macroData}
+                xKey="date"
+                series={[
+                  { key: "Белки", name: "Белки", fill: "var(--foreground)" },
+                  { key: "Углеводы", name: "Углеводы", fill: "var(--muted-foreground)" },
+                  { key: "Жиры", name: "Жиры", fill: "var(--border)" },
+                ]}
+                height={CHART_HEIGHT}
+                labelInterval={labelInterval}
+              />
             )}
           </ChartCard>
 
@@ -516,25 +430,14 @@ export default function Progress() {
                 text="Запишите первую тренировку из плана — появится недельная активность."
               />
             ) : (
-              <ResponsiveContainer key={`wk-${period}`} width="100%" height={CHART_HEIGHT}>
-                <BarChart data={workoutData}>
-                  <CartesianGrid {...gridProps} />
-                  <XAxis dataKey="label" {...axisProps} />
-                  <YAxis width={30} allowDecimals={false} {...axisProps} />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    cursor={tooltipCursor}
-                  />
-                  <Bar
-                    dataKey="sessions"
-                    name="Тренировки"
-                    fill="var(--foreground)"
-                    radius={barRadius}
-                    maxBarSize={32}
-                    {...barAnim}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                key={`wk-${period}`}
+                data={workoutData}
+                xKey="label"
+                series={[{ key: "sessions", name: "Тренировки", fill: "var(--foreground)" }]}
+                height={CHART_HEIGHT}
+                allowDecimals={false}
+              />
             )}
           </ChartCard>
         </div>
