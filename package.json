@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage src/",
+    "check:dead-files": "node scripts/check-dead-files.mjs",
+    "css:audit": "node scripts/find-dead-css.mjs",
     "format": "prettier --write .",
     "preview": "vite preview"
   },

@@ -41,6 +41,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Фейлим при мёртвых файлах: каждый файл в src/components/ui/ должен
+      # импортироваться хотя бы раз (кроме index.ts и *.test.*). Локально:
+      #   npm run check:dead-files
+      - name: Check for dead UI files
+        run: npm run check:dead-files
+
       - name: Typecheck
         run: npx tsc -b
 
