@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { addWater, getByDate } from "./water";
+import { addWater, getByDate, listMyWater } from "./water";
 import {
   errorMessage,
   makeConvexDb,
@@ -27,6 +27,12 @@ type AddWaterArgs = { date: string; amountMl: number };
 const runAddWater = (
   addWater as unknown as {
     _handler: (ctx: { db: ConvexDbMock }, args: AddWaterArgs) => Promise<unknown>;
+  }
+)._handler;
+
+const runListMyWater = (
+  listMyWater as unknown as {
+    _handler: (ctx: { db: ConvexDbMock }, args: Record<string, never>) => Promise<unknown>;
   }
 )._handler;
 
@@ -165,5 +171,34 @@ describe("addWater", () => {
     // user-1 за 04.08 — новая запись; w2 (другой пользователь) не затронут.
     expect(store.waterEntries).toHaveLength(3);
     expect(store.waterEntries.find((d) => d._id === "w2")).toMatchObject({ amountMl: 900 });
+  });
+});
+
+describe("listMyWater", () => {
+  beforeEach(() => {
+    mockAuth(getAuthUserId);
+  });
+
+  it("без сессии возвращает пустой список (ветка auth-null)", async () => {
+    mockAuth(getAuthUserId, "anonymous");
+    const { db } = makeConvexDb({
+      waterEntries: [
+        { _id: "w1", _creationTime: 0, userId: "user-1", date: "2026-08-04", amountMl: 750 },
+      ],
+    });
+    await expect(runListMyWater({ db }, {})).resolves.toEqual([]);
+  });
+
+  it("возвращает все записи пользователя по убыванию даты", async () => {
+    const { db } = makeConvexDb({
+      waterEntries: [
+        { _id: "w1", _creationTime: 0, userId: "user-1", date: "2026-08-04", amountMl: 750 },
+        { _id: "w2", _creationTime: 0, userId: "user-1", date: "2026-08-06", amountMl: 900 },
+        { _id: "w3", _creationTime: 0, userId: "user-2", date: "2026-08-05", amountMl: 500 },
+      ],
+    });
+    const result = (await runListMyWater({ db }, {})) as { _id: string; date: string }[];
+    // Только свои записи, отсортированы по дате по убыванию.
+    expect(result.map((d) => d._id)).toEqual(["w2", "w1"]);
   });
 });

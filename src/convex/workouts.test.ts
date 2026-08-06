@@ -15,6 +15,8 @@ vi.mock("@convex-dev/auth/server", () => ({
 }));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { Infer } from "convex/values";
+import { workoutDayValidator } from "./schema";
 import {
   deleteLog,
   getMyPlan,
@@ -112,6 +114,77 @@ const VALID_LOG = {
 function logDoc(id: string, userId: string, date: string): ConvexDoc {
   return { _id: id, _creationTime: 0, userId, date, workoutName: "Тренировка А" };
 }
+
+describe("workoutDayValidator — поле approxMinutes", () => {
+  /** Реальный день из workoutLibrary: все поля, что шлёт клиент. */
+  const DAY_WITH_MINUTES = {
+    day: 1,
+    focus: "Верх тела",
+    exercises: [
+      {
+        name: "Жим гантелей",
+        sets: 3,
+        reps: "8-12",
+        restSeconds: 90,
+        priority: true,
+        weightNote: "+2.5 кг",
+        weightKg: 12.5,
+        tempo: "2-1-1",
+      },
+    ],
+    notes: ["Спина: без резких движений"],
+    warmup: ["Разминка плеч 5 мин"],
+    approxMinutes: 45,
+  };
+
+  /** Рантайм-спека валидатора: по ней Convex сверяет поля объекта.
+   *  `.json` внутренний — читаем через каст, как это делает рантайм. */
+  function validatorSpec() {
+    return (
+      workoutDayValidator as unknown as {
+        json: { value: Record<string, { fieldType: { type: string }; optional: boolean }> };
+      }
+    ).json.value;
+  }
+
+  it("заявляет approxMinutes в спеку валидатора (number, optional)", () => {
+    expect(validatorSpec().approxMinutes).toEqual({
+      fieldType: { type: "number" },
+      optional: true,
+    });
+  });
+
+  it("каждое поле реального дня объявлено в спеке — баг «extra field» не вернётся", () => {
+    // Рантайм Convex сверяет ключи приходящего объекта со спекой валидатора:
+    // необъявленное поле (как было с approxMinutes) падает с «extra field».
+    const declared = new Set(Object.keys(validatorSpec()));
+    for (const key of Object.keys(DAY_WITH_MINUTES)) {
+      expect(
+        declared.has(key),
+        `поле "${key}" должно быть объявлено в workoutDayValidator`,
+      ).toBe(true);
+    }
+    // Вложенные поля упражнений — тоже.
+    const exSpec = (
+      validatorSpec().exercises as unknown as {
+        fieldType: { value: { value: Record<string, unknown> } };
+      }
+    ).fieldType.value.value;
+    for (const key of Object.keys(DAY_WITH_MINUTES.exercises[0])) {
+      expect(
+        Object.prototype.hasOwnProperty.call(exSpec, key),
+        `поле упражнения "${key}" должно быть объявлено в exerciseValidator`,
+      ).toBe(true);
+    }
+  });
+
+  it("тип Infer<typeof workoutDayValidator> включает approxMinutes", () => {
+    // Компиляционный чехол: если поле уберут из валидатора, объект с
+    // approxMinutes перестанет проходить по типу и тест не соберётся.
+    const day: Infer<typeof workoutDayValidator> = DAY_WITH_MINUTES;
+    expect(day.approxMinutes).toBe(45);
+  });
+});
 
 describe("getMyPlan", () => {
   beforeEach(() => {
