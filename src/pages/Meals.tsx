@@ -66,6 +66,11 @@ function kcalPerServing(calories: number, servingGrams: number): number {
   return Math.round((calories * servingGrams) / 100);
 }
 
+/** Форматирует примерную цену блюда/дня в BYN: «≈ 5,40 byn». */
+function formatPrice(byn: number): string {
+  return `≈ ${byn.toFixed(2).replace(".", ",")} byn`;
+}
+
 /** Допустимые в числовом поле символы: цифры, запятая, точка. */
 const DECIMAL_INPUT = (v: string) => v.replace(/[^\d.,]/g, "");
 
@@ -644,8 +649,15 @@ export default function Meals() {
                       {WEEKDAY_SHORT[day.weekday]}
                       {dIdx === 0 && <span className="text-brand"> · сегодня</span>}
                     </span>
-                    <span className="text-xs font-semibold num">
-                      {day.calories.toLocaleString("ru-RU")} ккал
+                    <span className="flex items-baseline gap-2">
+                      <span className="text-[10px] font-medium text-muted-foreground">
+                        {formatPrice(
+                          day.meals.reduce((s, m) => s + m.priceByn, 0),
+                        )}
+                      </span>
+                      <span className="text-xs font-semibold num">
+                        {day.calories.toLocaleString("ru-RU")} ккал
+                      </span>
                     </span>
                   </div>
 
@@ -653,7 +665,12 @@ export default function Meals() {
                     {day.meals.map((m) => {
                       const MealIcon = MEAL_ART[m.mealType].icon;
                       return (
-                        <li key={m.mealType} className="flex items-start gap-2.5 px-4 py-2.5">
+                        // key должен быть уникальным: при «наборе массы» в дне два
+                        // перекуса (mealType «snack»), одного типа недостаточно.
+                        <li
+                          key={`${m.mealType}-${m.name}`}
+                          className="flex items-start gap-2.5 px-4 py-2.5"
+                        >
                           <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary-container/70 text-on-secondary-container">
                             <MealIcon className="size-3" />
                           </span>
@@ -662,8 +679,13 @@ export default function Meals() {
                               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                                 {MEAL_TYPE_LABELS[m.mealType]}
                               </span>
-                              <span className="shrink-0 text-xs font-medium num">
-                                {m.calories} ккал
+                              <span className="flex shrink-0 items-baseline gap-2">
+                                <span className="text-[10px] text-muted-foreground">
+                                  {formatPrice(m.priceByn)}
+                                </span>
+                                <span className="text-xs font-medium num">
+                                  {m.calories} ккал
+                                </span>
                               </span>
                             </div>
                             <p className="mt-1 text-sm font-medium leading-snug">
@@ -1149,7 +1171,11 @@ export default function Meals() {
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 {plan.meals.map((m: PlannedMeal) => (
-                  <div key={m.mealType} className="rounded-xl border bg-card p-4 shadow-elev-1">
+                  // key: тип + название — при «наборе массы» перекусов два.
+                  <div
+                    key={`${m.mealType}-${m.name}`}
+                    className="rounded-xl border bg-card p-4 shadow-elev-1"
+                  >
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="text-xs font-semibold uppercase tracking-wide">
                         {MEAL_TYPE_LABELS[m.mealType]}

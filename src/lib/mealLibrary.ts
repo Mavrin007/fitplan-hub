@@ -12,8 +12,8 @@
  *    ни «2.4 яйца»;
  *  - порции адаптируются под цель: при похудении ужимаются углеводы и жиры,
  *    при наборе массы — растут углеводы и белок;
- *  - меню разнообразно: в неделе 7 завтраков, 7 обедов, 7 ужинов и 7 перекусов
- *    без повторов в течение недели;
+ *  - меню разнообразно: в неделе 7 завтраков, 7 обедов, 7 ужинов и 7-9
+ *    перекусов без повторов в течение недели;
  *  - расхождение с целью по калориям закрывается «стапелем» — порцией крупы
  *    или гарнира, которую реально можно добавить/убавить (шаг 25 г).
  */
@@ -35,6 +35,10 @@ export interface FoodItem {
   /** Типичный вес одной порции/штуки в граммах. */
   servingGrams: number;
   category: "protein" | "carb" | "veg" | "fat" | "fruit" | "dairy" | "snack";
+  /** Примерная розничная цена в BYN за стандартную порцию (servingGrams).
+   *  Используется для «бюджетно-очевидного» меню: цена блюда считается как
+   *  сумма цен ингредиентов пропорционально их количеству. */
+  priceByn: number;
 }
 
 export interface PlannedFood {
@@ -45,6 +49,8 @@ export interface PlannedFood {
   protein: number;
   carbs: number;
   fat: number;
+  /** Стоимость этого количества в BYN. */
+  priceByn: number;
 }
 
 export interface PlannedMeal {
@@ -56,6 +62,8 @@ export interface PlannedMeal {
   protein: number;
   carbs: number;
   fat: number;
+  /** Примерная стоимость порции в BYN (сумма цен ингредиентов). */
+  priceByn: number;
 }
 
 export interface GeneratedPlan {
@@ -114,68 +122,72 @@ function seeded(seedStr: string) {
 
 export const FOOD_LIBRARY: FoodItem[] = [
   // Белок
-  { name: "Куриная грудка (гриль)", calories: 165, protein: 31, carbs: 0, fat: 3.6, unit: "г", servingGrams: 150, category: "protein" },
-  { name: "Постная говядина (вырезка)", calories: 217, protein: 26, carbs: 0, fat: 12, unit: "г", servingGrams: 140, category: "protein" },
-  { name: "Лосось (запечённый)", calories: 208, protein: 20, carbs: 0, fat: 13, unit: "г", servingGrams: 140, category: "protein" },
-  { name: "Тунец (консервы в воде)", calories: 116, protein: 26, carbs: 0, fat: 1, unit: "г", servingGrams: 120, category: "protein" },
-  { name: "Треска (запечённая)", calories: 90, protein: 19, carbs: 0, fat: 0.7, unit: "г", servingGrams: 150, category: "protein" },
-  { name: "Яйца", calories: 155, protein: 13, carbs: 1.1, fat: 11, unit: "шт", servingGrams: 50, category: "protein" },
-  { name: "Греческий йогурт (0%)", calories: 59, protein: 10, carbs: 3.6, fat: 0.4, unit: "г", servingGrams: 200, category: "dairy" },
-  { name: "Творог (нежирный)", calories: 98, protein: 11, carbs: 3.4, fat: 4.3, unit: "г", servingGrams: 150, category: "dairy" },
-  { name: "Тофу (плотный)", calories: 144, protein: 17, carbs: 3, fat: 9, unit: "г", servingGrams: 150, category: "protein" },
-  { name: "Креветки", calories: 99, protein: 24, carbs: 0.2, fat: 0.3, unit: "г", servingGrams: 130, category: "protein" },
-  { name: "Индейка (грудка, ветчина)", calories: 120, protein: 24, carbs: 1, fat: 2, unit: "г", servingGrams: 120, category: "protein" },
-  { name: "Сывороточный протеин", calories: 400, protein: 80, carbs: 8, fat: 6, unit: "г", servingGrams: 30, category: "protein" },
+  { name: "Куриная грудка (гриль)", calories: 165, protein: 31, carbs: 0, fat: 3.6, unit: "г", servingGrams: 150, category: "protein", priceByn: 1.8 },
+  { name: "Постная говядина (вырезка)", calories: 217, protein: 26, carbs: 0, fat: 12, unit: "г", servingGrams: 140, category: "protein", priceByn: 2.5 },
+  { name: "Лосось (запечённый)", calories: 208, protein: 20, carbs: 0, fat: 13, unit: "г", servingGrams: 140, category: "protein", priceByn: 4.9 },
+  { name: "Тунец (консервы в воде)", calories: 116, protein: 26, carbs: 0, fat: 1, unit: "г", servingGrams: 120, category: "protein", priceByn: 4.2 },
+  { name: "Треска (запечённая)", calories: 90, protein: 19, carbs: 0, fat: 0.7, unit: "г", servingGrams: 150, category: "protein", priceByn: 2.1 },
+  { name: "Яйца", calories: 155, protein: 13, carbs: 1.1, fat: 11, unit: "шт", servingGrams: 50, category: "protein", priceByn: 0.4 },
+  { name: "Греческий йогурт (0%)", calories: 59, protein: 10, carbs: 3.6, fat: 0.4, unit: "г", servingGrams: 200, category: "dairy", priceByn: 2.4 },
+  { name: "Творог (нежирный)", calories: 98, protein: 11, carbs: 3.4, fat: 4.3, unit: "г", servingGrams: 150, category: "dairy", priceByn: 1.4 },
+  { name: "Тофу (плотный)", calories: 144, protein: 17, carbs: 3, fat: 9, unit: "г", servingGrams: 150, category: "protein", priceByn: 5.3 },
+  { name: "Креветки", calories: 99, protein: 24, carbs: 0.2, fat: 0.3, unit: "г", servingGrams: 130, category: "protein", priceByn: 3.3 },
+  { name: "Индейка (грудка, ветчина)", calories: 120, protein: 24, carbs: 1, fat: 2, unit: "г", servingGrams: 120, category: "protein", priceByn: 1.8 },
+  { name: "Сывороточный протеин", calories: 400, protein: 80, carbs: 8, fat: 6, unit: "г", servingGrams: 30, category: "protein", priceByn: 1.7 },
 
   // Углеводы
-  { name: "Белый рис (варёный)", calories: 130, protein: 2.7, carbs: 28, fat: 0.3, unit: "г", servingGrams: 180, category: "carb" },
-  { name: "Бурый рис (варёный)", calories: 112, protein: 2.6, carbs: 24, fat: 0.9, unit: "г", servingGrams: 180, category: "carb" },
-  { name: "Гречка (варёная)", calories: 132, protein: 4.5, carbs: 25, fat: 1.2, unit: "г", servingGrams: 180, category: "carb" },
-  { name: "Киноа (варёная)", calories: 120, protein: 4.4, carbs: 21, fat: 1.9, unit: "г", servingGrams: 180, category: "carb" },
-  { name: "Овсянка (сухая)", calories: 389, protein: 17, carbs: 66, fat: 7, unit: "г", servingGrams: 50, category: "carb" },
-  { name: "Батат (запечённый)", calories: 90, protein: 2, carbs: 21, fat: 0.2, unit: "г", servingGrams: 200, category: "carb" },
-  { name: "Цельнозерновой хлеб", calories: 247, protein: 13, carbs: 41, fat: 3.4, unit: "ломтик", servingGrams: 40, category: "carb" },
-  { name: "Паста (варёная)", calories: 158, protein: 5.8, carbs: 31, fat: 0.9, unit: "г", servingGrams: 180, category: "carb" },
-  { name: "Картофель (отварной)", calories: 87, protein: 1.9, carbs: 20, fat: 0.1, unit: "г", servingGrams: 200, category: "carb" },
-  { name: "Мёд", calories: 304, protein: 0.3, carbs: 82, fat: 0, unit: "г", servingGrams: 15, category: "carb" },
-  { name: "Мука пшеничная", calories: 334, protein: 11, carbs: 68, fat: 1.2, unit: "г", servingGrams: 25, category: "carb" },
-  { name: "Банан", calories: 89, protein: 1.1, carbs: 23, fat: 0.3, unit: "шт", servingGrams: 120, category: "fruit" },
-  { name: "Яблоко", calories: 52, protein: 0.3, carbs: 14, fat: 0.2, unit: "шт", servingGrams: 180, category: "fruit" },
-  { name: "Апельсин", calories: 47, protein: 0.9, carbs: 12, fat: 0.1, unit: "шт", servingGrams: 150, category: "fruit" },
-  { name: "Груша", calories: 57, protein: 0.4, carbs: 15, fat: 0.1, unit: "шт", servingGrams: 150, category: "fruit" },
-  { name: "Черника", calories: 57, protein: 0.7, carbs: 14, fat: 0.3, unit: "г", servingGrams: 100, category: "fruit" },
+  { name: "Белый рис (варёный)", calories: 130, protein: 2.7, carbs: 28, fat: 0.3, unit: "г", servingGrams: 180, category: "carb", priceByn: 0.45 },
+  { name: "Бурый рис (варёный)", calories: 112, protein: 2.6, carbs: 24, fat: 0.9, unit: "г", servingGrams: 180, category: "carb", priceByn: 0.55 },
+  { name: "Гречка (варёная)", calories: 132, protein: 4.5, carbs: 25, fat: 1.2, unit: "г", servingGrams: 180, category: "carb", priceByn: 0.55 },
+  { name: "Киноа (варёная)", calories: 120, protein: 4.4, carbs: 21, fat: 1.9, unit: "г", servingGrams: 180, category: "carb", priceByn: 2.2 },
+  { name: "Овсянка (сухая)", calories: 389, protein: 17, carbs: 66, fat: 7, unit: "г", servingGrams: 50, category: "carb", priceByn: 0.25 },
+  { name: "Батат (запечённый)", calories: 90, protein: 2, carbs: 21, fat: 0.2, unit: "г", servingGrams: 200, category: "carb", priceByn: 0.7 },
+  { name: "Цельнозерновой хлеб", calories: 247, protein: 13, carbs: 41, fat: 3.4, unit: "ломтик", servingGrams: 40, category: "carb", priceByn: 0.15 },
+  { name: "Паста (варёная)", calories: 158, protein: 5.8, carbs: 31, fat: 0.9, unit: "г", servingGrams: 180, category: "carb", priceByn: 0.55 },
+  { name: "Лапша яичная (варёная)", calories: 138, protein: 4.5, carbs: 25, fat: 2, unit: "г", servingGrams: 150, category: "carb", priceByn: 0.5 },
+  { name: "Пшено (варёное)", calories: 120, protein: 3.5, carbs: 24, fat: 1, unit: "г", servingGrams: 180, category: "carb", priceByn: 0.4 },
+  { name: "Картофель (отварной)", calories: 87, protein: 1.9, carbs: 20, fat: 0.1, unit: "г", servingGrams: 200, category: "carb", priceByn: 0.3 },
+  { name: "Мёд", calories: 304, protein: 0.3, carbs: 82, fat: 0, unit: "г", servingGrams: 15, category: "carb", priceByn: 0.23 },
+  { name: "Мука пшеничная", calories: 334, protein: 11, carbs: 68, fat: 1.2, unit: "г", servingGrams: 25, category: "carb", priceByn: 0.05 },
+  { name: "Банан", calories: 89, protein: 1.1, carbs: 23, fat: 0.3, unit: "шт", servingGrams: 120, category: "fruit", priceByn: 0.3 },
+  { name: "Яблоко", calories: 52, protein: 0.3, carbs: 14, fat: 0.2, unit: "шт", servingGrams: 180, category: "fruit", priceByn: 0.25 },
+  { name: "Апельсин", calories: 47, protein: 0.9, carbs: 12, fat: 0.1, unit: "шт", servingGrams: 150, category: "fruit", priceByn: 0.4 },
+  { name: "Груша", calories: 57, protein: 0.4, carbs: 15, fat: 0.1, unit: "шт", servingGrams: 150, category: "fruit", priceByn: 0.35 },
+  { name: "Черника", calories: 57, protein: 0.7, carbs: 14, fat: 0.3, unit: "г", servingGrams: 100, category: "fruit", priceByn: 2.5 },
 
   // Овощи
-  { name: "Брокколи (на пару)", calories: 35, protein: 2.4, carbs: 7, fat: 0.4, unit: "г", servingGrams: 150, category: "veg" },
-  { name: "Шпинат", calories: 23, protein: 2.9, carbs: 3.6, fat: 0.4, unit: "г", servingGrams: 100, category: "veg" },
-  { name: "Салатный микс", calories: 17, protein: 1.4, carbs: 3.3, fat: 0.2, unit: "г", servingGrams: 100, category: "veg" },
-  { name: "Болгарский перец", calories: 31, protein: 1, carbs: 6, fat: 0.3, unit: "г", servingGrams: 120, category: "veg" },
-  { name: "Помидор", calories: 18, protein: 0.9, carbs: 3.9, fat: 0.2, unit: "шт", servingGrams: 120, category: "veg" },
-  { name: "Огурец", calories: 15, protein: 0.7, carbs: 3.6, fat: 0.1, unit: "шт", servingGrams: 100, category: "veg" },
-  { name: "Капуста белокочанная", calories: 25, protein: 1.3, carbs: 6, fat: 0.1, unit: "г", servingGrams: 100, category: "veg" },
-  { name: "Морковь", calories: 41, protein: 0.9, carbs: 10, fat: 0.2, unit: "г", servingGrams: 100, category: "veg" },
-  { name: "Кабачок", calories: 17, protein: 1.2, carbs: 3.1, fat: 0.3, unit: "г", servingGrams: 150, category: "veg" },
-  { name: "Лук репчатый", calories: 40, protein: 1.1, carbs: 9, fat: 0.1, unit: "г", servingGrams: 50, category: "veg" },
+  { name: "Брокколи (на пару)", calories: 35, protein: 2.4, carbs: 7, fat: 0.4, unit: "г", servingGrams: 150, category: "veg", priceByn: 1.1 },
+  { name: "Шпинат", calories: 23, protein: 2.9, carbs: 3.6, fat: 0.4, unit: "г", servingGrams: 100, category: "veg", priceByn: 0.8 },
+  { name: "Салатный микс", calories: 17, protein: 1.4, carbs: 3.3, fat: 0.2, unit: "г", servingGrams: 100, category: "veg", priceByn: 0.6 },
+  { name: "Болгарский перец", calories: 31, protein: 1, carbs: 6, fat: 0.3, unit: "г", servingGrams: 120, category: "veg", priceByn: 0.7 },
+  { name: "Помидор", calories: 18, protein: 0.9, carbs: 3.9, fat: 0.2, unit: "шт", servingGrams: 120, category: "veg", priceByn: 0.3 },
+  { name: "Огурец", calories: 15, protein: 0.7, carbs: 3.6, fat: 0.1, unit: "шт", servingGrams: 100, category: "veg", priceByn: 0.2 },
+  { name: "Капуста белокочанная", calories: 25, protein: 1.3, carbs: 6, fat: 0.1, unit: "г", servingGrams: 100, category: "veg", priceByn: 0.12 },
+  { name: "Морковь", calories: 41, protein: 0.9, carbs: 10, fat: 0.2, unit: "г", servingGrams: 100, category: "veg", priceByn: 0.15 },
+  { name: "Кабачок", calories: 17, protein: 1.2, carbs: 3.1, fat: 0.3, unit: "г", servingGrams: 150, category: "veg", priceByn: 0.4 },
+  { name: "Лук репчатый", calories: 40, protein: 1.1, carbs: 9, fat: 0.1, unit: "г", servingGrams: 50, category: "veg", priceByn: 0.08 },
+  { name: "Свёкла (варёная)", calories: 45, protein: 1.6, carbs: 10, fat: 0.2, unit: "г", servingGrams: 100, category: "veg", priceByn: 0.15 },
+  { name: "Тыква (запечённая)", calories: 26, protein: 1, carbs: 7, fat: 0.1, unit: "г", servingGrams: 150, category: "veg", priceByn: 0.25 },
 
   // Жиры
-  { name: "Оливковое масло", calories: 884, protein: 0, carbs: 0, fat: 100, unit: "г", servingGrams: 10, category: "fat" },
-  { name: "Миндаль", calories: 579, protein: 21, carbs: 22, fat: 50, unit: "г", servingGrams: 25, category: "fat" },
-  { name: "Арахисовая паста", calories: 588, protein: 25, carbs: 20, fat: 50, unit: "г", servingGrams: 20, category: "fat" },
-  { name: "Авокадо", calories: 160, protein: 2, carbs: 9, fat: 15, unit: "шт", servingGrams: 100, category: "fat" },
-  { name: "Семена чиа", calories: 486, protein: 17, carbs: 42, fat: 31, unit: "г", servingGrams: 15, category: "fat" },
-  { name: "Грецкие орехи", calories: 654, protein: 15, carbs: 14, fat: 65, unit: "г", servingGrams: 25, category: "fat" },
+  { name: "Оливковое масло", calories: 884, protein: 0, carbs: 0, fat: 100, unit: "г", servingGrams: 10, category: "fat", priceByn: 0.2 },
+  { name: "Миндаль", calories: 579, protein: 21, carbs: 22, fat: 50, unit: "г", servingGrams: 25, category: "fat", priceByn: 0.75 },
+  { name: "Арахисовая паста", calories: 588, protein: 25, carbs: 20, fat: 50, unit: "г", servingGrams: 20, category: "fat", priceByn: 0.45 },
+  { name: "Авокадо", calories: 160, protein: 2, carbs: 9, fat: 15, unit: "шт", servingGrams: 100, category: "fat", priceByn: 1.2 },
+  { name: "Семена чиа", calories: 486, protein: 17, carbs: 42, fat: 31, unit: "г", servingGrams: 15, category: "fat", priceByn: 0.55 },
+  { name: "Грецкие орехи", calories: 654, protein: 15, carbs: 14, fat: 65, unit: "г", servingGrams: 25, category: "fat", priceByn: 0.75 },
 
   // Молочное
-  { name: "Молоко 2.5%", calories: 52, protein: 3, carbs: 4.8, fat: 2.5, unit: "г", servingGrams: 200, category: "dairy" },
-  { name: "Кефир 2.5%", calories: 50, protein: 3, carbs: 4, fat: 2.5, unit: "г", servingGrams: 200, category: "dairy" },
-  { name: "Сметана 15%", calories: 160, protein: 2.6, carbs: 4.1, fat: 15, unit: "г", servingGrams: 30, category: "dairy" },
+  { name: "Молоко 2.5%", calories: 52, protein: 3, carbs: 4.8, fat: 2.5, unit: "г", servingGrams: 200, category: "dairy", priceByn: 0.5 },
+  { name: "Кефир 2.5%", calories: 50, protein: 3, carbs: 4, fat: 2.5, unit: "г", servingGrams: 200, category: "dairy", priceByn: 0.55 },
+  { name: "Сметана 15%", calories: 160, protein: 2.6, carbs: 4.1, fat: 15, unit: "г", servingGrams: 30, category: "dairy", priceByn: 0.25 },
 
   // Перекусы
-  { name: "Протеиновый батончик", calories: 350, protein: 25, carbs: 40, fat: 10, unit: "шт", servingGrams: 60, category: "snack" },
-  { name: "Рисовые хлебцы", calories: 387, protein: 8, carbs: 81, fat: 3, unit: "шт", servingGrams: 10, category: "snack" },
-  { name: "Тёмный шоколад (85%)", calories: 598, protein: 8, carbs: 46, fat: 43, unit: "г", servingGrams: 20, category: "snack" },
-  { name: "Творог с ананасом", calories: 90, protein: 9, carbs: 11, fat: 1.5, unit: "г", servingGrams: 150, category: "snack" },
-  { name: "Хумус", calories: 166, protein: 7.9, carbs: 14, fat: 9.6, unit: "г", servingGrams: 50, category: "snack" },
+  { name: "Протеиновый батончик", calories: 350, protein: 25, carbs: 40, fat: 10, unit: "шт", servingGrams: 60, category: "snack", priceByn: 1.5 },
+  { name: "Рисовые хлебцы", calories: 387, protein: 8, carbs: 81, fat: 3, unit: "шт", servingGrams: 10, category: "snack", priceByn: 0.1 },
+  { name: "Тёмный шоколад (85%)", calories: 598, protein: 8, carbs: 46, fat: 43, unit: "г", servingGrams: 20, category: "snack", priceByn: 0.4 },
+  { name: "Творог с ананасом", calories: 90, protein: 9, carbs: 11, fat: 1.5, unit: "г", servingGrams: 150, category: "snack", priceByn: 1.1 },
+  { name: "Хумус", calories: 166, protein: 7.9, carbs: 14, fat: 9.6, unit: "г", servingGrams: 50, category: "snack", priceByn: 0.6 },
 ];
 
 /** Быстрый доступ к продуктам по имени. */
@@ -297,6 +309,24 @@ const TEMPLATES: MealTemplate[] = [
     { name: "Помидор", g: 120 },
     { name: "Оливковое масло", g: 8 },
   ] },
+  { name: "Борщ с говядиной и сметаной", mealType: "lunch", ingredients: [
+    { name: "Постная говядина (вырезка)", g: 150 },
+    { name: "Свёкла (варёная)", g: 100 },
+    { name: "Картофель (отварной)", g: 200, adjustable: true },
+    { name: "Капуста белокочанная", g: 100 },
+    { name: "Морковь", g: 60 },
+    { name: "Лук репчатый", g: 40 },
+    { name: "Сметана 15%", g: 20 },
+    { name: "Цельнозерновой хлеб", g: 40 },
+  ] },
+  { name: "Куриный суп с лапшой", mealType: "lunch", ingredients: [
+    { name: "Куриная грудка (гриль)", g: 120 },
+    { name: "Лапша яичная (варёная)", g: 200, adjustable: true },
+    { name: "Морковь", g: 60 },
+    { name: "Лук репчатый", g: 40 },
+    { name: "Картофель (отварной)", g: 120 },
+    { name: "Цельнозерновой хлеб", g: 40 },
+  ] },
 
   // Ужины
   { name: "Лосось с картофелем и брокколи", mealType: "dinner", ingredients: [
@@ -348,6 +378,18 @@ const TEMPLATES: MealTemplate[] = [
     { name: "Цельнозерновой хлеб", g: 40 },
     { name: "Оливковое масло", g: 8 },
   ] },
+  { name: "Пшённая каша с тыквой и молоком", mealType: "dinner", ingredients: [
+    { name: "Пшено (варёное)", g: 300, adjustable: true },
+    { name: "Тыква (запечённая)", g: 120 },
+    { name: "Молоко 2.5%", g: 150 },
+    { name: "Мёд", g: 15 },
+  ] },
+  { name: "Овсяная каша с яблоком и орехами", mealType: "dinner", ingredients: [
+    { name: "Овсянка (сухая)", g: 60, adjustable: true },
+    { name: "Молоко 2.5%", g: 200 },
+    { name: "Яблоко", g: 180 },
+    { name: "Грецкие орехи", g: 20 },
+  ] },
 
   // Перекусы
   { name: "Яблоко с горстью миндаля", mealType: "snack", ingredients: [
@@ -376,6 +418,13 @@ const TEMPLATES: MealTemplate[] = [
     { name: "Груша", g: 150 },
     { name: "Грецкие орехи", g: 20 },
   ] },
+  { name: "Яйца вкрутую (2 шт)", mealType: "snack", ingredients: [
+    { name: "Яйца", g: 100 },
+  ] },
+  { name: "Кефир с хлебцами", mealType: "snack", ingredients: [
+    { name: "Кефир 2.5%", g: 200 },
+    { name: "Рисовые хлебцы", g: 20 },
+  ] },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -392,8 +441,8 @@ export const PORTION_SCALE: Record<FitnessGoal, Record<FoodItem["category"], num
   maintain: { protein: 1, carb: 1, veg: 1, fat: 1, fruit: 1, dairy: 1, snack: 1 },
   improve_endurance: { protein: 1, carb: 1.1, veg: 1, fat: 0.9, fruit: 1, dairy: 1, snack: 1 },
   // Сила: калории на поддержании, но чуть щедрее — восстановление и рост
-  // силы требуют полного запаса энергии.
-  strength: { protein: 1.1, carb: 1.15, veg: 1, fat: 1.05, fruit: 1, dairy: 1.05, snack: 1 },
+  // силы требуют полного запаса энергии, в том числе углеводов.
+  strength: { protein: 1.1, carb: 1.25, veg: 1, fat: 1.05, fruit: 1, dairy: 1.05, snack: 1 },
 };
 
 /** Штучные продукты всегда округляются до целой штуки (минимум одна). */
@@ -403,7 +452,14 @@ function snapPieces(food: FoodItem, grams: number): number {
   return pieces * food.servingGrams;
 }
 
-/** Макросы для `grams` граммов продукта (все макросы — на 100 г). */
+/** Стоимость `grams` граммов продукта в BYN: цена за servingGrams, умноженная
+ *  на количество порций. Для штучных продуктов servingGrams — вес одной штуки,
+ *  поэтому цена тоже получается поштучной. */
+function priceFor(food: FoodItem, grams: number): number {
+  return Math.round((food.priceByn * (grams / food.servingGrams)) * 100) / 100;
+}
+
+/** Макросы и цена для `grams` граммов продукта (все макросы — на 100 г). */
 function scale(food: FoodItem, grams: number): PlannedFood {
   const ratio = grams / 100;
   return {
@@ -413,6 +469,7 @@ function scale(food: FoodItem, grams: number): PlannedFood {
     protein: Math.round(food.protein * ratio * 10) / 10,
     carbs: Math.round(food.carbs * ratio * 10) / 10,
     fat: Math.round(food.fat * ratio * 10) / 10,
+    priceByn: priceFor(food, grams),
   };
 }
 
@@ -447,6 +504,7 @@ function mealFromTemplate(template: MealTemplate, goal: FitnessGoal): PlannedMea
     protein: Math.round(planned.reduce((s, f) => s + f.protein, 0) * 10) / 10,
     carbs: Math.round(planned.reduce((s, f) => s + f.carbs, 0) * 10) / 10,
     fat: Math.round(planned.reduce((s, f) => s + f.fat, 0) * 10) / 10,
+    priceByn: Math.round(planned.reduce((s, f) => s + f.priceByn, 0) * 100) / 100,
   };
 }
 
@@ -480,6 +538,7 @@ function replaceFoodGrams(meal: PlannedMeal, foodName: string, grams: number): P
     protein: Math.round(foods.reduce((s, f) => s + f.protein, 0) * 10) / 10,
     carbs: Math.round(foods.reduce((s, f) => s + f.carbs, 0) * 10) / 10,
     fat: Math.round(foods.reduce((s, f) => s + f.fat, 0) * 10) / 10,
+    priceByn: Math.round(foods.reduce((s, f) => s + f.priceByn, 0) * 100) / 100,
   };
 }
 
