@@ -32,6 +32,7 @@ import { addDays, toDateKey, todayKey } from "@/lib/dates";
 import {
   generateMealPlan,
   generateWeeklyMealPlan,
+  type GeneratedPlan,
   type MealType,
   type PlannedMeal,
   type WeeklyDay,
@@ -432,6 +433,24 @@ describe("Meals", () => {
       };
       vi.mocked(generateWeeklyMealPlan).mockReturnValue(plan);
 
+      // Дневной план для диалога «Предложенный план на сегодня» — тоже с
+      // двумя одинаковыми перекусами: ключи диалога `${mi}-snack-…` должны
+      // остаться уникальными по индексу приёма.
+      const dailyPlan: GeneratedPlan = {
+        meals: [
+          meal("breakfast", "Овсянка с бананом"),
+          meal("lunch", "Курица с рисом"),
+          meal("dinner", "Гречка с говядиной"),
+          meal("snack", "Протеиновый батончик"),
+          meal("snack", "Протеиновый батончик"),
+        ],
+        calories: 500,
+        protein: 50,
+        carbs: 100,
+        fat: 25,
+      };
+      vi.mocked(generateMealPlan).mockReturnValue(dailyPlan);
+
       renderWithRouter(<Meals />);
 
       // Переключаем недельное меню на «Набор массы» — 5 приёмов в день.
@@ -441,10 +460,30 @@ describe("Meals", () => {
         "gain_muscle",
         expect.anything(),
       );
+      expect(vi.mocked(generateMealPlan)).toHaveBeenCalledWith(
+        todayKey(),
+        "gain_muscle",
+        expect.anything(),
+      );
 
       // Два одинаковых перекуса отрендерены в первом дне (2 + 1×6 = 8 раз),
       // без duplicate-key предупреждений React.
       expect(screen.getAllByText("Протеиновый батончик")).toHaveLength(8);
+
+      // Открываем диалог плана: он строится из дневного мока с двумя
+      // одинаковыми snack — ключи `${mi}-${mealType}-${name}` уникальны.
+      await user.click(
+        screen.getByRole("button", { name: /Сгенерировать план на день/ }),
+      );
+      const dialog = screen.getByRole("dialog");
+      expect(
+        within(dialog).getByText("Предложенный план на сегодня"),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getAllByText("Протеиновый батончик"),
+      ).toHaveLength(2);
+
+      // Ни недельное меню, ни диалог не уронили duplicate-key предупреждение.
       const dupKeyErrors = errorSpy.mock.calls.filter((args) =>
         /same key|duplicate key/i.test(String(args[0] ?? "")),
       );
