@@ -1,0 +1,5 @@
+# Отображение старых адресов на единого автора (без переписывания истории).
+# Применяется git'ом автоматически (git log --use-mailmap по умолчанию
+# для --format с %aN/%aE, а также в GitHub UI и git shortlog).
+Buffy <49188780+Mavrin007@users.noreply.github.com> <buffy@freebuff.com>
+Buffy <49188780+Mavrin007@users.noreply.github.com> <fitplan-hub@users.noreply.github.com>
