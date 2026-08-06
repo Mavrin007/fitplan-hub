@@ -33,7 +33,13 @@ import {
 import { computeTargets } from "@/lib/nutrition";
 import { lastNDays, shortDate, todayKey } from "@/lib/dates";
 import { projectGoal, humanizeDistance } from "@/lib/projection";
-import { exportWeights, exportMeals, exportWorkouts } from "@/lib/export";
+import {
+  exportWeights,
+  exportMeals,
+  exportWorkouts,
+  exportWater,
+  exportFoods,
+} from "@/lib/export";
 import {
   Scale,
   Flame,
@@ -43,6 +49,8 @@ import {
   TrendingUp,
   Target,
   Download,
+  GlassWater,
+  Apple,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +100,8 @@ export default function Progress() {
   const profile = useQuery(api.profiles.getMyProfile);
   const weights = useQuery(api.weightEntries.listMyWeights, {});
   const workoutLogs = useQuery(api.workouts.listLogs, {});
+  const waterLogs = useQuery(api.water.listMyWater, {});
+  const foods = useQuery(api.foods.listMyFoods, {});
 
   const [period, setPeriod] = useState<Period>(30);
   const days = useMemo(() => lastNDays(period), [period]);
@@ -201,7 +211,9 @@ export default function Progress() {
     weights === undefined ||
     mealRange === undefined ||
     allMeals === undefined ||
-    workoutLogs === undefined;
+    workoutLogs === undefined ||
+    waterLogs === undefined ||
+    foods === undefined;
 
   if (loading) {
     return (
@@ -620,6 +632,41 @@ export default function Progress() {
             >
               <Activity className="size-3.5" />
               Тренировки ({workoutLogs?.length ?? 0})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                exportWater(
+                  (waterLogs ?? []).map((w) => ({
+                    date: w.date,
+                    amountMl: w.amountMl,
+                  })),
+                )
+              }
+            >
+              <GlassWater className="size-3.5" />
+              Вода ({waterLogs?.length ?? 0})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                exportFoods(
+                  (foods ?? []).map((f) => ({
+                    name: f.name,
+                    amount: f.amount,
+                    unit: f.unit,
+                    calories: f.calories,
+                    protein: f.protein,
+                    carbs: f.carbs,
+                    fat: f.fat,
+                  })),
+                )
+              }
+            >
+              <Apple className="size-3.5" />
+              Продукты ({foods?.length ?? 0})
             </Button>
           </div>
         </div>

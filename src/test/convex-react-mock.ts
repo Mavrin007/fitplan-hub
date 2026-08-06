@@ -61,7 +61,11 @@ export const api = {
     logWorkout: ref("workouts.logWorkout"),
     deleteLog: ref("workouts.deleteLog"),
   },
-  water: { getByDate: ref("water.getByDate"), addWater: ref("water.addWater") },
+  water: {
+    getByDate: ref("water.getByDate"),
+    addWater: ref("water.addWater"),
+    listMyWater: ref("water.listMyWater"),
+  },
   activity: { getActivityDays: ref("activity.getActivityDays") },
   guestStats: {
     hasMyData: ref("guestStats.hasMyData"),

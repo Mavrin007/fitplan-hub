@@ -23,6 +23,20 @@ export const getByDate = query({
   },
 });
 
+/** Все записи воды пользователя (для экспорта «Скачать свои данные»). */
+export const listMyWater = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    return await ctx.db
+      .query("waterEntries")
+      .withIndex("by_user_date", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
+  },
+});
+
 /** Добавляет `amountMl` к дневному итогу (upsert, отрицательные значения
  *  уменьшают — итог не уходит ниже нуля). */
 export const addWater = mutation({
