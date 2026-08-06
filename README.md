@@ -117,13 +117,16 @@ convention: `AUTH_<PROVIDER_ID>_ID` / `AUTH_<PROVIDER_ID>_SECRET`;
 `@auth/core` is a **direct** dependency — `src/convex/auth.ts` imports
 `Google` from `@auth/core/providers/google`).
 
-Register the OAuth client in Google Cloud Console with these redirect URIs
-(`<SITE_URL>/api/auth/callback/google` — the callback route is served by
-Convex Auth):
+Register the OAuth client in Google Cloud Console (full step-by-step in
+«Enabling Google OAuth» below, including the consent screen and test users)
+with these redirect URIs — the callback route is served by Convex Auth at
+`CONVEX_SITE_URL`:
 
 - Local dev: `http://127.0.0.1:3211/api/auth/callback/google` (port 3211 is
   the local `CONVEX_SITE_URL`)
-- Production: `https://<your-domain>/api/auth/callback/google`
+- Production: `https://<project>.convex.cloud/api/auth/callback/google` (the
+  Convex cloud URL from step 1 — **not** the Vercel domain: Vercel's SPA
+  rewrites would intercept the callback)
 
 Do **NOT** set `VLY_EMAIL_DEV_CAPTURE` in production — the dev OTP capture is
 for local work only. Guest sign-in works immediately; email OTP sends the code
@@ -131,11 +134,27 @@ through the VLY gateway (`vly.email.send`) using `VLY_INTEGRATION_KEY`. For
 letters to be delivered, verify the sender domain in the VLY dashboard — until
 then the send call returns an error and the code is not delivered.
 
-OTP delivery is rate-limited server-side (`src/convex/otpRateLimit.ts`):
-re-sending a code to the same email within 60 seconds is rejected before the
-VLY gateway is hit. Failed code-entry attempts are additionally capped at 5
-per hour (`signIn.maxFailedAttempsPerHour` in `src/convex/auth.ts`, built into
-`@convex-dev/auth`).
+### OTP security model (`src/convex/auth/emailOtp.ts` + `src/convex/otpRateLimit.ts`)
+
+- **15-minute expiry** — `Email({ maxAge: 60 * 15 })`: the code dies after 15
+  minutes. The client mirrors this (`src/pages/Auth.tsx`): the dev capture
+  block counts down («Код истекает через N мин»), and submitting an expired
+  code shows the distinct «Код истёк. Нажмите “Отправить ещё раз”.» message
+  instead of the generic wrong-code error — without spending a request on the
+  backend (server remains the source of truth for verification).
+- **60-second resend rate-limit** — `OTP_RESEND_INTERVAL_MS` enforced in
+  `sendVerificationRequest` *before* the VLY gateway (or the dev capture) is
+  hit, so re-sending within the window costs nothing. The client pre-checks
+  `canSend` so a blocked resend never reaches `signIn` and the current code
+  stays valid; after the window, re-sending issues a **new** code.
+- **Single-use, email-bound code** — 6 digits from `crypto.getRandomValues`;
+  `@convex-dev/auth` stores the code bound to the requesting email and deletes
+  it on successful verification, so the same code cannot be reused. Guest→
+  email linking keeps the same `userId` (`createOrUpdateUser` in
+  `src/convex/auth.ts`), so attaching an email never orphans the guest's data.
+- **5 failed attempts/hour** — `signIn.maxFailedAttempsPerHour: 5` (built into
+  `@convex-dev/auth`); the client pre-checks `canAttempt` and shows
+  «Слишком много попыток. Подождите N мин» without burning an attempt.
 
 ### 3. Frontend env + deploy to Vercel
 
@@ -163,23 +182,42 @@ You must follow these conventions when using authentication.
 
 All convex authentication functions are already set up. The auth currently uses email OTP, Google OAuth and anonymous (guest) users.
 
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
+The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`
+(already extended with server-side rate-limit and VLY email delivery — change
+it deliberately, not blindly).
 
 The Google OAuth provider lives in `src/convex/auth.ts` (imported from
 `@auth/core/providers/google`); the sign-in button is on `/auth`.
 
 ### Enabling Google OAuth (one-time setup)
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-   → **Create credentials → OAuth client ID** → type **Web application**.
-2. Under **Authorized redirect URIs** add the Convex auth callback:
-   - local backend: `http://127.0.0.1:3210/api/auth/callback/google`
+1. **OAuth consent screen** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   → **OAuth consent screen** (left menu) → **External** → fill in the app name
+   and your email → **Save**. Keep the status **Testing** while developing; in
+   Testing mode only accounts listed in **Test users** can sign in — add your
+   own email there, otherwise Google answers `access_denied`.
+2. **OAuth client ID** — **Credentials** → **Create credentials → OAuth client
+   ID** → type **Web application**.
+3. Under **Authorized redirect URIs** add both callbacks. The callback route is
+   served by Convex Auth at `CONVEX_SITE_URL` — use the Convex URLs, **not**
+   the Vercel domain (its SPA rewrites would return the app instead of the
+   auth endpoint):
+   - local backend: `http://127.0.0.1:3211/api/auth/callback/google`
    - production: `https://<your-project>.convex.cloud/api/auth/callback/google`
-   (also add your frontend URL under **Authorized JavaScript origins**).
-3. Copy the **Client ID** and **Client Secret** into the Convex environment
-   as `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` (Convex Dashboard → Settings →
-   Environment Variables, or `npx convex env set`).
-4. `npx convex deploy` to push the updated `auth.ts` provider list.
+   (Authorized JavaScript origins can stay empty — the flow uses a code
+   exchange, not an implicit flow.)
+4. **Create** → copy the **Client ID** (`*.apps.googleusercontent.com`) and the
+   **Client Secret**.
+5. Set them in the environment. Locally (dev backend reads env at startup —
+   restart `convex dev` after):
+
+   ```bash
+   CONVEX_DEV_DEPLOYMENT=local npx convex env set AUTH_GOOGLE_ID <client-id>
+   CONVEX_DEV_DEPLOYMENT=local npx convex env set AUTH_GOOGLE_SECRET <client-secret>
+   ```
+
+   For production, add the same two variables in the Convex Dashboard
+   (Project → Settings → Environment Variables) and run `npx convex deploy`.
 
 The button on `/auth` then signs the user in with their Google account. When
 an anonymous guest signs in with Google, the existing user and their data are
@@ -191,7 +229,8 @@ kept (account linking, `createOrUpdateUser` in `src/convex/auth.ts`).
 > linking (`allowDangerousEmailAccountLinking`), which is intentionally off
 > to avoid silently joining accounts.
 
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
+These files are already extended (Google OAuth, guest→email linking, attempt
+limits) — change them deliberately, and keep the auth docs above in sync.
 
 ## Using Convex Auth on the backend
 
