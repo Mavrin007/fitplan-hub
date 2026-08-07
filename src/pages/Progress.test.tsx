@@ -245,4 +245,67 @@ describe("Progress", () => {
     expect(over.style.color).toBe("var(--macro-over)");
     expect(screen.getByText("цель достигнута")).toBeInTheDocument();
   });
+
+  it("похудение в процессе: кольцо показывает долю пройденного пути (82 → 78.5, цель 75 = 50%)", () => {
+    const now = new Date();
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 82),
+      weightEntry(toDateKey(new Date(now.getTime() - 7 * 86400000)), 80),
+      weightEntry(todayKey(), 78.5),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // Путь 82 → 78.5 = половина из 7 кг до цели 75: goalProgress ровно 0.5.
+    expect(screen.getByRole("img", { name: "50% от цели" })).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("к цели 75.0 кг")).toBeInTheDocument();
+    // Прогресс < 100% — карточка-инсайт в режиме прогноза, а не «цель достигнута».
+    expect(screen.queryByText("75.0 кг — вы справились! 🎉")).not.toBeInTheDocument();
+  });
+
+  it("набор массы: цель выше старта, прогресс считается в ту же сторону (80 → 82, цель 85 = 40%)", () => {
+    const now = new Date();
+    // Цель набора — выше текущего веса: фикстура похудения переопределена.
+    setQuery(api.profiles.getMyProfile, undefined, { ...profile, targetWeightKg: 85 });
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 80),
+      weightEntry(toDateKey(new Date(now.getTime() - 7 * 86400000)), 81),
+      weightEntry(todayKey(), 82),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // Путь 80 → 82 = 2 из 5 кг до цели 85: goalProgress 0.4.
+    expect(screen.getByRole("img", { name: "40% от цели" })).toBeInTheDocument();
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.getByText("к цели 85.0 кг")).toBeInTheDocument();
+  });
+
+  it("цель достигнута ровно (82 → 75): кольцо на 100%, без состояния перебора", () => {
+    const now = new Date();
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 82),
+      weightEntry(todayKey(), 75),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // goalProgress = 1: кольцо честно на 100% («100% от цели», не «Превышение»),
+    // внутри «100%» + зелёная подпись «цель достигнута».
+    expect(screen.getByRole("img", { name: "100% от цели" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Превышение/ })).not.toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("цель достигнута")).toBeInTheDocument();
+    // Карточка-инсайт: заголовок «Цель достигнута» и поздравление.
+    expect(screen.getByText("75.0 кг — вы справились! 🎉")).toBeInTheDocument();
+  });
 });
