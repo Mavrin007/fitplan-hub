@@ -6,15 +6,17 @@ import { cn } from "@/lib/utils";
  * доза в граммах или процент от цели, под кольцом — подпись.
  * Используется на «Обзоре» и в «Питании».
  *
- * При переборе цели (value > target) кольцо загорается красным, значение
- * подсвечивается, а под ним показывается перебор: «+N%» (center="percent")
- * или «+N г» (center="target").
+ * При переборе цели (value > target) кольцо подсвечивается мягким зелёным
+ * (`--macro-over`): перебор белка/углеводов не вреден, поэтому красный цвет
+ * оставлен только калориям. Под значением показывается перебор: «+N%»
+ * (center="percent") или «+N г» (center="target").
  */
 export function MacroRing({
   label,
   value,
   target,
   color,
+  overColor = "var(--macro-over)",
   delay = 0,
   center = "target",
 }: {
@@ -22,6 +24,8 @@ export function MacroRing({
   value: number;
   target: number;
   color: string;
+  /** Цвет дуги/подсветки при переборе цели. По умолчанию — мягкий зелёный. */
+  overColor?: string;
   delay?: number;
   /** Что показывать под значением: целевую дозу в граммах или процент. */
   center?: "target" | "percent";
@@ -47,23 +51,21 @@ export function MacroRing({
         size={76}
         stroke={7}
         color={color}
+        overColor={overColor}
         delay={delay}
       >
         <span
-          className={cn(
-            "text-sm font-semibold num",
-            isOver && "text-destructive",
-          )}
+          className={cn("text-sm font-semibold num", !isOver && "text-foreground")}
+          style={isOver ? { color: overColor } : undefined}
         >
           {Math.round(value)}
         </span>
         <span
           className={cn(
             "text-[9px] uppercase tracking-wider num",
-            isOver
-              ? "font-semibold text-destructive"
-              : "text-muted-foreground",
+            isOver ? "font-semibold" : "text-muted-foreground",
           )}
+          style={isOver ? { color: overColor } : undefined}
         >
           {sub}
         </span>
