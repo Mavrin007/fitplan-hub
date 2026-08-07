@@ -83,8 +83,108 @@ jobs:
 
       # Собираем той же командой, что и Vercel (vercel.json buildCommand) —
       # локальная проверка = прод-сборка, никаких расхождений.
+      # SEO-файлы (robots.txt/sitemap.xml) генерятся перед сборкой: в CI
+      # задан SITE_URL, поэтому canonical/og:url указывают на прод-домен.
+      - name: Generate SEO files
+        run: node scripts/generate-seo.mjs
+
       - name: Build
         run: npm run build
+
+  # Web Vitals (Lighthouse): против прод-сборки (vite preview из dist).
+  # Страница для замера — публичный лендинг «/» (аутентифицированные
+  # страницы требуют сессии, их перф замеряется e2e/первым экраном).
+  # Chrome на ubuntu-latest уже установлен — chrome-launcher находит его сам.
+  #
+  # Пороги Web Vitals: заданы env ниже — при локальном запуске тот же скрипт
+  # читает эти переменные (дефолты в scripts/lighthouse-check.mjs служат
+  # фолбэком, когда env не задан, так что число одно на CI и локально):
+  #   LCP < 2500 мс · FCP < 1800 мс · TBT < 300 мс · CLS < 0.1
+  # Лучший из 2 прогонов — CI-раннеры шумят. Тюнинг порогов — только здесь
+  # (или через repo/org env): если лендинг реально ускорился/замедлился,
+  # правка одного числа вместо коммита в код.
+  #
+  # Мобильный сценарий (simulated Fast 4G + 4x CPU) даёт LCP ~4.4 с и
+  # осознанно НЕ является гейтом: сначала сокращение бандла, затем гейт
+  # подтягивают до mobile-simulate (см. README → Performance & Web Vitals).
+  #
+  # Отчёт (JSON + HTML) сохраняется в perf-report/ и загружается артефактом
+  # даже при упавшем гейте — регрессию можно расследовать, а не только увидеть.
+  perf:
+    name: Web Vitals (Lighthouse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    # Запускаем и на push в main, и в PR — регрессии Web Vitals ловятся до мержа.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Lighthouse (Web Vitals gate)
+        env:
+          PERF_LCP_MAX_MS: "2500"
+          PERF_FCP_MAX_MS: "1800"
+          PERF_TBT_MAX_MS: "300"
+          PERF_CLS_MAX: "0.1"
+        run: node scripts/lighthouse-check.mjs
+
+      # Артефакт сохраняется даже при упавшем шаге выше (скрипт пишет отчёт
+      # ДО проверки порогов): если гейт красный — в артефакте лежит почему.
+      - name: Upload Lighthouse report
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: perf-report
+          if-no-files-found: error
+          retention-days: 14
+
+  # E2E (Playwright): полный локальный стек (convex dev + vite dev) поднимается
+  # самим Playwright (webServer в playwright.config.ts). Прогоняются все
+  # проекты: критический путь (e2e/critical-path.spec.ts), сквозной axe-аудит
+  # доступности (e2e/a11y.spec.ts) и мобильная адаптивность без
+  # горизонтального скролла (e2e/mobile.spec.ts, viewport 375px).
+  # Локально: npm run test:e2e (см. .freebuff/run.md → “E2E (Playwright)”).
+  e2e:
+    name: E2E (critical path · axe · mobile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # E2E требует локального Convex-бэкенда с auth-ключами и dev-OTP
+      # (VLY_EMAIL_DEV_CAPTURE=1). Без настроенных env джоба честно падает —
+      # это сигнал добавить ключи (см. run.md), а не тихий скип.
+      - name: E2E (critical path · axe · mobile)
+        run: npx playwright test
 
   # Деплой в продакшен: только push в основную ветку main, только после
   # зелёной проверки, и только если в репозитории настроены Vercel-секреты
@@ -114,6 +214,9 @@ jobs:
       # Deploy token для облачного Convex: создаётся в настройках проекта Convex
       # (Dashboard → Project → Settings → Deploy Keys). Без него шаг пропускается.
       CONVEX_DEPLOY_TOKEN: ${{ secrets.CONVEX_DEPLOY_TOKEN }}
+      # Webhook для алертинга об упавшем деплое (Telegram bot URL, Slack
+      # Incoming Webhook и т.п.) — см. шаг «Notify on failure» ниже.
+      DEPLOY_ALERT_WEBHOOK: ${{ secrets.DEPLOY_ALERT_WEBHOOK }}
 
     steps:
       - name: Checkout
@@ -184,3 +287,83 @@ jobs:
           test -n "$DEPLOY_URL" || { echo "::error::DEPLOY_URL пуст — деплой не удался"; exit 1; }
           curl -fsS -o /dev/null -w "GET $DEPLOY_URL -> %{http_code}\n" "$DEPLOY_URL"
           curl -fsS -o /dev/null -w "GET $DEPLOY_URL/dashboard -> %{http_code}\n" "$DEPLOY_URL/dashboard"
+
+      # Алертинг об упавшем деплое: если любой шаг выше упал и задан webhook —
+      # шлём уведомление со ссылкой на прогон. Без секрета шаг пропускается,
+      # CI остаётся зелёным в локальных репозиториях без мониторинга.
+      - name: Notify on deploy failure
+        if: failure() && env.DEPLOY_ALERT_WEBHOOK != ''
+        run: |
+          curl -fsS -X POST "$DEPLOY_ALERT_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\":\"🔴 Deploy FAILED (${{ github.repository }})\n\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+
+  # Staging: Vercel preview-деплой на каждый PR. Отдельного GitHub Environment
+  # не нужно — preview-окружение Vercel и есть staging: каждый PR получает
+  # уникальный URL, который смоук-тестируется и комментится в PR.
+  #
+  # Предусловие: в панели Vercel у проекта должен быть настроен preview-енв
+  # с теми же переменными, что и production (VITE_CONVEX_URL и др.) — тогда
+  # `vercel pull --environment=preview` их подтянет, а guard не упадёт.
+  # Если preview-енв не настроен — джоба честно падает с понятной ошибкой
+  # (сигнал дополнить preview-переменные), а не деплоит пустую сборку.
+  deploy-preview:
+    name: Deploy preview (staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    # PR из форков не видят секреты — preview-деплой работает для PR из
+    # этого же репозитория (обычный сценарий одной команды).
+    if: github.event_name == 'pull_request' && secrets.VERCEL_TOKEN != ''
+    concurrency:
+      group: deploy-preview-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull Vercel preview settings
+        run: npx --yes vercel@58 pull --yes --environment=preview
+
+      # Гард: preview-сборка тоже обязана иметь валидный VITE_CONVEX_URL.
+      # Скрипт принимает путь к env-файлу аргументом (см. scripts/guard-prod-env.mjs).
+      - name: Guard preview env (VITE_CONVEX_URL)
+        run: node scripts/guard-prod-env.mjs .vercel/.env.preview.local
+
+      - name: Build (preview)
+        run: npx --yes vercel@58 build --prebuilt
+
+      # Без --prod: деплой уходит в preview-окружение (staging URL).
+      - name: Deploy to Vercel preview
+        run: |
+          npx --yes vercel@58 deploy --prebuilt 2>&1 | tee /tmp/vercel-preview.log
+          echo "PREVIEW_URL=$(grep -oE 'https://[^ ]+' /tmp/vercel-preview.log | tail -1)" >> "$GITHUB_ENV"
+
+      - name: Smoke test preview URL
+        run: |
+          test -n "$PREVIEW_URL" || { echo "::error::PREVIEW_URL пуст — деплой не удался"; exit 1; }
+          curl -fsS -o /dev/null -w "GET $PREVIEW_URL -> %{http_code}\n" "$PREVIEW_URL"
+
+      # Комментим staging-URL в PR, чтобы ревьюеру не искать его в Actions.
+      - name: Comment preview URL on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body "🟢 Preview (staging): $PREVIEW_URL"

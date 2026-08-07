@@ -1,0 +1,41 @@
+# Автоматические обновления зависимостей (Dependabot).
+#
+# npm — раз в неделю (воскресенье), PR-ы по одному на пакет, не больше 10
+# открытых одновременно (чтобы не завалить очередь CI). Каждый PR гоняет
+# полный CI (lint/tsc/test/coverage/build/perf/e2e) — регрессии видны до мержа.
+# github-actions — раз в месяц (первое число), обновление экшенов workflow.
+#
+# Локальная проверка обновлений без ожидания расписания: `npm outdated` +
+# ручной bump в package.json, либо `npx npm-check-updates -u` (ставится по вкусу).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "05:00"
+      timezone: "Europe/Minsk"
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    groups:
+      # Мажорные bump'ы приходят отдельными PR (главный источник регрессий),
+      # а вот патчи/миноры можно группировать, чтобы не плодить PR.
+      minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # CLI Convex привязан к серверу локального dev — обновляем вручную.
+      - dependency-name: "convex"
+      - dependency-name: "@convex-dev/*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+      day: 1
+      time: "05:00"
+      timezone: "Europe/Minsk"
+    open-pull-requests-limit: 5

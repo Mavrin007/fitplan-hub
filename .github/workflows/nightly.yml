@@ -1,0 +1,71 @@
+name: Nightly
+
+# Ночной полный прогон против main: ловит flaky-тесты, устаревшие зависимости
+# и регрессии окружения, которые не видны на PR (стабильный зелёный CI может
+# маскировать медленно деградирующие тесты). Каждый день в 03:00 по UTC
+# (06:00 по Минску) прогоняется та же связка, что и в CI, но без деплоя.
+#
+# Отдельно от CI-прогона на push: PR-прогон «живёт» вместе с PR, а ночной
+# замеряет именно состояние main. При падении — уведомление через
+# DEPLOY_ALERT_WEBHOOK (если секрет задан), иначе просто красная проверка
+# на вкладке Actions.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  # Ручной запуск с вкладки Actions (для диагностики).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: Nightly full run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DEPLOY_ALERT_WEBHOOK: ${{ secrets.DEPLOY_ALERT_WEBHOOK }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Audit — ловит новые CVE, появившиеся после последнего Dependabot-прогона.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Tests + coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      # Уведомление при падении ночного прогона (flaky, устаревшие депы).
+      # Webhook задаётся секретом DEPLOY_ALERT_WEBHOOK (Telegram bot API URL,
+      # Slack Incoming Webhook и т.п.) — без него шаг просто пропускается.
+      - name: Notify on failure
+        if: failure() && env.DEPLOY_ALERT_WEBHOOK != ''
+        run: |
+          curl -fsS -X POST "$DEPLOY_ALERT_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\":\"🔴 Nightly run FAILED (${{ github.repository }})\\n\\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
