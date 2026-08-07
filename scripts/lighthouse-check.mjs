@@ -135,16 +135,21 @@ async function main() {
   }
 
   const targetUrl = urlArg ?? URL;
-  // Ubuntu-раннеры имеют /dev/shm всего 64 МБ — без --disable-dev-shm-usage
-  // Chrome роняет рендерер, и прогон возвращает error-аудиты без метрик (NaN).
   // Флаги обязаны идти launcher'у: lighthouse() их игнорирует, когда передан
-  // готовый `port` (поэтому chromeFlags в опциях lighthouse выше не дублируем).
+  // готовый `port` (поэтому chromeFlags в опциях lighthouse не дублируем).
+  // Набор проверен на ubuntu-раннерах (Chrome 132+):
+  //  - --disable-dev-shm-usage: /dev/shm всего 64 МБ — без него рендерер падает;
+  //  - --enable-unsafe-swiftshader: в новом headless (Chrome 132+) софтверный
+  //    GL требуется разрешить явно, иначе страница не рисует НИ ОДНОГО кадра
+  //    и Lighthouse падает с NO_FCP «The page did not paint any content»;
+  //  - --disable-gpu НЕ добавляем: с новым headless он как раз и провоцирует
+  //    пустой кадр (NO_FCP), хотя локально на Windows всё рисуется.
   const chrome = await launch({
     chromeFlags: [
       "--headless",
       "--no-sandbox",
-      "--disable-gpu",
       "--disable-dev-shm-usage",
+      "--enable-unsafe-swiftshader",
     ],
   });
 

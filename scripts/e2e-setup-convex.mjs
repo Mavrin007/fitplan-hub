@@ -66,8 +66,12 @@ function makeAuthEnv() {
 }
 
 function setEnv(name, value) {
-  const res = spawnSync("npx", ["convex", "env", "set", name, value], {
-    stdio: "inherit",
+  // Значение передаём через stdin (команда без value-аргумента), а не
+  // аргументом: PEM-ключ и JWKS начинаются с '-', и commander-CLI принял бы
+  // их за опцию («error: unknown option '-----BEGIN PRIVATE KEY-----'»).
+  const res = spawnSync("npx", ["convex", "env", "set", name], {
+    input: value,
+    stdio: ["pipe", "inherit", "inherit"],
     env: { ...process.env, CONVEX_DEV_DEPLOYMENT: "local" },
   });
   if (res.status !== 0) {
