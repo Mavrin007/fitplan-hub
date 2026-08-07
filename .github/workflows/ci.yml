@@ -144,6 +144,10 @@ jobs:
       # Артефакт сохраняется даже при упавшем шаге выше (скрипт пишет отчёт
       # ДО проверки порогов): если гейт красный — в артефакте лежит почему.
       - name: Upload Lighthouse report
+        # Артефакт нужен именно когда гейт упал (скрипт пишет отчёт ДО сверки
+        # порогов) — без if: always() шаг пропускается после failure, и
+        # расследовать регрессию было бы не по чему.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-report
@@ -180,9 +184,20 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # E2E требует локального Convex-бэкенда с auth-ключами и dev-OTP
-      # (VLY_EMAIL_DEV_CAPTURE=1). Без настроенных env джоба честно падает —
-      # это сигнал добавить ключи (см. run.md), а не тихий скип.
+      # E2E требует локального Convex-бэкенда с auth-окружением (JWT_PRIVATE_KEY,
+      # JWKS, SITE_URL) и dev-перехватом OTP (VLY_EMAIL_DEV_CAPTURE=1). Свежий
+      # `convex dev` на раннере создаёт пустой деплой — без этих переменных
+      # @convex-dev/auth падает (requireEnv), /auth не рендерится, и все тесты
+      # уходят в таймаут по h1. Поднимаем бэкенд в фоне и ставим env скриптом
+      # scripts/e2e-setup-convex.mjs (JWT-ключи генерируются на лету — в
+      # репозиторий и GitHub-секреты ничего не кладётся). Playwright затем
+      # переиспользует уже поднятый бэкенд (reuseExistingServer: true).
+      - name: Prepare local Convex backend (auth env)
+        run: |
+          npx convex dev --typecheck disable > /tmp/convex-e2e.log 2>&1 &
+          node scripts/e2e-setup-convex.mjs
+          tail -2 /tmp/convex-e2e.log
+
       - name: E2E (critical path · axe · mobile)
         run: npx playwright test
 
