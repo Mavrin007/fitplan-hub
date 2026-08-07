@@ -751,7 +751,7 @@ export default function Workouts() {
         <ChartCard
           title="Недельный тоннаж"
           subtitle="Тоннаж = вес × повторы × подходы. Рост тоннажа по неделям — признак прогресса в силе и массе."
-          legend={<LegendChip color="var(--foreground)" label="Тоннаж (кг)" />}
+          legend={<LegendChip color="var(--accent-activity)" label="Тоннаж (кг)" />}
         >
           {tonnageData.length === 0 ? (
             <div className="flex h-[200px] items-center justify-center">
@@ -768,7 +768,9 @@ export default function Workouts() {
               key={`tonnage-${tonnageData.length}`}
               data={tonnageData}
               xKey="label"
-              series={[{ key: "tonnage", name: "Тоннаж", fill: "var(--foreground)" }]}
+              series={[
+                { key: "tonnage", name: "Тоннаж", fill: "var(--accent-activity)" },
+              ]}
               height={200}
               labelInterval={Math.max(0, Math.floor(tonnageData.length / 6) - 1)}
               maxBarSize={36}

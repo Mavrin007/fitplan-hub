@@ -3,6 +3,7 @@ import { useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ChartCard, LegendChip } from "@/components/chart-card";
+import { ProgressRing } from "@/components/progress-ring";
 import { PageAurora } from "@/components/page-aurora";
 import { ChartScene } from "@/components/illustrations";
 import { Chip } from "@/components/ui/chip";
@@ -124,6 +125,24 @@ export default function Progress() {
     );
   }, [weights, targetWeight]);
 
+  // Пройденный путь к цели: от первого замера к текущему, доля от всего
+  // расстояния до целевого веса. Работает в обе стороны (похудение и набор):
+  // старт = 0%, достижение цели = 100%. Перебор (goalProgress > 1) — цель
+  // достигнута и пройдена дальше: кольцо загорается зелёным «цель достигнута».
+  const goalProgress = useMemo(() => {
+    if (!targetWeight) return 0;
+    const sorted = [...(weights ?? [])].sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+    if (sorted.length === 0) return 0;
+    const start = sorted[0].weightKg;
+    const current = sorted[sorted.length - 1].weightKg;
+    const span = targetWeight - start;
+    if (Math.abs(span) < 0.01) return 1; // уже на цели
+    // Верхний предел не клампим: перебор = «прошли цель» (зелёная подсветка).
+    return Math.max(0, (current - start) / span);
+  }, [weights, targetWeight]);
+
   const calorieData = useMemo(() => {
     const byDate = new Map<string, number>();
     for (const e of mealRange ?? []) {
@@ -229,8 +248,10 @@ export default function Progress() {
         </p>
       </header>
 
-      {/* Карточка-инсайт: прогноз достижения цели */}
-      {projection && (
+      {/* Карточка-инсайт: прогноз достижения цели (и состояние «цель
+          достигнута», когда прогноз уже не строится — projectGoal честно
+          возвращает null после пересечения цели). */}
+      {targetWeight && (projection || goalProgress >= 1) && (
         <section className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1">
           <div className="flex flex-wrap items-center justify-between gap-4 p-6 sm:p-8">
             <div className="flex min-w-0 items-center gap-4">
@@ -238,41 +259,79 @@ export default function Progress() {
                 <Target className="size-5" />
               </div>
               <div className="min-w-0">
-                <p className="label-overline text-muted-foreground">
-                  Прогноз по текущему темпу
-                </p>
-                <p className="m3-title-large mt-0.5">
-                  {targetWeight?.toFixed(1)} кг — около{" "}
-                  {new Date(projection.etaDate).toLocaleDateString("ru-RU", {
-                    day: "numeric",
-                    month: "long",
-                  })}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Темп {projection.ratePerWeek.toFixed(1)} кг/нед · до цели{" "}
-                  {humanizeDistance(projection.etaDate, todayKey())} · осталось{" "}
-                  {projection.remainingKg.toFixed(1)} кг
-                  {!projection.confident && " · прогноз предварительный"}
-                </p>
+                {goalProgress >= 1 ? (
+                  <>
+                    <p className="label-overline text-muted-foreground">
+                      Цель достигнута
+                    </p>
+                    <p className="m3-title-large mt-0.5">
+                      {targetWeight.toFixed(1)} кг — вы справились! 🎉
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Осталось удержать результат — малые ежедневные шаги по-прежнему окупаются.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="label-overline text-muted-foreground">
+                      Прогноз по текущему темпу
+                    </p>
+                    <p className="m3-title-large mt-0.5">
+                      {targetWeight?.toFixed(1)} кг — около{" "}
+                      {new Date(projection!.etaDate).toLocaleDateString("ru-RU", {
+                        day: "numeric",
+                        month: "long",
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Темп {projection!.ratePerWeek.toFixed(1)} кг/нед · до цели{" "}
+                      {humanizeDistance(projection!.etaDate, todayKey())} · осталось{" "}
+                      {projection!.remainingKg.toFixed(1)} кг
+                      {!projection!.confident && " · прогноз предварительный"}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
-            <div className="w-full max-w-56">
-              <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
-                <span>Сейчас</span>
-                <span>Цель {targetWeight?.toFixed(1)}</span>
-              </div>
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-brand transition-all duration-700"
-                  style={{
-                    width: `${Math.min(100, Math.max(4, (projection.remainingKg / Math.max(1, projection.remainingKg + 5)) * 100))}%`,
-                  }}
-                />
-              </div>
-              <p className="mt-1.5 text-right text-[10px] text-muted-foreground num">
-                путь к цели
-              </p>
-            </div>
+            <ProgressRing
+              value={goalProgress * 100}
+              max={100}
+              size={92}
+              stroke={7}
+              color="var(--brand)"
+              // Достижение цели — позитив: зелёный перебор, а не красный.
+              overColor="var(--macro-over)"
+              delay={0.1}
+            >
+              {goalProgress > 1 ? (
+                <>
+                  <span className="text-lg font-semibold num" style={{ color: "var(--macro-over)" }}>
+                    +{Math.round((goalProgress - 1) * 100)}%
+                  </span>
+                  <span
+                    className="text-[9px] font-semibold uppercase tracking-wider"
+                    style={{ color: "var(--macro-over)" }}
+                  >
+                    цель достигнута
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-lg font-semibold num">
+                    {Math.round(goalProgress * 100)}%
+                  </span>
+                  <span
+                    className={
+                      goalProgress >= 1
+                        ? "text-[9px] font-semibold uppercase tracking-wider text-[var(--macro-over)]"
+                        : "text-[9px] uppercase tracking-wider text-muted-foreground"
+                    }
+                  >
+                    {goalProgress >= 1 ? "цель достигнута" : `к цели ${targetWeight?.toFixed(1)} кг`}
+                  </span>
+                </>
+              )}
+            </ProgressRing>
           </div>
         </section>
       )}
@@ -295,7 +354,7 @@ export default function Progress() {
             }
             legend={
               <>
-                <LegendChip color="var(--foreground)" label="Вес (кг)" />
+                <LegendChip color="var(--brand)" label="Вес (кг)" />
                 {targetWeight !== null && (
                   <LegendChip
                     color="var(--muted-foreground)"
@@ -347,6 +406,7 @@ export default function Progress() {
                 referenceLabel={
                   targetWeight ? `Цель ${targetWeight.toFixed(1)}` : undefined
                 }
+                color="var(--brand)"
               />
             )}
           </ChartCard>
@@ -357,7 +417,7 @@ export default function Progress() {
             subtitle={`Последние ${period} дней против цели`}
             legend={
               <>
-                <LegendChip color="var(--foreground)" label="Потреблено" />
+                <LegendChip color="var(--brand)" label="Потреблено" />
                 <LegendChip
                   color="var(--muted-foreground)"
                   dashed
@@ -376,7 +436,7 @@ export default function Progress() {
                 key={`cal-${period}`}
                 data={calorieData}
                 xKey="date"
-                series={[{ key: "calories", name: "ккал", fill: "var(--foreground)" }]}
+                series={[{ key: "calories", name: "ккал", fill: "var(--brand)" }]}
                 height={CHART_HEIGHT}
                 labelInterval={labelInterval}
                 referenceY={targets.calories}
@@ -391,9 +451,9 @@ export default function Progress() {
             subtitle={`Белки · Углеводы · Жиры, последние ${period} дн. (г)`}
             legend={
               <>
-                <LegendChip color="var(--foreground)" label="Белки" />
-                <LegendChip color="var(--muted-foreground)" label="Углеводы" />
-                <LegendChip color="var(--border)" label="Жиры" />
+                <LegendChip color="var(--macro-protein)" label="Белки" />
+                <LegendChip color="var(--macro-carbs)" label="Углеводы" />
+                <LegendChip color="var(--macro-fat)" label="Жиры" />
               </>
             }
           >
@@ -408,9 +468,9 @@ export default function Progress() {
                 data={macroData}
                 xKey="date"
                 series={[
-                  { key: "Белки", name: "Белки", fill: "var(--foreground)" },
-                  { key: "Углеводы", name: "Углеводы", fill: "var(--muted-foreground)" },
-                  { key: "Жиры", name: "Жиры", fill: "var(--border)" },
+                  { key: "Белки", name: "Белки", fill: "var(--macro-protein)" },
+                  { key: "Углеводы", name: "Углеводы", fill: "var(--macro-carbs)" },
+                  { key: "Жиры", name: "Жиры", fill: "var(--macro-fat)" },
                 ]}
                 height={CHART_HEIGHT}
                 labelInterval={labelInterval}
@@ -422,7 +482,9 @@ export default function Progress() {
           <ChartCard
             title="Тренировки"
             subtitle={`Выполненные тренировки по неделям за ${period} дн.`}
-            legend={<LegendChip color="var(--foreground)" label="Сессий в неделю" />}
+            legend={
+              <LegendChip color="var(--accent-activity)" label="Сессий в неделю" />
+            }
           >
             {workoutsEmpty ? (
               <EmptyChart
@@ -434,7 +496,13 @@ export default function Progress() {
                 key={`wk-${period}`}
                 data={workoutData}
                 xKey="label"
-                series={[{ key: "sessions", name: "Тренировки", fill: "var(--foreground)" }]}
+                series={[
+                  {
+                    key: "sessions",
+                    name: "Тренировки",
+                    fill: "var(--accent-activity)",
+                  },
+                ]}
                 height={CHART_HEIGHT}
                 allowDecimals={false}
               />

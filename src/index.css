@@ -125,6 +125,8 @@
   --macro-carbs: oklch(0.68 0.15 82);
   --macro-fat: oklch(0.55 0.2 300);
   --macro-over: oklch(0.55 0.14 152);
+  /* Графики: тренировки/активность — небесно-голубой (отличается от брендового мятного) */
+  --accent-activity: oklch(0.55 0.15 250);
   --sidebar: oklch(0.97 0.004 195);
   --sidebar-foreground: oklch(0.16 0.005 195);
   --sidebar-primary: oklch(0.45 0.11 185);
@@ -198,6 +200,8 @@
   --macro-carbs: oklch(0.8 0.16 82);
   --macro-fat: oklch(0.72 0.18 300);
   --macro-over: oklch(0.78 0.15 152);
+  /* Графики: тренировки/активность — небесно-голубой (отличается от брендового мятного) */
+  --accent-activity: oklch(0.75 0.12 250);
   --sidebar: oklch(0.2 0.006 195);
   --sidebar-foreground: oklch(0.93 0.005 195);
   --sidebar-primary: oklch(0.78 0.09 185);

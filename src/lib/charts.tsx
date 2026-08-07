@@ -198,6 +198,8 @@ export interface SVGAreaChartProps {
   referenceY?: number;
   referenceLabel?: string;
   tooltipFormatter?: (value: number) => string;
+  /** Цвет линии, градиентной заливки и точки под курсором. */
+  color?: string;
   className?: string;
 }
 
@@ -215,6 +217,7 @@ export function SVGAreaChart({
   referenceY,
   referenceLabel,
   tooltipFormatter,
+  color = "var(--brand)",
   className,
 }: SVGAreaChartProps) {
   const { ref, width } = useChartWidth();
@@ -270,8 +273,8 @@ export function SVGAreaChart({
       <svg width={width} height={height} role="img" style={{ opacity, transition: `opacity ${lineAnim.animationDuration}ms ease-out` }}>
         <defs>
           <linearGradient id={`area-${gid}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--foreground)" stopOpacity={0.18} />
-            <stop offset="100%" stopColor="var(--foreground)" stopOpacity={0} />
+            <stop offset="0%" stopColor={color} stopOpacity={0.2} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
 
@@ -365,7 +368,7 @@ export function SVGAreaChart({
           <path
             d={linePath}
             fill="none"
-            stroke="var(--foreground)"
+            stroke={color}
             strokeWidth={1.5}
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -383,7 +386,7 @@ export function SVGAreaChart({
               stroke="var(--muted)"
               strokeWidth={1}
             />
-            <circle cx={hoverPoint.x} cy={hoverPoint.y} r={3} fill="var(--foreground)" />
+            <circle cx={hoverPoint.x} cy={hoverPoint.y} r={3} fill={color} />
           </>
         )}
 
@@ -399,7 +402,7 @@ export function SVGAreaChart({
         />
       </svg>
 
-      {/* HTML-тултип */}
+      {/* HTML-тултип: подпись точки (дата) + значение */}
       {hoverVal !== null && hoverPoint && (
         <div
           style={{
@@ -413,10 +416,15 @@ export function SVGAreaChart({
             whiteSpace: "nowrap",
           }}
         >
-          <span className="font-medium">{name}: </span>
-          <span className="num">
-            {tooltipFormatter ? tooltipFormatter(hoverVal) : formatChartValue(hoverVal)}
-          </span>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {String(data[hoverPoint.i][xKey])}
+          </div>
+          <div>
+            <span className="font-medium">{name}: </span>
+            <span className="num">
+              {tooltipFormatter ? tooltipFormatter(hoverVal) : formatChartValue(hoverVal)}
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -482,6 +490,7 @@ export function SVGBarChart({
 }: SVGBarChartProps) {
   const { ref, width } = useChartWidth();
   const opacity = useFadeIn(barAnim.animationBegin);
+  const gid = useId().replace(/[^a-zA-Z0-9]/g, "");
 
   const { top, bottom, left, right } = BAR_MARGIN;
   const innerW = Math.max(10, width - left - right);
@@ -520,6 +529,22 @@ export function SVGBarChart({
   return (
     <div ref={ref} className={className} style={{ position: "relative", height }}>
       <svg width={width} height={height} role="img" style={{ opacity, transition: `opacity ${barAnim.animationDuration}ms ease-out` }}>
+        {/* Вертикальные градиенты столбцов: светлее сверху → насыщеннее у
+            основания — глубина как у кольца прогресса. По одному на серию
+            (в стеке каждая сегментация ссылается на градиент своего цвета). */}
+        <defs>
+          {series.map((sr) => (
+            <linearGradient
+              key={`grad-${sr.key}`}
+              id={`bar-${gid}-${sr.key}`}
+              x1="0" y1="0" x2="0" y2="1"
+            >
+              <stop offset="0%" stopColor={sr.fill} stopOpacity={0.6} />
+              <stop offset="100%" stopColor={sr.fill} stopOpacity={1} />
+            </linearGradient>
+          ))}
+        </defs>
+
         {/* Горизонтальная сетка */}
         {ticks.map((t) => (
           <line
@@ -631,11 +656,12 @@ export function SVGBarChart({
             if (seg.v <= 0) return null;
             const rounded = si === lastNonZero;
             const h = seg.y1 - seg.y2;
+            const fill = `url(#bar-${gid}-${seg.sr.key})`;
             return rounded ? (
               <path
                 key={`${i}-${seg.sr.key}`}
                 d={topRoundedRect(x, seg.y2, barW, h, topR)}
-                fill={seg.sr.fill}
+                fill={fill}
               />
             ) : (
               <rect
@@ -644,7 +670,7 @@ export function SVGBarChart({
                 y={seg.y2}
                 width={barW}
                 height={h}
-                fill={seg.sr.fill}
+                fill={fill}
               />
             );
           });
@@ -662,7 +688,7 @@ export function SVGBarChart({
         />
       </svg>
 
-      {/* HTML-тултип */}
+      {/* HTML-тултип: подпись точки (дата) + значения серий */}
       {hoverD && (
         <div
           style={{
@@ -676,6 +702,9 @@ export function SVGBarChart({
             whiteSpace: "nowrap",
           }}
         >
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {String(hoverD[xKey])}
+          </div>
           {series.map((sr, si) => {
             const v = num(hoverD, sr.key);
             if (v <= 0 && series.length > 1) return null;
