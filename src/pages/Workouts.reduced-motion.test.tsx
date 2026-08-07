@@ -84,8 +84,13 @@ describe("Workouts · prefers-reduced-motion", () => {
       </MemoryRouter>,
     );
 
+    // Сигнал на проскочившую анимацию: проверка через ~1 кадр (80 мс), а не
+    // после 450 мс — при настоящем твине (y 10→0, ~300 мс) через 80 мс
+    // transform был бы mid-flight translateY(≈6px) и ассерт «none» упал бы.
+    // При reduced motion y входит в positionalKeys → тип { type: false },
+    // финальный keyframe применяется мгновенно: transform уже "none".
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await new Promise((resolve) => setTimeout(resolve, 80));
     });
 
     // День плана отрисован — reduced-motion не прячет контент.

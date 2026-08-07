@@ -78,8 +78,13 @@ describe("Profile · prefers-reduced-motion", () => {
       </MemoryRouter>,
     );
 
+    // Сигнал на проскочившую layout-анимацию: проверка через ~1 кадр (80 мс),
+    // а не после 450 мс — при настоящем твине (~300 мс) через 80 мс ширина
+    // была бы mid-flight (~треть пути) и ассерт «50%» упал бы. При reduced
+    // motion framer-motion даёт width-анимации тип { type: false } (width
+    // входит в positionalKeys) — финальный keyframe применяется мгновенно.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await new Promise((resolve) => setTimeout(resolve, 80));
     });
 
     // Полоса онбординга (animate: width 0 → onboardingPct%). Для фикстуры

@@ -10,6 +10,7 @@ vi.mock("sonner", () => import("@/test/sonner-mock"));
 import { api, setQuery } from "@/test/convex-react-mock";
 import { profile, type MealEntry } from "@/test/fixtures";
 import { todayKey } from "@/lib/dates";
+import { computeTargets } from "@/lib/nutrition";
 import Meals from "./Meals";
 
 /**
@@ -70,6 +71,13 @@ describe("Meals · prefers-reduced-motion", () => {
     setQuery(api.mealLog.getByDate, { date: todayKey() }, today);
     setQuery(api.foods.listMyFoods, {}, []);
 
+    // Точная конечная ширина — из того же источника, что и Meals (500 ккал
+    // из дневной цели профиля-фикстуры), а не хардкод «≈23%».
+    const calPct = Math.min(
+      100,
+      Math.round((500 / computeTargets(profile).calories) * 100),
+    );
+
     // Рендер как в main.tsx: приложение обёрнуто в MotionConfig reducedMotion="user".
     render(
       <MemoryRouter>
@@ -79,18 +87,19 @@ describe("Meals · prefers-reduced-motion", () => {
       </MemoryRouter>,
     );
 
+    // Сигнал на проскочившую layout-анимацию: проверка через ~1 кадр (80 мс),
+    // а не после 450 мс. При reduced motion framer-motion даёт width-анимации
+    // тип { type: false } (width входит в positionalKeys) — финальный keyframe
+    // применяется мгновенно, ширина уже конечная. Будь твин реальным (~300 мс),
+    // через 80 мс ширина была бы mid-flight (~треть пути) и ассерт упал бы.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await new Promise((resolve) => setTimeout(resolve, 80));
     });
 
-    // Полоса дневника (animate: width 0 → calPct%). При reduced motion
-    // layout-анимация пропускается: ширина — конечная (≈23% при 500 ккал),
-    // а не застрявшая на начальном width: 0.
     const bar = document.querySelector<HTMLElement>(
       ".h-full.rounded-full.bg-brand",
     );
     expect(bar).not.toBeNull();
-    expect(bar!.style.width).not.toBe("0%");
-    expect(bar!.style.width).not.toBe("0px");
+    expect(bar!.style.width).toBe(`${calPct}%`);
   });
 });
