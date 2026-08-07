@@ -1,6 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -20,36 +20,34 @@ import { ChartCard, LegendChip } from "@/components/chart-card";
 import { Chip } from "@/components/ui/chip";
 import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
+import { PageLoading } from "@/components/page-loading";
 import { EmptyState } from "@/components/empty-state";
 import { DishScene } from "@/components/illustrations";
 import { Badge } from "@/components/ui/badge";
 import {
   FOOD_LIBRARY,
-  MEAL_TYPE_LABELS,
-  WEEKDAY_SHORT,
   formatAmount,
   generateMealPlan,
   generateWeeklyMealPlan,
   type MealType,
   type PlannedMeal,
 } from "@/lib/mealLibrary";
-import {
-  GOAL_LABELS,
-  computeTargets,
-  type FitnessGoal,
-  type Targets,
-} from "@/lib/nutrition";
+import { GOAL_LABELS, MEAL_TYPE_LABELS, UNITS, WEEKDAY_SHORT } from "@/lib/i18n";
+import { computeTargets, type FitnessGoal, type Targets } from "@/lib/nutrition";
 import { addDays, pluralRecords, shortDate, toDateKey, todayKey } from "@/lib/dates";
+import { searchOpenFoodFacts, type CatalogProduct } from "@/lib/productSearch";
 import { cn, parseLocalNumber } from "@/lib/utils";
 import {
   Apple,
   ArrowRight,
+  Camera,
   Coffee,
   Copy,
   Loader2,
   Moon,
   Pencil,
   Plus,
+  Search,
   Sparkles,
   Trash2,
   UtensilsCrossed,
@@ -96,7 +94,7 @@ function MacroMatchRow({
   target: Targets;
 }) {
   const items: { label: string; v: number; t: number }[] = [
-    { label: "ккал", v: value.calories, t: target.calories },
+    { label: UNITS.kcal, v: value.calories, t: target.calories },
     { label: "Б", v: value.protein, t: target.protein },
     { label: "Ж", v: value.fat, t: target.fat },
     { label: "У", v: value.carbs, t: target.carbs },
@@ -123,6 +121,7 @@ export default function Meals() {
   const deleteEntry = useMutation(api.mealLog.deleteEntry);
   const addFood = useMutation(api.foods.addFood);
   const deleteFood = useMutation(api.foods.deleteFood);
+  const analyzePhoto = useAction(api.photo.analyzeMealPhoto);
 
   // Add/edit entry dialog state
   const [dialogMeal, setDialogMeal] = useState<MealType | null>(null);
@@ -155,6 +154,18 @@ export default function Meals() {
   const [copying, setCopying] = useState(false);
 
   const [showPlan, setShowPlan] = useState(false);
+
+  // Внешний каталог Open Food Facts: результаты поиска по запросу, состояние
+  // запроса и выбранный внешний продукт (макросы на 100 г, порция = 100 г).
+  const [offResults, setOffResults] = useState<CatalogProduct[] | null>(null);
+  const [searchingOff, setSearchingOff] = useState(false);
+  const [offError, setOffError] = useState<string | null>(null);
+  const [offSelected, setOffSelected] = useState<CatalogProduct | null>(null);
+
+  // Фото-трекинг: снимок тарелки → Gemini Vision распознаёт блюдо → КБЖУ.
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   // Стиль недельного меню: по умолчанию — цель из профиля, можно переключить
   // на другой (например «Похудение»/«Набор массы»), чтобы посмотреть меню.
@@ -212,6 +223,107 @@ export default function Meals() {
     setCustomProtein("");
     setCustomCarbs("");
     setCustomFat("");
+    setOffResults(null);
+    setSearchingOff(false);
+    setOffError(null);
+    setOffSelected(null);
+    setPhotoDataUrl(null);
+    setAnalyzingPhoto(false);
+    setPhotoError(null);
+  };
+
+  /** Прочитать выбранный файл как data URL (превью + отправка на распознавание).
+   *  Лимит размера на клиенте: не тащим в память 20-МБ фото, которое сервер
+   *  всё равно отклонит (>2.5 МБ base64 ≈ 1.9 МБ бинарных). */
+  const handlePhotoFile = (file: File | undefined) => {
+    setPhotoError(null);
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Выберите файл изображения (JPEG/PNG/WebP).");
+      return;
+    }
+    if (file.size > 1_900_000) {
+      setPhotoError("Фото слишком большое — выберите файл до 2 МБ.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setPhotoDataUrl(String(reader.result ?? ""));
+    reader.onerror = () => setPhotoError("Не удалось прочитать файл.");
+    reader.readAsDataURL(file);
+  };
+
+  /** Распознать блюдо на фото: результат сразу добавляется в дневник
+   *  выбранного приёма. Распознавание и сохранение — отдельные try, чтобы
+   *  ошибка дневника не маскировалась под «не распознал фото». */
+  const handleAnalyzePhoto = async () => {
+    if (!dialogMeal || !photoDataUrl) return;
+    setAnalyzingPhoto(true);
+    setPhotoError(null);
+    let items: Awaited<ReturnType<typeof analyzePhoto>>["items"] = [];
+    try {
+      const res = await analyzePhoto({ imageDataUrl: photoDataUrl });
+      items = res.items;
+    } catch (err) {
+      console.error("[Meals] Ошибка распознавания фото:", err);
+      setPhotoError(
+        err instanceof Error && /Слишком часто/.test(err.message)
+          ? "Слишком часто — подождите немного и попробуйте ещё раз."
+          : "Не удалось распознать фото — проверьте интернет и попробуйте ещё раз.",
+      );
+      return;
+    } finally {
+      setAnalyzingPhoto(false);
+    }
+
+    if (items.length === 0) {
+      setPhotoError(
+        "Не удалось разобрать блюдо на фото — попробуйте ближе или добавьте вручную.",
+      );
+      return;
+    }
+    try {
+      await addEntries({
+        entries: items.map((i) => ({
+          date: todayKey(),
+          mealType: dialogMeal,
+          name: i.name,
+          quantity: i.quantity,
+          calories: i.calories,
+          protein: i.protein,
+          carbs: i.carbs,
+          fat: i.fat,
+        })),
+      });
+      toast.success(`Распознано: ${items.length} ${pluralRecords(items.length)} — добавлено в дневник`);
+      closeDialog();
+    } catch (err) {
+      console.error("[Meals] Ошибка сохранения распознанного фото:", err);
+      toast.error("Не удалось добавить распознанное — попробуйте ещё раз");
+    }
+  };
+
+  /** Поиск в Open Food Facts: внешний каталог за пределами кураторской
+   *  библиотеки. Ошибка сети/пустой результат не ломают диалог — показываем
+   *  понятное сообщение, локальная библиотека остаётся доступной. */
+  const handleOffSearch = async () => {
+    const q = search.trim();
+    if (q.length < 2) {
+      toast.error("Введите минимум 2 символа для поиска в каталоге");
+      return;
+    }
+    setSearchingOff(true);
+    setOffError(null);
+    setOffSelected(null);
+    try {
+      const res = await searchOpenFoodFacts(q);
+      setOffResults(res);
+      if (res.length === 0) setOffError("В каталоге ничего не нашлось — попробуйте короче.");
+    } catch {
+      setOffResults([]);
+      setOffError("Каталог недоступен — проверьте интернет и попробуйте ещё раз.");
+    } finally {
+      setSearchingOff(false);
+    }
   };
 
   /** Открыть диалог с предзаполненными значениями записи для редактирования. */
@@ -272,8 +384,15 @@ export default function Meals() {
       toast.error("Порций: укажите число больше нуля, например 1,5.");
       return;
     }
-    const food = FOOD_LIBRARY.find((f) => f.name === selectedName);
-    if (!food) return;
+    // Локальная библиотека первая; внешний продукт из OFF — если не нашли.
+    const food =
+      FOOD_LIBRARY.find((f) => f.name === selectedName) ?? offSelected;
+    // Защита от «тихого» no-op: если продукт не разрешился (например, выбран
+    // внешний, а потом запрос изменили), сообщаем вместо молчаливого выхода.
+    if (!food) {
+      toast.error("Выберите продукт из списка");
+      return;
+    }
     const ratio = (qty * food.servingGrams) / 100; // от 100 г к выбранному количеству
     try {
       await addEntry({
@@ -446,12 +565,7 @@ export default function Meals() {
   const loading = profile === undefined || todayLog === undefined;
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-3xl space-y-4">
-        <div className="h-8 w-40 animate-pulse rounded bg-muted" />
-        <div className="h-40 animate-pulse rounded-lg border bg-muted/40" />
-      </div>
-    );
+    return <PageLoading />;
   }
 
   if (!targets) {
@@ -915,7 +1029,7 @@ export default function Meals() {
             />
           </div>
           <div>
-            <Label htmlFor="nf-cal">ккал</Label>
+            <Label htmlFor="nf-cal">{UNITS.kcal}</Label>
             <Input
               id="nf-cal"
               type="text"
@@ -1053,7 +1167,17 @@ export default function Meals() {
                     id="food-search"
                     placeholder="курица, рис, овсянка…"
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      // Новый запрос инвалидирует внешние результаты И выбор:
+                      // иначе выбранный OFF-продукт остаётся «подвешенным»
+                      // (selectedName указывает на имя, которого нет в
+                      // библиотеке, а offSelected уже сброшен).
+                      setSelectedName("");
+                      setOffResults(null);
+                      setOffSelected(null);
+                      setOffError(null);
+                    }}
                   />
                   <div className="max-h-56 overflow-y-auto rounded-md border">
                     {FOOD_LIBRARY.filter((f) =>
@@ -1066,7 +1190,10 @@ export default function Meals() {
                           <button
                             key={f.name}
                             type="button"
-                            onClick={() => setSelectedName(f.name)}
+                            onClick={() => {
+                              setSelectedName(f.name);
+                              setOffSelected(null);
+                            }}
                             className={cn(
                               "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
                               active
@@ -1086,9 +1213,74 @@ export default function Meals() {
                   </div>
                 </div>
 
+                {/* Внешний каталог Open Food Facts: миллионы продуктов с
+                    реальными КБЖУ по штрихкодам. Явная кнопка, а не debounce:
+                    внешний API не должен дёргаться на каждую клавишу. */}
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    disabled={searchingOff || search.trim().length < 2}
+                    onClick={() => void handleOffSearch()}
+                  >
+                    {searchingOff ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Search className="size-3.5" />
+                    )}
+                    {searchingOff
+                      ? "Ищем в каталоге…"
+                      : "Искать в каталоге Open Food Facts"}
+                  </Button>
+
+                  {offError && (
+                    <p className="text-[11px] text-destructive">{offError}</p>
+                  )}
+
+                  {offResults && offResults.length > 0 && (
+                    <div className="max-h-44 overflow-y-auto rounded-md border">
+                      {offResults.map((p) => {
+                        const active = offSelected?.name === p.name;
+                        return (
+                          <button
+                            key={p.barcode ?? p.name}
+                            type="button"
+                            onClick={() => {
+                              setOffSelected(p);
+                              setSelectedName(p.name);
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors",
+                              active
+                                ? "bg-secondary font-medium"
+                                : "hover:bg-secondary/60",
+                            )}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate">{p.name}</span>
+                              {p.brands && (
+                                <span className="block truncate text-[10px] text-muted-foreground">
+                                  {p.brands}
+                                </span>
+                              )}
+                            </span>
+                            <span className="shrink-0 text-xs text-muted-foreground num">
+                              {p.calories} ккал / 100 г
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {selectedName && (
                   <div className="space-y-2">
-                    <Label htmlFor="qty">Порций</Label>
+                    <Label htmlFor="qty">
+                      {offSelected ? "Грамм (100 г — порция)" : "Порций"}
+                    </Label>
                     <Input
                       id="qty"
                       type="text"
@@ -1100,6 +1292,61 @@ export default function Meals() {
                   </div>
                 )}
               </>
+            )}
+
+            {/* Фото тарелки: Gemini Vision распознаёт блюдо и добавляет КБЖУ. */}
+            {!editingEntry && (
+              <div className="space-y-2 rounded-lg border border-dashed p-3">
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Или фото тарелки
+                </p>
+                {photoDataUrl ? (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={photoDataUrl}
+                      alt="Фото тарелки"
+                      className="size-16 shrink-0 rounded-lg object-cover"
+                    />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <Button
+                        className="w-full"
+                        disabled={analyzingPhoto}
+                        onClick={() => void handleAnalyzePhoto()}
+                      >
+                        {analyzingPhoto ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="size-4" />
+                        )}
+                        {analyzingPhoto ? "Распознаём…" : "Распознать и добавить"}
+                      </Button>
+                      <label className="block cursor-pointer text-center text-[11px] text-muted-foreground underline-offset-4 hover:underline">
+                        Другое фото
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="sr-only"
+                          onChange={(e) => handlePhotoFile(e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground transition-colors hover:border-brand hover:text-brand">
+                    <Camera className="size-4" />
+                    Выбрать фото тарелки
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="sr-only"
+                      onChange={(e) => handlePhotoFile(e.target.files?.[0])}
+                    />
+                  </label>
+                )}
+                {photoError && (
+                  <p className="text-[11px] text-destructive">{photoError}</p>
+                )}
+              </div>
             )}
 
             {!editingEntry && (
@@ -1136,7 +1383,7 @@ export default function Meals() {
                 <Input
                   type="text"
                   inputMode="decimal"
-                  placeholder="ккал"
+                  placeholder={UNITS.kcal}
                   value={customCals}
                   onChange={(e) => setCustomCals(DECIMAL_INPUT(e.target.value))}
                 />

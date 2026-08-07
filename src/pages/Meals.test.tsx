@@ -18,7 +18,7 @@ vi.mock("@/lib/mealLibrary", async (importOriginal) => {
   };
 });
 
-import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock";
+import { api, convexMock, setAction, setMutation, setQuery } from "@/test/convex-react-mock";
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
 import {
   profile,
@@ -244,7 +244,7 @@ describe("Meals", () => {
 
   // Под полной нагрузкой coverage-прогона (все файлы параллельно) тест
   // с dialog-аннимациями не успевает за дефолтные 5 секунд — даём запас.
-  it("сохраняет свой продукт из формы", { timeout: 20000 }, async () => {
+  it("сохраняет свой продукт из формы", { timeout: 30000 }, async () => {
     const user = userEvent.setup();
     setupMeals();
     renderWithRouter(<Meals />);
@@ -301,6 +301,200 @@ describe("Meals", () => {
         args: [{ id: "e1" }],
       }),
     );
+  });
+
+  it("ищет в каталоге Open Food Facts и добавляет внешний продукт", async () => {
+    const user = userEvent.setup();
+    // Мок сети: OFF возвращает продукт с макросами на 100 г.
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        products: [
+          {
+            product_name: "Кокосовое молоко",
+            brands: "Aroy-D",
+            code: "8858899100110",
+            nutriments: {
+              "energy-kcal_100g": 180,
+              "proteins_100g": 2,
+              "carbohydrates_100g": 3,
+              "fat_100g": 18,
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      setupMeals();
+      renderWithRouter(<Meals />);
+
+      await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+      const dialog = screen.getByRole("dialog");
+      await user.type(
+        within(dialog).getByLabelText("Поиск по библиотеке"),
+        "кокосовое молоко",
+      );
+
+      await user.click(
+        within(dialog).getByRole("button", {
+          name: /Искать в каталоге Open Food Facts/,
+        }),
+      );
+
+      // Результат с брендом и ккал/100 г.
+      const result = await within(dialog).findByRole("button", {
+        name: /Кокосовое молоко/,
+      });
+      expect(result).toBeInTheDocument();
+      expect(within(dialog).getByText(/Aroy-D/)).toBeInTheDocument();
+      expect(within(dialog).getByText("180 ккал / 100 г")).toBeInTheDocument();
+
+      await user.click(result);
+      // Внешний продукт считает порцию в граммах.
+      expect(
+        within(dialog).getByLabelText("Грамм (100 г — порция)"),
+      ).toBeInTheDocument();
+
+      await user.click(
+        within(dialog).getByRole("button", { name: /Добавить в завтрак/ }),
+      );
+
+      // 1 порция = 100 г → макросы на 100 г, калории 180.
+      expect(convexMock.mutationCalls).toContainEqual(
+        expect.objectContaining({
+          path: "mealLog.addEntry",
+          args: [
+            expect.objectContaining(
+              {
+                date: todayKey(),
+                mealType: "breakfast",
+                name: "Кокосовое молоко",
+                quantity: 1,
+                calories: 180,
+                protein: 2,
+                carbs: 3,
+                fat: 18,
+              } satisfies MealLogArgs,
+            ),
+          ],
+        }),
+      );
+      expect(toast.success).toHaveBeenCalledWith(
+        "Кокосовое молоко — добавлено",
+      );
+      // URL запроса содержит поисковый термин.
+      const fetchUrl = (fetchMock.mock.calls as unknown as [unknown][])[0][0];
+      expect(String(fetchUrl)).toContain("search_terms=");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("каталог OFF: ошибка сети не ломает диалог (понятное сообщение)", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    try {
+      setupMeals();
+      renderWithRouter(<Meals />);
+
+      await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+      const dialog = screen.getByRole("dialog");
+      await user.type(
+        within(dialog).getByLabelText("Поиск по библиотеке"),
+        "чиабатта",
+      );
+      await user.click(
+        within(dialog).getByRole("button", {
+          name: /Искать в каталоге Open Food Facts/,
+        }),
+      );
+
+      expect(
+        await within(dialog).findByText(/Каталог недоступен/),
+      ).toBeInTheDocument();
+      // Локальная библиотека по-прежнему доступна, диалог жив.
+      expect(
+        within(dialog).getByLabelText("Поиск по библиотеке"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("фото тарелки: распознавание добавляет блюда в дневник", async () => {
+    const user = userEvent.setup();
+    // Мок action: Gemini Vision «распознал» два продукта.
+    setAction(api.photo.analyzeMealPhoto, async () => ({
+      items: [
+        { name: "Овсянка", quantity: 250, calories: 340, protein: 12, carbs: 50, fat: 7 },
+        { name: "Яблоко", quantity: 1, calories: 90, protein: 0, carbs: 20, fat: 0 },
+      ],
+      raw: "<<<LOG>>>...",
+    }));
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+
+    // Выбираем «файл» через FileReader: передаём data URL.
+    const file = new File(["x"], "plate.png", { type: "image/png" });
+    const input = within(dialog).getByLabelText(/Выбрать фото тарелки|Другое фото/);
+    await user.upload(input, file);
+    // FileReader читает асинхронно — кнопка появляется после загрузки файла.
+    await user.click(
+      await within(dialog).findByRole("button", { name: /Распознать и добавить/ }),
+    );
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntries",
+        args: [
+          expect.objectContaining({
+            entries: expect.arrayContaining([
+              expect.objectContaining({
+                date: todayKey(),
+                mealType: "breakfast",
+                name: "Овсянка",
+                calories: 340,
+              }),
+              expect.objectContaining({ name: "Яблоко", calories: 90 }),
+            ]),
+          }),
+        ],
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining("Распознано: 2 записи"),
+    );
+  });
+
+  it("фото тарелки: пустое распознавание показывает сообщение и не пишет в дневник", async () => {
+    const user = userEvent.setup();
+    setAction(api.photo.analyzeMealPhoto, async () => ({ items: [], raw: "" }));
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в обед/ }));
+    const dialog = screen.getByRole("dialog");
+    const file = new File(["x"], "plate.png", { type: "image/png" });
+    await user.upload(within(dialog).getByLabelText(/Выбрать фото тарелки/), file);
+    await user.click(
+      await within(dialog).findByRole("button", { name: /Распознать и добавить/ }),
+    );
+
+    expect(
+      await within(dialog).findByText(/Не удалось разобрать блюдо на фото/),
+    ).toBeInTheDocument();
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "mealLog.addEntries"),
+    ).toHaveLength(0);
   });
 
   it("добавляет предложенный план на день в дневник", async () => {

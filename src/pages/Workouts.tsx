@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FitnessHero } from "@/components/illustrations";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { PageAurora } from "@/components/page-aurora";
+import { PageLoading } from "@/components/page-loading";
 import { SVGBarChart } from "@/lib/charts";
 import {
   applyProgression,
@@ -31,17 +32,10 @@ import {
   normalizeEquipment,
   normalizeLimitations,
   profileSignature,
-  WEEKDAYS,
   type TrainingProfile,
   type WorkoutDay,
   type WorkoutTemplate,
 } from "@/lib/workoutLibrary";
-import {
-  applyEffortAdjustment,
-  effortAdjustedCount,
-  EFFORT_LABELS,
-  type Effort,
-} from "@/lib/effort";
 import {
   ACTIVITY_LABELS,
   EXPERIENCE_LABELS,
@@ -49,6 +43,15 @@ import {
   GOAL_LABELS,
   LIMITATION_LABELS,
   TRAINING_STYLE_LABELS,
+  WEEKDAYS,
+} from "@/lib/i18n";
+import {
+  applyEffortAdjustment,
+  effortAdjustedCount,
+  EFFORT_LABELS,
+  type Effort,
+} from "@/lib/effort";
+import {
   type TrainingStyle,
 } from "@/lib/nutrition";
 import { todayKey, shortDate, prettyDate } from "@/lib/dates";
@@ -329,12 +332,7 @@ export default function Workouts() {
   const loading = profile === undefined || plan === undefined || logs === undefined;
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-3xl space-y-4">
-        <div className="h-8 w-44 animate-pulse rounded bg-muted" />
-        <div className="h-64 animate-pulse rounded-lg border bg-muted/40" />
-      </div>
-    );
+    return <PageLoading />;
   }
 
   if (!profile) {

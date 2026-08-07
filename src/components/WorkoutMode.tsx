@@ -6,11 +6,11 @@ import {
   BARBELL_BAR_WEIGHT_KG,
   EXERCISE_TIPS,
   isBarbellExercise,
-  WEEKDAYS,
   warmUpSets,
   type Exercise,
   type WorkoutDay,
 } from "@/lib/workoutLibrary";
+import { WEEKDAYS } from "@/lib/i18n";
 import {
   EFFORT_COLORS,
   EFFORT_HINTS,

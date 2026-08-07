@@ -8,6 +8,7 @@ import {
   loggedExerciseValidator,
   workoutDayValidator,
 } from "./schema";
+import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { assertDate, assertMaxItems, assertRange, assertText } from "./validation";
 
 const MAX_DAYS = 7;
@@ -78,6 +79,7 @@ export const savePlan = mutation({
       assertMaxItems(args.howCalculated, 12, "Пунктов «как считается»");
     }
     assertMaxItems(args.days, MAX_DAYS, "Дней в неделе");
+    await consumeRateLimit(ctx, `${userId}:savePlan`, RATE_LIMITS.savePlan);
     if (args.weeks) {
       assertMaxItems(args.weeks, MAX_WEEKS, "Недель в цикле");
     }
@@ -127,6 +129,7 @@ export const logWorkout = mutation({
       assertRange(ex.reps, 1, 500, "Повторения");
       assertRange(ex.weightKg, 0, 1000, "Вес (кг)");
     }
+    await consumeRateLimit(ctx, `${userId}:workoutLog`, RATE_LIMITS.workoutLog);
 
     return await ctx.db.insert("workoutLogs", {
       ...args,
@@ -140,8 +143,9 @@ export const listLogs = query({
   args: {
     from: v.optional(v.string()),
     to: v.optional(v.string()),
+    limit: v.optional(v.number()),
   },
-  handler: async (ctx, { from, to }) => {
+  handler: async (ctx, { from, to, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     const q =
@@ -154,7 +158,10 @@ export const listLogs = query({
         : ctx.db
             .query("workoutLogs")
             .withIndex("by_user_date", (qq) => qq.eq("userId", userId));
-    return await q.order("desc").collect();
+    // Лимит опционален: графики передают его, экспорт — без лимита.
+    return limit !== undefined
+      ? await q.order("desc").take(limit)
+      : await q.order("desc").collect();
   },
 });
 
