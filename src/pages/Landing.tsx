@@ -14,6 +14,7 @@ import {
 import { Link } from "react-router";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { FitnessHero } from "@/components/illustrations";
+import { ProgressRing } from "@/components/progress-ring";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -77,8 +78,6 @@ const MOCK_MACROS = [
 ];
 
 function MockDashboard() {
-  const ringR = 34;
-  const ringC = 2 * Math.PI * ringR;
   const done = 2180;
   const total = 2400;
 
@@ -113,39 +112,14 @@ function MockDashboard() {
         </div>
 
         <div className="grid grid-cols-[auto_1fr] items-center gap-5 p-5">
-          {/* Кольцо калорий */}
+          {/* Кольцо калорий — единый стиль ProgressRing (градиент, ореол,
+              внутренняя подсветка, точка на кончике) как на дашборде */}
           <div className="flex flex-col items-center gap-2">
-            <div className="relative">
-              <svg viewBox="0 0 96 96" className="size-24 -rotate-90">
-                <circle
-                  cx="48"
-                  cy="48"
-                  r={ringR}
-                  fill="none"
-                  strokeWidth="8"
-                  className="stroke-muted"
-                />
-                <motion.circle
-                  cx="48"
-                  cy="48"
-                  r={ringR}
-                  fill="none"
-                  strokeWidth="8"
-                  strokeLinecap="round"
-                  className="stroke-foreground"
-                  strokeDasharray={ringC}
-                  initial={{ strokeDashoffset: ringC }}
-                  whileInView={{ strokeDashoffset: ringC * (1 - done / total) }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 1.3, ease: EASE }}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-base font-semibold num">
-                  {Math.round((done / total) * 100)}%
-                </span>
-              </div>
-            </div>
+            <ProgressRing value={done} max={total} size={96} stroke={8}>
+              <span className="text-base font-semibold num">
+                {Math.round((done / total) * 100)}%
+              </span>
+            </ProgressRing>
             <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               {done.toLocaleString("ru-RU")} / {total.toLocaleString("ru-RU")} ккал
             </p>
@@ -994,7 +968,12 @@ export default function Landing() {
           <p className="text-xs text-muted-foreground">
             Фитнес и питание. Ваши данные остаются вашими.
           </p>
-          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()}</p>
+          <p className="flex items-center gap-3 text-xs text-muted-foreground">
+            <Link to="/privacy" className="underline underline-offset-4 transition hover:text-foreground">
+              Политика конфиденциальности
+            </Link>
+            <span>© {new Date().getFullYear()}</span>
+          </p>
         </div>
       </footer>
     </div>

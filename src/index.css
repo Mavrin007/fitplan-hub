@@ -73,10 +73,10 @@
 
 /* Material Design 3: Roboto, tonal палитра, elevation-уровни. */
 @theme {
-  --font-sans: "Roboto", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Roboto", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   /* Display-гарнитура для заголовков (Onest — современная, с полной
      кириллицей; фолбэк Roboto при офлайне). */
-  --font-display: "Onest", "Roboto", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Onest", "Roboto", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   /* M3 elevation 0–5 */
   --shadow-elev-0: none;
@@ -456,6 +456,14 @@
     .card-lift:hover {
       transform: none;
       box-shadow: var(--shadow-elev-1);
+    }
+    /* Hover-транзишены тоже мгновенные: кольца (scale 1.03, свечение),
+       карточки и остальные transition-эффекты не «скользят». */
+    .transition-transform,
+    .transition-opacity,
+    .transition-all,
+    .transition-colors {
+      transition-duration: 0.01ms !important;
     }
     html {
       scroll-behavior: auto;

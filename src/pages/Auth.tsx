@@ -538,6 +538,10 @@ function Auth({
             >
               freebuff.com
             </a>
+            {" · "}
+            <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
+              Политика конфиденциальности
+            </Link>
           </p>
         </motion.div>
       </div>

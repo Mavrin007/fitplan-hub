@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { todayKey } from "@/lib/dates";
 
@@ -32,6 +32,9 @@ import { api, convexMock, setMutation, setQuery } from "@/test/convex-react-mock
 import { resetMocks, renderWithRouter, toast } from "@/test/utils";
 import { profile, type WeightEntry } from "@/test/fixtures";
 import Profile from "./Profile";
+
+/** Перехват скачивания для теста экспорта: ссылка <a download> из appendChild. */
+let exportedAnchor: HTMLAnchorElement | null = null;
 
 /** Записи веса: три замера, чтобы график и список записей отрисовались. */
 function weightEntries(): WeightEntry[] {
@@ -338,6 +341,97 @@ describe("Profile", () => {
     expect(screen.getByText(/осталось сбросить 5\.0 кг/)).toBeInTheDocument();
   });
 
+  it("guided-режим: кнопка «Настроить за 2 минуты» открывает визард с предзаполнением", async () => {
+    const user = userEvent.setup();
+    setQuery(api.profiles.getMyProfile, undefined, {
+      ...profile,
+      age: 45,
+      weightKg: 90,
+      targetWeightKg: 85,
+    });
+    setQuery(api.weightEntries.listMyWeights, {}, []);
+    renderWithRouter(<Profile />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Настроить за 2 минуты" }),
+    );
+
+    // Визард открылся как диалог с шагом 1, форма предзаполнена профилем
+    // (45 лет / 90 кг — не дефолтные 30 / 75).
+    const dialog = screen.getByRole("dialog", {
+      name: "Онбординг: настройте профиль за 2 минуты",
+    });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Возраст")).toHaveValue("45");
+    expect(within(dialog).getByLabelText("Вес (кг)")).toHaveValue("90");
+  });
+
+  it("guided-режим: сохранение через визард вызывает upsertProfile и закрывает его", async () => {
+    const user = userEvent.setup();
+    setupFilled();
+    renderWithRouter(<Profile />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Настроить за 2 минуты" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Онбординг: настройте профиль за 2 минуты",
+    });
+
+    // Шаг 1 → шаг 2 → шаг 3 → «Создать план». Фикстура профиля не имеет
+    // инвентаря, а шаг 3 требует минимум один — выбираем гантели.
+    await user.click(within(dialog).getByRole("button", { name: /Далее/ }));
+    await user.click(within(dialog).getByRole("button", { name: /Далее/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Гантели$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /Создать план/ }));
+
+    // Визард сохранил профиль (upsertProfile) и закрылся.
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "profiles.upsertProfile",
+        args: [
+          expect.objectContaining({
+            age: 30,
+            heightCm: 180,
+            weightKg: 80,
+            // Целевой вес не редактируется в визарде, но сохраняется из
+            // initial — повторный запуск не должен затирать его.
+            targetWeightKg: 75,
+            fitnessGoal: "lose_weight",
+          }),
+        ],
+      }),
+    );
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Онбординг: настройте профиль за 2 минуты",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("guided-режим: «Пропустить» закрывает визард без записи в localStorage", async () => {
+    const user = userEvent.setup();
+    setupFilled();
+    renderWithRouter(<Profile />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Настроить за 2 минуты" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Онбординг: настройте профиль за 2 минуты",
+    });
+
+    await user.click(within(dialog).getByRole("button", { name: "Пропустить" }));
+
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Онбординг: настройте профиль за 2 минуты",
+      }),
+    ).not.toBeInTheDocument();
+    // persistSkip=false: повторный вход не должен считать онбординг пропущенным.
+    expect(localStorage.getItem("kilo:onboarding-skipped")).toBeNull();
+  });
+
   it("менее двух замеров → заглушка вместо графика", () => {
     setupFilled({
       weights: [weightEntries()[0]],
@@ -347,5 +441,63 @@ describe("Profile", () => {
     expect(
       screen.getByText("Запишите минимум два замера веса — кривая появится здесь."),
     ).toBeInTheDocument();
+  });
+
+  it("«Экспортировать все данные» скачивает JSON со всеми таблицами", async () => {
+    const user = userEvent.setup();
+    setupFilled();
+    setQuery(api.account.exportMyData, undefined, {
+      app: "kilo",
+      exportedAt: "2026-08-07T10:00:00.000Z",
+      weightEntries: [{ date: "2026-08-01", weightKg: 80 }],
+    });
+
+    // Перехват скачивания: filename из <a download>, Blob — в createObjectURL.
+    exportedAnchor = null;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:fake");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const append = document.body.appendChild.bind(document.body);
+    vi.spyOn(document.body, "appendChild").mockImplementation(function (
+      node: Node,
+    ) {
+      if (node instanceof HTMLAnchorElement) exportedAnchor = node;
+      return append(node);
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    renderWithRouter(<Profile />);
+    await user.click(
+      await screen.findByRole("button", { name: "Экспортировать все данные" }),
+    );
+
+    expect(exportedAnchor!.download).toBe("kilo-данные-2026-08-07.json");
+  });
+
+  it("«Удалить аккаунт» требует подтверждения и выходит из сессии", async () => {
+    const user = userEvent.setup();
+    setupFilled();
+    setMutation(api.account.deleteMyAccount, async () => {});
+
+    renderWithRouter(<Profile />);
+    const deleteBtn = await screen.findByRole("button", {
+      name: "Удалить аккаунт",
+    });
+
+    // Первый клик «взводит» кнопку — мутация ещё не вызвана.
+    await user.click(deleteBtn);
+    expect(convexMock.mutationCalls).toHaveLength(0);
+
+    // Второй клик подтверждает: мутация + выход из сессии.
+    await user.click(screen.getByRole("button", { name: "Точно удалить аккаунт?" }));
+    await waitFor(() => {
+      expect(
+        convexMock.mutationCalls.some((c) => c.path === "account.deleteMyAccount"),
+      ).toBe(true);
+    });
+    expect(authMocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 });

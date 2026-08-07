@@ -18,9 +18,15 @@ import {
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { ProgressRing } from "@/components/progress-ring";
 import { MacroRing } from "@/components/macro-ring";
+import { RingProgress } from "@/components/rings/RingProgress";
+import {
+  CALORIES_RING,
+  TRAINING_RING,
+  WATER_RING,
+} from "@/components/rings/colors";
 import { PageAurora } from "@/components/page-aurora";
+import { PageLoading } from "@/components/page-loading";
 import { ChartScene } from "@/components/illustrations";
 import { EmptyState } from "@/components/empty-state";
 import {
@@ -34,6 +40,7 @@ import {
   Target,
   UtensilsCrossed,
 } from "lucide-react";
+import { UNITS } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const LOOKBACK_DAYS = 84; // 12 недель — горизонт календаря активности
@@ -219,8 +226,10 @@ function ActivityCalendar({
 export default function Overview() {
   const profile = useQuery(api.profiles.getMyProfile);
   const todayLog = useQuery(api.mealLog.getByDate, { date: todayKey() });
-  const weights = useQuery(api.weightEntries.listMyWeights, {});
-  const workoutLogs = useQuery(api.workouts.listLogs, {});
+  // Тренд/прогнозу нужны последние замеры, недельному счётчику — логи
+  // последних месяцев: лимиты вместо полной выгрузки всей истории.
+  const weights = useQuery(api.weightEntries.listMyWeights, { limit: 90 });
+  const workoutLogs = useQuery(api.workouts.listLogs, { limit: 200 });
   const water = useQuery(api.water.getByDate, { date: todayKey() });
   const addWater = useMutation(api.water.addWater);
 
@@ -339,6 +348,51 @@ export default function Overview() {
     (l) => l.date >= weekStart,
   ).length;
 
+  // Три кольца героя в стиле Apple Fitness: калории, тренировки за неделю
+  // и вода. Количество/состав колец — просто длина массива: композит не знает
+  // про конкретные метрики.
+  const ringData = useMemo(
+    () => [
+      {
+        id: "calories",
+        label: "Калории",
+        value: calories,
+        max: targets?.calories ?? 1,
+        unit: UNITS.kcal,
+        color: CALORIES_RING,
+      },
+      {
+        id: "training",
+        label: "Тренировки",
+        value: workoutsThisWeek,
+        max: profile?.preferredTrainingDays ?? 3,
+        unit: "за нед.",
+        color: TRAINING_RING,
+      },
+      {
+        id: "water",
+        label: "Вода",
+        value: waterMl,
+        max: waterTarget,
+        unit: "л",
+        color: WATER_RING,
+        // Литры в центре деталей: «2,3 / 3 л» вместо «2300 / 3000 мл».
+        display: (v: number) =>
+          (v / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 }),
+      },
+    ],
+    // Зависимости — примитивы, а не объект targets (он пересоздаётся каждый
+    // рендер и ломал бы memo(Ring)).
+    [
+      calories,
+      targets?.calories,
+      workoutsThisWeek,
+      profile?.preferredTrainingDays,
+      waterMl,
+      waterTarget,
+    ],
+  );
+
   const noProfile = profile === null;
   const loading =
     profile === undefined ||
@@ -347,15 +401,7 @@ export default function Overview() {
     water === undefined;
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-3xl space-y-8">
-        <div className="animate-pulse space-y-2">
-          <div className="h-4 w-32 rounded bg-muted" />
-          <div className="h-8 w-56 rounded bg-muted" />
-        </div>
-        <div className="h-64 animate-pulse rounded-lg border bg-muted/40" />
-      </div>
-    );
+    return <PageLoading />;
   }
 
   return (
@@ -425,35 +471,26 @@ export default function Overview() {
                   )}
                 </p>
               </div>
-              <ProgressRing
-                value={calories}
-                max={targets!.calories}
-                size={120}
-                stroke={9}
-                color="var(--brand)"
-                overColor="var(--destructive)"
+              <RingProgress
+                size={184}
+                duration={1.4}
                 delay={0.1}
-              >
-                {isCalOver ? (
-                  <>
-                    <span className="text-2xl font-semibold num text-destructive">
-                      +{overCalPct < 1 ? overCalPct.toFixed(1) : Math.round(overCalPct)}%
-                    </span>
-                    <span className="text-[9px] font-semibold uppercase tracking-wider text-destructive">
-                      сверх нормы
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-2xl font-semibold num">
-                      <CountUp value={calPct} />%
-                    </span>
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                      от цели
-                    </span>
-                  </>
-                )}
-              </ProgressRing>
+                caption="Сегодня"
+                aria-label={`Активность за сегодня: ${calPct}%`}
+                data={ringData}
+                center={
+                  isCalOver ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-1">
+                      <span className="num text-[1.7em] font-semibold leading-none tracking-tight text-destructive">
+                        +{overCalPct < 1 ? overCalPct.toFixed(1) : Math.round(overCalPct)}%
+                      </span>
+                      <span className="text-[0.56em] font-semibold uppercase tracking-[0.18em] text-destructive">
+                        сверх нормы
+                      </span>
+                    </div>
+                  ) : undefined
+                }
+              />
             </div>
             <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <motion.div

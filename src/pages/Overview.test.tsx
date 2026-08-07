@@ -40,8 +40,8 @@ function setupFilled(overrides: {
 } = {}) {
   setQuery(api.profiles.getMyProfile, undefined, profile);
   setQuery(api.mealLog.getByDate, { date: todayKey() }, overrides.today ?? []);
-  setQuery(api.weightEntries.listMyWeights, {}, overrides.weights ?? []);
-  setQuery(api.workouts.listLogs, {}, []);
+  setQuery(api.weightEntries.listMyWeights, { limit: 90 }, overrides.weights ?? []);
+  setQuery(api.workouts.listLogs, { limit: 200 }, []);
   setQuery(
     api.water.getByDate,
     { date: todayKey() },
@@ -81,8 +81,8 @@ describe("Overview", () => {
     // показать EmptyState, а не скелетон и не дашборд.
     setQuery(api.profiles.getMyProfile, undefined, null);
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
-    setQuery(api.weightEntries.listMyWeights, {}, []);
-    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.weightEntries.listMyWeights, { limit: 90 }, []);
+    setQuery(api.workouts.listLogs, { limit: 200 }, []);
     setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
     setQuery(api.activity.getActivityDays, activityRange(), []);
     const view = renderWithRouter(<Overview />);
@@ -194,6 +194,8 @@ describe("Overview", () => {
     renderWithRouter(<Overview />);
 
     expect(screen.getByText("Превышение нормы")).toBeInTheDocument();
+    // Центр героя при переборе калорий снова показывает «+N% сверх нормы».
+    expect(screen.getByText("сверх нормы")).toBeInTheDocument();
   });
 
   it("с записями веса показывает динамику и прогноз", () => {
@@ -222,8 +224,8 @@ describe("Overview", () => {
     // ключей покрыта отдельно в convex-react-mock.test.ts.)
     setQuery(api.profiles.getMyProfile, undefined, profile);
     setQuery(api.mealLog.getByDate, { date: todayKey() }, []);
-    setQuery(api.weightEntries.listMyWeights, {}, []);
-    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.weightEntries.listMyWeights, { limit: 90 }, []);
+    setQuery(api.workouts.listLogs, { limit: 200 }, []);
     setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(0));
     setQuery(api.activity.getActivityDays, activityRange(), [
       { date: todayKey(), count: 1 } satisfies ActivityDay,

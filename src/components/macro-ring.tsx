@@ -35,6 +35,10 @@ export function MacroRing({
   const overPct = target > 0 ? Math.round((value / target - 1) * 100) : 0;
   const overGrams = Math.round(value - target);
 
+  // Подпись под значением. При переборе в percent-режиме — две строки
+  // («+21%» / «сверх»), как у калорийного кольца: компактно в малом кольце
+  // и сразу читается. В остальных случаях — одна строка.
+  const isOverPercent = isOver && center === "percent";
   const sub = isOver
     ? center === "percent"
       ? `+${overPct}%`
@@ -52,6 +56,9 @@ export function MacroRing({
         stroke={7}
         color={color}
         overColor={overColor}
+        // Точка на кончике всегда в цвете макроса — при переборе дуга
+        // зеленеет, но маркер не теряет свою идентичность.
+        tipColor={color}
         delay={delay}
       >
         <span
@@ -69,6 +76,14 @@ export function MacroRing({
         >
           {sub}
         </span>
+        {isOverPercent && (
+          <span
+            className="text-[7px] font-medium uppercase tracking-[0.14em]"
+            style={{ color: overColor }}
+          >
+            сверх
+          </span>
+        )}
       </ProgressRing>
       <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
         {label}

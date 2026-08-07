@@ -3,18 +3,16 @@ import { describe, expect, it } from "vitest";
 import { ProgressRing } from "./progress-ring";
 import { MacroRing } from "./macro-ring";
 
-/** Продвигает кадры (rAF-стаб = setTimeout 0): точка на кончике появляется
- *  с delay + 0.8 с, поэтому ждём больше секунды реального времени. */
+/** Продвигает кадры: капля появляется с задержкой, ждём больше секунды. */
 async function advanceFrames(ms = 1300) {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms));
   });
 }
 
-/** Последний <circle> в SVG — это точка на кончике дуги. */
+/** Капля на кончике дуги — motion.circle с data-bead. */
 function tipDot(container: HTMLElement): SVGCircleElement {
-  const circles = container.querySelectorAll("svg circle");
-  return circles[circles.length - 1] as SVGCircleElement;
+  return container.querySelector("[data-bead]") as SVGCircleElement;
 }
 
 describe("ProgressRing", () => {
@@ -34,11 +32,22 @@ describe("ProgressRing", () => {
     expect(grad!.id).toMatch(/^ring-grad-/);
     expect(glow!.id).toMatch(/^ring-glow-/);
 
-    // Внутренняя подсветка (fill) ссылается на radialGradient, дуга и ореол
-    // (stroke) — на linearGradient: url(#id) не конфликтует в jsdom.
+    // Внутренняя подсветка (fill) ссылается на radialGradient, дуга (stroke) —
+    // на linearGradient: url(#id) не конфликтует в jsdom.
     expect(svg.querySelector(`circle[fill="url(#${glow!.id})"]`)).not.toBeNull();
     const strokes = Array.from(svg.querySelectorAll("circle"));
-    expect(strokes.some((c) => c.getAttribute("stroke") === `url(#${grad!.id})`)).toBe(true);
+    expect(
+      strokes.some((c) => c.getAttribute("stroke") === `url(#${grad!.id})`),
+    ).toBe(true);
+
+    // Градиент объёма: светлее → базовый → глубже (color-mix из var(--brand)).
+    const stops = [...grad!.querySelectorAll("stop")].map((s) =>
+      s.getAttribute("stop-color"),
+    );
+    expect(stops.length).toBe(3);
+    expect(stops[1]).toBe("var(--brand)");
+    expect(stops[0]).toContain("color-mix");
+    expect(stops[2]).toContain("color-mix");
   });
 
   it("два инстанса получают разные градиентные id (нет конфликта url())", () => {
@@ -48,43 +57,78 @@ describe("ProgressRing", () => {
         <ProgressRing value={60} max={100} />
       </div>,
     );
-    const ids = Array.from(container.querySelectorAll("linearGradient")).map(
-      (g) => g.id,
-    );
+    // Только основные градиенты дуг (без linearGradient отражения).
+    const ids = Array.from(container.querySelectorAll("linearGradient"))
+      .map((g) => g.id)
+      .filter((id) => id.startsWith("ring-grad-"));
     expect(ids.length).toBe(2);
     expect(ids[0]).not.toBe(ids[1]);
     // Каждая дуга ссылается на градиент своего кольца, а не чужого.
     for (const id of ids) {
-      expect(container.querySelectorAll(`circle[stroke='url(#${id})']`).length).toBeGreaterThan(0);
+      expect(
+        container.querySelectorAll(`circle[stroke='url(#${id})']`).length,
+      ).toBeGreaterThan(0);
     }
   });
 
-  it("при 100% точка на кончике видима и сидит на верхней точке дуги", async () => {
+  it("при 100% капля сидит на конце дуги (attr-позиция = конец круга)", async () => {
     const { container } = render(
       <ProgressRing value={100} max={100} size={96} stroke={8} />,
     );
     const dot = tipDot(container);
-    // r = (size - stroke) / 2; при полной дуге кончик возвращается в верхнюю точку.
-    expect(parseFloat(dot.getAttribute("cx")!)).toBeCloseTo(48, 5); // float-погрешность
-    expect(parseFloat(dot.getAttribute("cy")!)).toBeCloseTo(4, 5); // 48 - 44
+    // r = (size − stroke)/2 = 44; конец полной дуги в системе координат svg —
+    // точка (cx + r, cy) = (92, 48); после -rotate-90 она визуально наверху,
+    // ровно там, где дуга заканчивается (старый кончик «сидел» мимо дуги).
+    expect(parseFloat(dot.getAttribute("cx")!)).toBeCloseTo(92, 5);
+    expect(parseFloat(dot.getAttribute("cy")!)).toBeCloseTo(48, 5);
     expect(dot.getAttribute("fill")).toBe("var(--brand)");
 
     await advanceFrames();
-    // Точка появилась: opacity-атрибут (не inline-style) = 1.
+    // Капля появилась: opacity-атрибут = 1.
     expect(dot.getAttribute("opacity")).toBe("1");
   });
 
-  it("при 0% точка на кончике отсутствует (opacity 0)", async () => {
+  it("tipColor переопределяет цвет капли (макросы при переборе)", async () => {
+    const { container } = render(
+      <ProgressRing
+        value={200}
+        max={100}
+        size={96}
+        stroke={8}
+        color="var(--macro-protein)"
+        overColor="var(--macro-over)"
+        tipColor="var(--macro-protein)"
+      />,
+    );
+    const dot = tipDot(container);
+    // Дуга-хвост при переборе зелёная, но капля остаётся в цвете макроса.
+    expect(dot.getAttribute("fill")).toBe("var(--macro-protein)");
+
+    await advanceFrames();
+    expect(dot.getAttribute("opacity")).toBe("1");
+  });
+
+  it("при 0% капля не рендерится вовсе", async () => {
     const { container } = render(
       <ProgressRing value={0} max={100} size={96} stroke={8} />,
     );
-    const dot = tipDot(container);
+    expect(container.querySelector("[data-bead]")).toBeNull();
+    expect(screen.getByRole("img", { name: "0% от цели" })).toBeInTheDocument();
+  });
 
-    await advanceFrames();
-    // Дуга не рисуется — точка скрыта даже после продвижения кадров.
-    expect(dot.getAttribute("opacity")).toBe("0");
-    // И по scale остаётся в 0, а не в "none" (как у видимой точки при 100%).
-    expect(dot.style.transform).toContain("scale(0)");
+  /**
+   * Контроль к progress-ring.reduced-motion.test.tsx: БЕЗ системного
+   * prefers-reduced-motion дуга стартует с пустого состояния — сразу после
+   * монтирования dashoffset равен длине окружности (анимация идёт от 0).
+   */
+  it("контроль: без reduced-motion дуга начинает с пустого (dashoffset = C)", () => {
+    const { container } = render(
+      <ProgressRing value={50} max={100} size={96} stroke={8} />,
+    );
+    const arc = container.querySelector("[data-arc]");
+    const c = 2 * Math.PI * 44; // ≈ 276.46
+    const offset = parseFloat(arc!.getAttribute("stroke-dashoffset") ?? "");
+    expect(offset).toBeCloseTo(c, 0);
   });
 
   it("при max = 0 показывает 0%", () => {
@@ -100,11 +144,6 @@ describe("ProgressRing", () => {
   it("при переборе не клампит дугу в aria-label (100% ровно — от цели)", () => {
     render(<ProgressRing value={100} max={100} />);
     expect(screen.getByRole("img", { name: "100% от цели" })).toBeInTheDocument();
-  });
-
-  it("при max = 0 показывает 0%", () => {
-    render(<ProgressRing value={5} max={0} />);
-    expect(screen.getByRole("img", { name: "0% от цели" })).toBeInTheDocument();
   });
 
   it("рендерит содержимое центра", () => {
@@ -137,9 +176,10 @@ describe("MacroRing", () => {
     expect(screen.getByRole("img", { name: "0% от цели" })).toBeInTheDocument();
   });
 
-  it("при переборе показывает перебор (+100%) и мягкую зелёную подсветку", () => {
+  it("при переборе в percent показывает «+100%» и «сверх» двумя строками (как калории)", () => {
     render(<MacroRing label="Белки" value={200} target={100} color="#f00" center="percent" />);
     expect(screen.getByText("+100%")).toBeInTheDocument();
+    expect(screen.getByText("сверх")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Превышение на 100%" })).toBeInTheDocument();
     // Перебор макроса не вреден — подсветка мягким зелёным, а не красным.
     const value = screen.getByText("200");
@@ -147,12 +187,31 @@ describe("MacroRing", () => {
     expect(value.className).not.toContain("text-destructive");
   });
 
+  it("при переборе трек кольца тонируется цветом перебора (выделение тоном)", () => {
+    const { container } = render(
+      <ProgressRing value={150} max={100} overColor="#0f0" />,
+    );
+    const track = container.querySelectorAll("svg circle")[1]; // второй круг — трек
+    expect(track.getAttribute("stroke")).toBe("#0f0");
+    expect(track.getAttribute("stroke-opacity")).toBe("0.3");
+    // Хвост второго круга (перелив) рисуется градиентом цвета перебора.
+    const arcs = container.querySelectorAll("[data-arc]");
+    expect(arcs.length).toBe(2); // полный круг + хвост
+    expect(arcs[1].getAttribute("stroke")).toMatch(/^url\(#ring-grad-over-/);
+  });
+
+  it("без перебора трек остаётся нейтральным (единый тёмно-серый)", () => {
+    const { container } = render(<ProgressRing value={50} max={100} />);
+    const track = container.querySelectorAll("svg circle")[1];
+    expect(track.getAttribute("stroke")).toBe("rgba(148, 153, 162, 0.42)");
+    expect(track.getAttribute("stroke-opacity")).toBe("1");
+  });
+
   it("кастомный overColor переопределяет цвет перебора", () => {
     render(
       <MacroRing label="Белки" value={200} target={100} color="#f00" overColor="#0f0" />,
     );
     expect(screen.getByRole("img", { name: "Превышение на 100%" })).toBeInTheDocument();
-    // jsdom нормализует hex в rgb() — сравниваем через computed-эквивалент.
     expect(screen.getByText("200").style.color).toBe("rgb(0, 255, 0)");
   });
 

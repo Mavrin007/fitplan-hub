@@ -1,5 +1,11 @@
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
+import { Link } from "react-router";
+import { exportAllJson } from "@/lib/export";
+
+// Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
+// и показываем их в attach-форме вместо письма — как на /auth.
+const ATTACH_DEV_OTP_ENABLED = import.meta.env.VITE_EMAIL_DEV_CAPTURE === "1";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -17,19 +23,15 @@ import { Separator } from "@/components/ui/separator";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { PageAurora } from "@/components/page-aurora";
+import { PageLoading } from "@/components/page-loading";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
 import { SVGAreaChart } from "@/lib/charts";
 import {
-  ACTIVITY_LABELS,
   ACTIVITY_MULTIPLIERS,
-  GENDER_LABELS,
   GOAL_ADJUSTMENTS,
-  GOAL_LABELS,
-  EXPERIENCE_LABELS,
   LIMITATION_KEYS,
-  LIMITATION_LABELS,
   LIMITATION_DESCRIPTIONS,
   TRAINING_STYLE_HINTS,
-  TRAINING_STYLE_LABELS,
   computeTargets,
   type ActivityLevel,
   type ExperienceLevel,
@@ -38,12 +40,16 @@ import {
   type Limitation,
   type TrainingStyle,
 } from "@/lib/nutrition";
+import { EQUIPMENT_KEYS, EQUIPMENT_PRESETS, type Equipment } from "@/lib/workoutLibrary";
 import {
-  EQUIPMENT_KEYS,
+  ACTIVITY_LABELS,
   EQUIPMENT_LABELS,
-  EQUIPMENT_PRESETS,
-  type Equipment,
-} from "@/lib/workoutLibrary";
+  EXPERIENCE_LABELS,
+  GENDER_LABELS,
+  GOAL_LABELS,
+  LIMITATION_LABELS,
+  TRAINING_STYLE_LABELS,
+} from "@/lib/i18n";
 import { todayKey, shortDate } from "@/lib/dates";
 import { cn, parseLocalNumber } from "@/lib/utils";
 import { formatConvexError } from "@/lib/errors";
@@ -62,10 +68,14 @@ import {
   PersonStanding,
   Plus,
   Scale,
+  ShieldAlert,
   Target,
   Weight,
   Activity,
   ArrowRight,
+  Sparkles,
+  Download,
+  FileJson,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -134,7 +144,10 @@ export default function Profile() {
   const upsertProfile = useMutation(api.profiles.upsertProfile);
   const addWeight = useMutation(api.weightEntries.addWeight);
   const deleteWeight = useMutation(api.weightEntries.deleteWeight);
-  const { user, signIn } = useAuth();
+  const { user, signIn, signOut } = useAuth();
+  const exportMyData = useQuery(api.account.exportMyData);
+  const deleteMyAccount = useMutation(api.account.deleteMyAccount);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Привязка почты к гостевому аккаунту: данные, сохранённые под анонимной
   // сессией, после этого доступны и при входе по почте с любого устройства.
@@ -143,6 +156,15 @@ export default function Profile() {
   const [attachOtp, setAttachOtp] = useState("");
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+
+  // Dev-only: последний перехваченный код для вводимого адреса (для e2e и
+  // локальной разработки без SMTP). Запрос активен только на OTP-шаге.
+  const attachDevOtpCode = useQuery(
+    api.devOtp.getByEmail,
+    ATTACH_DEV_OTP_ENABLED && attachStep === "otp" && attachEmail
+      ? { email: attachEmail }
+      : "skip",
+  );
 
   const handleAttachEmail = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -204,11 +226,14 @@ export default function Profile() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [weightInput, setWeightInput] = useState("");
+  // Guided-режим: переоткрытие визарда с предзаполнением из текущего профиля.
+  const [wizardOpen, setWizardOpen] = useState(false);
 
-  // Sync form when the profile loads
-  const [hydrated, setHydrated] = useState(false);
-  if (profile && !hydrated) {
-    setHydrated(true);
+  // Sync form when the profile loads (или обновляется — updatedAt меняется
+  // после сохранения через визард, и форма перехватывает свежие значения).
+  const [hydratedAt, setHydratedAt] = useState<number | null>(null);
+  if (profile && hydratedAt !== profile.updatedAt) {
+    setHydratedAt(profile.updatedAt);
     setForm({
       age: String(profile.age),
       gender: profile.gender,
@@ -363,6 +388,27 @@ export default function Profile() {
     }
   };
 
+  const handleExportAll = () => {
+    if (!exportMyData) return;
+    exportAllJson(exportMyData, exportMyData.exportedAt);
+    toast.success("Данные выгружены — файл kilo-данные-*.json");
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await deleteMyAccount();
+      await signOut();
+      toast.success("Аккаунт удалён. До свидания!");
+    } catch (err) {
+      console.error(err);
+      setDeletingAccount(false);
+      toast.error(
+        formatConvexError(err, "Не удалось удалить аккаунт. Попробуйте ещё раз."),
+      );
+    }
+  };
+
   const toggleEquipment = (eq: Equipment) => {
     setForm((f) => ({
       ...f,
@@ -394,12 +440,7 @@ export default function Profile() {
   );
 
   if (profile === undefined || weights === undefined) {
-    return (
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-96 animate-pulse rounded-lg border bg-muted/40" />
-      </div>
-    );
+    return <PageLoading />;
   }
 
   return (
@@ -514,6 +555,17 @@ export default function Profile() {
                       )}
                     </Button>
                   </div>
+                  {attachDevOtpCode && (
+                    <div className="rounded-lg border border-brand/40 bg-brand/10 p-3 text-center">
+                      <p className="flex items-center justify-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-brand">
+                        <ShieldAlert className="size-3.5" />
+                        Dev-режим: код без письма
+                      </p>
+                      <p className="num mt-1 font-mono text-2xl font-semibold tracking-[0.35em] text-foreground">
+                        {attachDevOtpCode}
+                      </p>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -535,19 +587,36 @@ export default function Profile() {
         </section>
       )}
 
-      {/* M3 onboarding: линейный прогресс + шаги */}
+      {/* M3 onboarding: линейный прогресс + шаги + кнопка guided-режима */}
       <section className="card-lift rounded-xl border bg-card p-5 shadow-elev-1">
-        <div className="flex items-center justify-between gap-3">
-          <p className="label-overline text-muted-foreground">Онбординг</p>
-          <p className="text-xs font-medium num">{onboardingPct}%</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="label-overline text-muted-foreground">Онбординг</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Пройдите 3 коротких шага — антропометрия, цель, инвентарь — и
+              получите готовый план тренировок и меню.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setWizardOpen(true)}
+          >
+            <Sparkles className="size-3.5" />
+            Настроить за 2 минуты
+          </Button>
         </div>
-        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant">
-          <motion.div
-            className="h-full rounded-full bg-primary"
-            initial={{ width: 0 }}
-            animate={{ width: `${onboardingPct}%` }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-          />
+        <div className="mt-3 flex items-center gap-3">
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-variant">
+            <motion.div
+              className="h-full rounded-full bg-primary"
+              initial={{ width: 0 }}
+              animate={{ width: `${onboardingPct}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+            />
+          </div>
+          <p className="shrink-0 text-xs font-medium num">{onboardingPct}%</p>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {onboardingSteps.map((s) => (
@@ -570,6 +639,36 @@ export default function Profile() {
           ))}
         </div>
       </section>
+
+      {/* Guided-режим: переоткрытие визарда с предзаполнением. onComplete
+          просто закрывает — форма на странице синхронизируется через
+          useQuery(profile) (гидрация по updatedAt перехватывает новые
+          значения). При отсутствии профиля визард стартует с дефолтами. */}
+      {wizardOpen && (
+        <OnboardingWizard
+          initial={
+            profile
+              ? {
+                  age: String(profile.age),
+                  gender: profile.gender,
+                  heightCm: String(profile.heightCm),
+                  weightKg: String(profile.weightKg),
+                  targetWeightKg: profile.targetWeightKg,
+                  activityLevel: profile.activityLevel,
+                  fitnessGoal: profile.fitnessGoal,
+                  experienceLevel: profile.experienceLevel,
+                  equipment: (profile.equipment ?? []) as Equipment[],
+                  limitations: (profile.limitations ?? []) as Limitation[],
+                  preferredTrainingDays: profile.preferredTrainingDays ?? 3,
+                  trainingStyle: (profile.trainingStyle ?? "balanced") as TrainingStyle,
+                }
+              : undefined
+          }
+          persistSkip={false}
+          onComplete={() => setWizardOpen(false)}
+          onSkip={() => setWizardOpen(false)}
+        />
+      )}
 
       <form onSubmit={handleSave} className="space-y-8">
         <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
@@ -916,10 +1015,10 @@ export default function Profile() {
                   className={cn(
                     "rounded-full px-2.5 py-0.5 text-[11px] font-medium",
                     bmiInfo.tone === "ok"
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
                       : bmiInfo.tone === "low"
-                        ? "bg-sky-500/15 text-sky-700 dark:text-sky-400"
-                        : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                        ? "bg-sky-500/15 text-sky-800 dark:text-sky-300"
+                        : "bg-amber-500/15 text-amber-800 dark:text-amber-300",
                   )}
                 >
                   {bmiInfo.label}
@@ -1157,6 +1256,48 @@ export default function Profile() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="size-5 text-muted-foreground" />
+          <h2 className="m3-title-large">Данные и приватность</h2>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Ваши данные принадлежат вам: вы можете забрать их одним файлом или
+          удалить аккаунт целиком (права GDPR — переносимость и забвение).
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleExportAll}
+            disabled={!exportMyData}
+          >
+            <Download className="size-4" />
+            {exportMyData
+              ? "Экспортировать все данные"
+              : "Загрузка данных…"}
+          </Button>
+          <ConfirmDelete
+            onConfirm={() => void handleDeleteAccount()}
+            label="Удалить аккаунт"
+            confirmLabel="Точно удалить аккаунт?"
+            busy={deletingAccount}
+          />
+          <Link
+            to="/privacy"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline underline-offset-4 transition hover:text-foreground"
+          >
+            <FileJson className="size-4" />
+            Политика конфиденциальности
+          </Link>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground/80">
+          Удаление стирает профиль, дневник, вес, воду, тренировки, планы и
+          привязанные входы без возможности восстановления.
+        </p>
       </section>
     </div>
   );

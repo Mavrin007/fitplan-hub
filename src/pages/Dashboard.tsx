@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { api } from "@/convex/_generated/api";
+import { useQuery } from "convex/react";
 import { useAuth } from "@/hooks/use-auth";
 import {
   Activity,
@@ -14,6 +16,8 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { GuestSignOutOverlay } from "@/components/guest-sign-out-overlay";
+import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard";
+import { shouldShowOnboarding } from "@/features/onboarding/onboarding";
 
 const OPEN_ASSISTANT_EVENT = "kilo:open-assistant";
 
@@ -56,9 +60,16 @@ export default function Dashboard() {
   const navigate = useNavigate();
   // Оверлей «у вас N записей» при выходе из гостевой сессии.
   const [signOutOpen, setSignOutOpen] = useState(false);
+  // Онбординг на первом входе: показывается, пока профиль не создан.
+  const profile = useQuery(api.profiles.getMyProfile);
 
   // Гость = анонимная сессия (нет email). Для таких выход перехватывается.
   const isGuest = user != null && (user.isAnonymous === true || !user.email);
+
+  // Первый вход: профиля нет и пользователь не пропустил онбординг в этом
+  // браузере. Пока профиль ещё грузится (undefined) визард не показываем.
+  const showOnboarding = shouldShowOnboarding(profile);
+  const [onboardingDone, setOnboardingDone] = useState(false);
 
   const doSignOut = async () => {
     await signOut();
@@ -73,6 +84,17 @@ export default function Dashboard() {
     }
     await doSignOut();
   };
+
+  // Онбординг закрыт (профиль сохранён): при следующем рендере profile уже
+  // пришёл с сервера, поэтому визард не вернётся; скип запоминает браузер.
+  if (showOnboarding && !onboardingDone) {
+    return (
+      <OnboardingWizard
+        onComplete={() => setOnboardingDone(true)}
+        onSkip={() => setOnboardingDone(true)}
+      />
+    );
+  }
 
   return (
     <div className="bg-aurora isolate relative min-h-screen overflow-x-clip bg-background text-foreground">
