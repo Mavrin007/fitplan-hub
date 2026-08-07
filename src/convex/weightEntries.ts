@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
+import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { assertDate, assertRange } from "./validation";
 
 /** Вес записывается как минимум раз в неделю — дальний предел только защитный. */
@@ -16,8 +17,9 @@ export const listMyWeights = query({
   args: {
     from: v.optional(v.string()),
     to: v.optional(v.string()),
+    limit: v.optional(v.number()),
   },
-  handler: async (ctx, { from, to }) => {
+  handler: async (ctx, { from, to, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     const q =
@@ -30,7 +32,11 @@ export const listMyWeights = query({
         : ctx.db
             .query("weightEntries")
             .withIndex("by_user_date", (qq) => qq.eq("userId", userId));
-    return await q.order("desc").collect();
+    // Лимит опционален: чарты/тренды передают его (графику не нужны сотни
+    // замеров), экспорт «Скачать свои данные» — без лимита (полная выгрузка).
+    return limit !== undefined
+      ? await q.order("desc").take(limit)
+      : await q.order("desc").collect();
   },
 });
 
@@ -42,6 +48,7 @@ export const addWeight = mutation({
 
     assertDate(date);
     assertRange(weightKg, MIN_WEIGHT_KG, MAX_WEIGHT_KG, "Вес (кг)");
+    await consumeRateLimit(ctx, `${userId}:weight`, RATE_LIMITS.weight);
 
     const existing = await ctx.db
       .query("weightEntries")

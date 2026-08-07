@@ -130,6 +130,23 @@ export function exportWater(rows: { date: string; amountMl: number }[]): void {
   );
 }
 
+/** Экспорт ВСЕХ данных пользователя одним JSON-файлом (GDPR-переносимость,
+ *  кнопка «Экспортировать все данные» на Профиле). Принимает ответ
+ *  account.exportMyData. */
+export function exportAllJson(data: unknown, exportedAt: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `kilo-данные-${exportedAt.slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /** Свои продукты: название, порция и единица, ккал, БЖУ. */
 export function exportFoods(
   rows: {

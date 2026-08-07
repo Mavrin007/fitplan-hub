@@ -22,6 +22,7 @@ import {
   deleteEntry,
   getByDate,
   getByRange,
+  getDailyTotals,
   updateEntry,
 } from "./mealLog";
 import {
@@ -66,6 +67,16 @@ const runByRange = (
       ctx: { db: ConvexDbMock },
       args: { from: string; to: string },
     ) => Promise<ConvexDoc[]>;
+  }
+)._handler;
+const runDailyTotals = (
+  getDailyTotals as unknown as {
+    _handler: (
+      ctx: { db: ConvexDbMock },
+      args: { from: string; to: string },
+    ) => Promise<
+      { date: string; calories: number; protein: number; carbs: number; fat: number; count: number }[]
+    >;
   }
 )._handler;
 const runAdd = (
@@ -135,6 +146,57 @@ describe("getByDate / getByRange", () => {
     const result = await runByDate({ db }, { date: "2026-08-04" });
     expect(result.map((d) => d._id)).toEqual(["m1", "m2"]);
   });
+
+describe("getDailyTotals — серверная агрегация дня", () => {
+  beforeEach(() => {
+    mockAuth(getAuthUserId);
+  });
+
+  it("суммирует калории/БЖУ и число записей по датам", async () => {
+    const { db } = makeConvexDb({
+      mealLog: [
+        mealDoc("m1", "user-1", "2026-08-01", "Завтрак"),
+        mealDoc("m2", "user-1", "2026-08-01", "Обед"),
+        { ...mealDoc("m3", "user-1", "2026-08-02", "Ужин"), calories: 700, protein: 50, fat: 20 },
+      ],
+    });
+
+    const totals = await runDailyTotals({ db }, { from: "2026-08-01", to: "2026-08-02" });
+    expect(totals).toHaveLength(2);
+    expect(totals[0]).toEqual({
+      date: "2026-08-01",
+      calories: 1000,
+      protein: 80,
+      carbs: 0,
+      fat: 20,
+      count: 2,
+    });
+    expect(totals[1]).toMatchObject({ date: "2026-08-02", calories: 700, protein: 50, count: 1 });
+  });
+
+  it("уважает границы диапазона и не смешивает чужого пользователя", async () => {
+    const { db } = makeConvexDb({
+      mealLog: [
+        mealDoc("m1", "user-1", "2026-07-31", "Вне окна"),
+        mealDoc("m2", "user-1", "2026-08-05", "Вне окна"),
+        mealDoc("m3", "user-2", "2026-08-01", "Чужой"),
+        mealDoc("m4", "user-1", "2026-08-01", "Мой"),
+      ],
+    });
+
+    const totals = await runDailyTotals({ db }, { from: "2026-08-01", to: "2026-08-04" });
+    expect(totals).toEqual([
+      { date: "2026-08-01", calories: 500, protein: 40, carbs: 0, fat: 10, count: 1 },
+    ]);
+  });
+
+  it("анониму отдаёт пустой список", async () => {
+    mockAuth(getAuthUserId, "anonymous");
+    const { db } = makeConvexDb();
+    const totals = await runDailyTotals({ db }, { from: "2026-08-01", to: "2026-08-02" });
+    expect(totals).toEqual([]);
+  });
+});
 
   it("getByRange уважает включительные границы и фильтр по владельцу", async () => {
     const { db } = makeConvexDb({

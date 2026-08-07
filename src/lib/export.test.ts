@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  exportAllJson,
   exportMeals,
   exportWeights,
   exportWorkouts,
@@ -266,5 +267,21 @@ describe("exportFoods", () => {
     expect(downloadedFilename()).toMatch(
       /^kilo-продукты-\d{4}-\d{2}-\d{2}\.csv$/,
     );
+  });
+});
+
+describe("exportAllJson — GDPR-экспорт всего", () => {
+  it("скачивает JSON-файл со всеми данными и датой в имени", async () => {
+    const data = {
+      app: "kilo",
+      exportedAt: "2026-08-07T10:00:00.000Z",
+      weightEntries: [{ date: "2026-08-01", weightKg: 80 }],
+    };
+    exportAllJson(data, data.exportedAt);
+
+    expect(downloadedFilename()).toBe("kilo-данные-2026-08-07.json");
+    // JSON без BOM (в отличие от CSV) — это машинный формат для переноса.
+    const text = await rawText();
+    expect(JSON.parse(text)).toEqual(data);
   });
 });

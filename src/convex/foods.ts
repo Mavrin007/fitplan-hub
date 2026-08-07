@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
+import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { assertRange, assertText } from "./validation";
 
 const MAX_NAME_LEN = 100;
@@ -49,6 +50,7 @@ export const addFood = mutation({
     assertRange(args.protein, 0, MAX_MACRO_G, "Белки (г)");
     assertRange(args.carbs, 0, MAX_MACRO_G, "Углеводы (г)");
     assertRange(args.fat, 0, MAX_MACRO_G, "Жиры (г)");
+    await consumeRateLimit(ctx, `${userId}:food`, RATE_LIMITS.food);
 
     return await ctx.db.insert("foods", {
       ...args,

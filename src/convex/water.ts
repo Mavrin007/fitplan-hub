@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
+import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { assertDate, assertRange } from "./validation";
 
 /** Разовая добавка воды (мл). Отрицательная — уменьшение, не больше стакана. */
@@ -23,17 +24,18 @@ export const getByDate = query({
   },
 });
 
-/** Все записи воды пользователя (для экспорта «Скачать свои данные»). */
+/** Все записи воды пользователя (для экспорта «Скачать свои данные»).
+ *  Лимит опционален: графики передают его, экспорт — без лимита. */
 export const listMyWater = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    return await ctx.db
+    const q = ctx.db
       .query("waterEntries")
       .withIndex("by_user_date", (q) => q.eq("userId", userId))
-      .order("desc")
-      .collect();
+      .order("desc");
+    return limit !== undefined ? await q.take(limit) : await q.collect();
   },
 });
 
@@ -49,6 +51,7 @@ export const addWater = mutation({
 
     assertDate(date);
     assertRange(amountMl, -MAX_DELTA_ML, MAX_DELTA_ML, "Объём воды (мл)");
+    await consumeRateLimit(ctx, `${userId}:water`, RATE_LIMITS.water);
 
     const existing = await ctx.db
       .query("waterEntries")

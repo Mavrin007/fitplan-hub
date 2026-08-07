@@ -7,6 +7,7 @@
  *    (jsdom-снапшот-структура через доступные роли/тексты).
  */
 import { describe, expect, it } from "vitest";
+import { render } from "@testing-library/react";
 import {
   axisProps,
   barAnim,
@@ -21,6 +22,7 @@ import {
   ticksFor,
   tooltipStyle,
 } from "./charts";
+import { SVGBarChart, SVGAreaChart } from "./charts";
 
 describe("charts — единый стиль графиков", () => {
   it("высота графиков фиксирована (220px)", () => {
@@ -154,5 +156,124 @@ describe("formatChartValue — подписи осей", () => {
 
   it("дробные — с запятой вместо точки", () => {
     expect(formatChartValue(79.5)).toBe("79,5");
+  });
+});
+
+describe("SVGBarChart — градиентная заливка столбцов", () => {
+  it("столбцы ссылаются на вертикальный градиент своей серии", () => {
+    const { container } = render(
+      <SVGBarChart
+        data={[{ d: "Пн", calories: 120 }]}
+        xKey="d"
+        series={[{ key: "calories", name: "Калории", fill: "var(--brand)" }]}
+        height={100}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    // Градиент создан для серии и идёт вертикально (сверху вниз).
+    const grad = svg.querySelector("linearGradient");
+    expect(grad).not.toBeNull();
+    expect(grad!.getAttribute("x1")).toBe("0");
+    expect(grad!.getAttribute("y1")).toBe("0");
+    expect(grad!.getAttribute("x2")).toBe("0");
+    expect(grad!.getAttribute("y2")).toBe("1");
+    // Верх светлее (0.6), основание насыщеннее (1) — глубина как у кольца.
+    // В jsdom атрибуты сериализуются с дефисом: stop-opacity/stop-color.
+    const stops = grad!.querySelectorAll("stop");
+    expect(stops.length).toBe(2);
+    expect(stops[0]!.getAttribute("stop-opacity")).toBe("0.6");
+    expect(stops[1]!.getAttribute("stop-opacity")).toBe("1");
+    expect(stops[0]!.getAttribute("stop-color")).toBe("var(--brand)");
+    // Столбец заливается url(#…-calories), а не плоским цветом
+    // (первый rect в DOM может быть зоной захвата курсора — фильтруем).
+    const bar = [...svg.querySelectorAll("rect, path")].find((el) =>
+      el.getAttribute("fill")?.startsWith("url(#"),
+    )!;
+    expect(bar.getAttribute("fill")).toBe(`url(#${grad!.id})`);
+  });
+
+  it("в стеке каждая серия получает собственный градиент", () => {
+    const { container } = render(
+      <SVGBarChart
+        data={[{ d: "Пн", protein: 40, fat: 20 }]}
+        xKey="d"
+        series={[
+          { key: "protein", name: "Белки", fill: "var(--macro-protein)" },
+          { key: "fat", name: "Жиры", fill: "var(--macro-fat)" },
+        ]}
+        height={100}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    const grads = svg.querySelectorAll("linearGradient");
+    expect(grads.length).toBe(2);
+    const ids = [...grads].map((g) => g.id);
+    // Только элементы с градиентной заливкой — столбцы (без зоны захвата
+    // курсора fill="transparent"). Каждый сегмент ссылается на градиент
+    // своего цвета.
+    const bars = [...svg.querySelectorAll("rect, path")].filter((el) =>
+      el.getAttribute("fill")?.startsWith("url(#"),
+    );
+    expect(bars.length).toBe(2);
+    bars.forEach((bar) => {
+      const fill = bar.getAttribute("fill")!;
+      expect(ids.some((id) => fill === `url(#${id})`)).toBe(true);
+    });
+  });
+});
+
+describe("SVGAreaChart — цвет линии и заливки", () => {
+  it("линия и градиент используют переданный color", () => {
+    const { container } = render(
+      <SVGAreaChart
+        data={[
+          { d: "Пн", weight: 80 },
+          { d: "Вт", weight: 79 },
+        ]}
+        xKey="d"
+        yKey="weight"
+        name="Вес"
+        height={100}
+        color="var(--accent-activity)"
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    // Линия — переданный цвет.
+    const line = [...svg.querySelectorAll("path")].find(
+      (p) => p.getAttribute("fill") === "none",
+    )!;
+    expect(line.getAttribute("stroke")).toBe("var(--accent-activity)");
+    // Градиент заливки — тот же цвет (jsdom сериализует stop-color с дефисом).
+    const grad = svg.querySelector("linearGradient")!;
+    const stops = [...grad.querySelectorAll("stop")];
+    expect(stops.length).toBeGreaterThan(0);
+    stops.forEach((s) => {
+      expect(s.getAttribute("stop-color")).toBe("var(--accent-activity)");
+    });
+    // Заливка области ссылается на этот градиент.
+    const area = [...svg.querySelectorAll("path")].find(
+      (p) => p.getAttribute("fill")?.startsWith("url(#"),
+    )!;
+    expect(area.getAttribute("fill")).toBe(`url(#${grad.id})`);
+  });
+
+  it("дефолт — брендовый var(--brand)", () => {
+    const { container } = render(
+      <SVGAreaChart
+        data={[{ d: "Пн", weight: 80 }]}
+        xKey="d"
+        yKey="weight"
+        height={100}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    const line = [...svg.querySelectorAll("path")].find(
+      (p) => p.getAttribute("fill") === "none",
+    )!;
+    expect(line.getAttribute("stroke")).toBe("var(--brand)");
+    const grad = svg.querySelector("linearGradient")!;
+    expect(grad.querySelector("stop")!.getAttribute("stop-color")).toBe(
+      "var(--brand)",
+    );
   });
 });
