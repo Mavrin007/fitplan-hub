@@ -39,6 +39,7 @@ export const api = {
   mealLog: {
     getByDate: ref("mealLog.getByDate"),
     getByRange: ref("mealLog.getByRange"),
+    getDailyTotals: ref("mealLog.getDailyTotals"),
     addEntry: ref("mealLog.addEntry"),
     addEntries: ref("mealLog.addEntries"),
     updateEntry: ref("mealLog.updateEntry"),
@@ -77,10 +78,17 @@ export const api = {
     canAttempt: ref("otpRateLimit.canAttempt"),
   },
   users: { currentUser: ref("users.currentUser") },
+  account: {
+    exportMyData: ref("account.exportMyData"),
+    deleteMyAccount: ref("account.deleteMyAccount"),
+  },
   assistant: {
     chat: ref("assistant.chat"),
     checkConnection: ref("assistant.checkConnection"),
   },
+  assistantLimits: { getMyLimit: ref("assistantLimits.getMyLimit") },
+  photo: { analyzeMealPhoto: ref("photo.analyzeMealPhoto") },
+  rateLimit: { consumeRateLimitAction: ref("rateLimit.consumeRateLimitAction") },
 };
 
 function pathOf(ref: unknown): string {

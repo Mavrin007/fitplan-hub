@@ -8,17 +8,24 @@
  * @module
  */
 
+import type * as account from "../account.js";
 import type * as activity from "../activity.js";
 import type * as assistant from "../assistant.js";
+import type * as assistantLimits from "../assistantLimits.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as crons from "../crons.js";
 import type * as devOtp from "../devOtp.js";
+import type * as digest from "../digest.js";
 import type * as foods from "../foods.js";
 import type * as guestStats from "../guestStats.js";
 import type * as http from "../http.js";
 import type * as mealLog from "../mealLog.js";
 import type * as otpRateLimit from "../otpRateLimit.js";
+import type * as photo from "../photo.js";
 import type * as profiles from "../profiles.js";
+import type * as rateLimit from "../rateLimit.js";
+import type * as roles from "../roles.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
 import type * as water from "../water.js";
@@ -32,17 +39,24 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  account: typeof account;
   activity: typeof activity;
   assistant: typeof assistant;
+  assistantLimits: typeof assistantLimits;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
+  crons: typeof crons;
   devOtp: typeof devOtp;
+  digest: typeof digest;
   foods: typeof foods;
   guestStats: typeof guestStats;
   http: typeof http;
   mealLog: typeof mealLog;
   otpRateLimit: typeof otpRateLimit;
+  photo: typeof photo;
   profiles: typeof profiles;
+  rateLimit: typeof rateLimit;
+  roles: typeof roles;
   users: typeof users;
   validation: typeof validation;
   water: typeof water;
