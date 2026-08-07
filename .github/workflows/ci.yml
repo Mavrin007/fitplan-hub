@@ -312,9 +312,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: check
+    # ВНИМАНИЕ: secrets НЕЛЬЗЯ использовать в job-level `if` — GitHub не
+    # запускает воркфлоу вообще (0 джоб). Поэтому проверка токена живёт на
+    # уровне шагов (`if: env.VERCEL_TOKEN != ''`), как в deploy-джобе выше.
     # PR из форков не видят секреты — preview-деплой работает для PR из
     # этого же репозитория (обычный сценарий одной команды).
-    if: github.event_name == 'pull_request' && secrets.VERCEL_TOKEN != ''
+    if: github.event_name == 'pull_request'
     concurrency:
       group: deploy-preview-${{ github.ref }}
       cancel-in-progress: true
@@ -340,29 +343,35 @@ jobs:
         run: npm ci
 
       - name: Pull Vercel preview settings
+        if: env.VERCEL_TOKEN != ''
         run: npx --yes vercel@58 pull --yes --environment=preview
 
       # Гард: preview-сборка тоже обязана иметь валидный VITE_CONVEX_URL.
       # Скрипт принимает путь к env-файлу аргументом (см. scripts/guard-prod-env.mjs).
       - name: Guard preview env (VITE_CONVEX_URL)
+        if: env.VERCEL_TOKEN != ''
         run: node scripts/guard-prod-env.mjs .vercel/.env.preview.local
 
       - name: Build (preview)
+        if: env.VERCEL_TOKEN != ''
         run: npx --yes vercel@58 build --prebuilt
 
       # Без --prod: деплой уходит в preview-окружение (staging URL).
       - name: Deploy to Vercel preview
+        if: env.VERCEL_TOKEN != ''
         run: |
           npx --yes vercel@58 deploy --prebuilt 2>&1 | tee /tmp/vercel-preview.log
           echo "PREVIEW_URL=$(grep -oE 'https://[^ ]+' /tmp/vercel-preview.log | tail -1)" >> "$GITHUB_ENV"
 
       - name: Smoke test preview URL
+        if: env.VERCEL_TOKEN != ''
         run: |
           test -n "$PREVIEW_URL" || { echo "::error::PREVIEW_URL пуст — деплой не удался"; exit 1; }
           curl -fsS -o /dev/null -w "GET $PREVIEW_URL -> %{http_code}\n" "$PREVIEW_URL"
 
       # Комментим staging-URL в PR, чтобы ревьюеру не искать его в Actions.
       - name: Comment preview URL on PR
+        if: env.VERCEL_TOKEN != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
