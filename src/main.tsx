@@ -1,12 +1,19 @@
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
-import { AssistantChat } from "@/components/AssistantChat";
-import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import * as Sentry from "@sentry/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { MotionConfig } from "framer-motion";
+import { TriangleAlert } from "lucide-react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
+
+// AssistantChat и VlyToolbar не входят в первый экран (плавающие оверлеи):
+// грузим их лениво после первичной отрисовки — это убирает из стартового
+// графа чат-UI, иллюстрации и snapdom (LCP/FCP на первом заходе).
+const AssistantChat = lazy(() =>
+  import("@/components/AssistantChat").then((m) => ({ default: m.AssistantChat })),
+);
+const VlyToolbar = lazy(() => import("../vly-toolbar-readonly.tsx"));
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
@@ -21,6 +28,7 @@ const Workouts = lazy(() => import("./pages/Workouts.tsx"));
 const Progress = lazy(() => import("./pages/Progress.tsx"));
 const Profile = lazy(() => import("./pages/Profile.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const Privacy = lazy(() => import("./pages/Privacy.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -73,15 +81,38 @@ export class RootErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
-          <div className="max-w-lg text-center">
-            <p className="text-sm font-semibold">Ошибка приложения</p>
-            <p className="mt-2 text-xs text-muted-foreground break-words">
-              {this.state.message}
+          <div className="max-w-md w-full text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+              <TriangleAlert className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <p className="mt-4 text-lg font-semibold">Что-то пошло не так</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Произошла непредвиденная ошибка. Перезагрузите страницу — ваши
+              данные сохранены в облаке.
             </p>
-            {this.state.stack && (
-              <pre className="mt-3 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
-                {this.state.stack}
-              </pre>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+            >
+              Перезагрузить
+            </button>
+            {(this.state.message || this.state.stack) && (
+              <details className="mt-4 text-left">
+                <summary className="cursor-pointer text-xs text-muted-foreground">
+                  Технические детали
+                </summary>
+                {this.state.message && (
+                  <p className="mt-2 text-xs text-muted-foreground break-words">
+                    {this.state.message}
+                  </p>
+                )}
+                {this.state.stack && (
+                  <pre className="mt-2 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
+                    {this.state.stack}
+                  </pre>
+                )}
+              </details>
             )}
           </div>
         </div>
@@ -176,6 +207,17 @@ if (sentryEnabled) {
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
+// PWA: сервис-воркер регистрируем только в прод-сборке. В dev он ломал бы
+// HMR (кэширование навигаций и /assets), поэтому офлайн-оболочка включена
+// только в собранном приложении (vite preview / продакшн).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((err: unknown) => {
+      console.warn("[PWA] Service worker registration failed:", err);
+    });
+  });
+}
+
 function RouteSyncer() {
   const location = useLocation();
   useEffect(() => {
@@ -209,18 +251,19 @@ createRoot(document.getElementById("root")!).render(
     <MotionConfig reducedMotion="user">
       <RootErrorBoundary>
       <ToolbarErrorBoundary>
-        <VlyToolbar />
+        <Suspense fallback={null}>
+          <VlyToolbar />
+        </Suspense>
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
         <BrowserRouter>
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
+              <Route path="/" element={<Landing />} />              <Route path="/auth"
                 element={<AuthPage redirectAfterAuth="/dashboard" />}
               />
+              <Route path="/privacy" element={<Privacy />} />
               <Route
                 path="/dashboard"
                 element={
@@ -238,7 +281,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
-          <AssistantChat />
+          <Suspense fallback={null}>
+            <AssistantChat />
+          </Suspense>
         </BrowserRouter>
         <Toaster />
       </ConvexAuthProvider>

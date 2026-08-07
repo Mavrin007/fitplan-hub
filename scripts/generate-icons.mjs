@@ -124,6 +124,103 @@ function shade(px, py, S, maskable) {
   return [r * 255, g * 255, b * 255, a * 255];
 }
 
+// ---------- OG-карточка 1200×630 (для соцсетей) ----------
+// Тот же рисунок, что и в иконках: брендовый градиент + кольцо прогресса.
+// Центр кольца — геометрический центр карточки, масштаб — по меньшей
+// стороне (S = min(W, H)), чтобы рисунок не тянулся.
+const OG_W = 1200;
+const OG_H = 630;
+
+function ogPixel(px, py) {
+  const cx = OG_W / 2;
+  const cy = OG_H / 2;
+  const S = Math.min(OG_W, OG_H);
+
+  // Фон: диагональный градиент deep → brand на весь канвас + мягкое свечение к центру
+  const t = (px + py) / (OG_W + OG_H);
+  let r = DEEP[0] + (BRAND[0] - DEEP[0]) * t;
+  let g = DEEP[1] + (BRAND[1] - DEEP[1]) * t;
+  let b = DEEP[2] + (BRAND[2] - DEEP[2]) * t;
+  const glowD = Math.hypot(px - cx, py - cy) / (0.7 * S);
+  const glow = Math.max(0, 1 - glowD) * 0.12;
+  r = r + (BRIGHT[0] - r) * glow;
+  g = g + (BRIGHT[1] - g) * glow;
+  b = b + (BRIGHT[2] - b) * glow;
+
+  const d = Math.hypot(px - cx, py - cy);
+  const inRing = d >= R_INNER * S && d <= R_OUTER * S;
+
+  // Трек кольца — лёгкое осветление фона
+  if (inRing) {
+    r = r + (WHITE[0] - r) * 0.16;
+    g = g + (WHITE[1] - g) * 0.16;
+    b = b + (WHITE[2] - b) * 0.16;
+  }
+
+  // Дуга прогресса с круглыми концами (та же геометрия, что в иконках)
+  const inArc = (() => {
+    if (!inRing) return false;
+    const ang = (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
+    const norm = ((ang - ARC_START_DEG) % 360 + 360) % 360;
+    if (norm <= ARC_LEN_DEG) return true;
+    const hw2 = TH * S * 0.5;
+    const sAng = (ARC_START_DEG * Math.PI) / 180;
+    const eAng = ((ARC_START_DEG + ARC_LEN_DEG) * Math.PI) / 180;
+    const sX = cx + R_MID * S * Math.cos(sAng);
+    const sY = cy + R_MID * S * Math.sin(sAng);
+    const eX = cx + R_MID * S * Math.cos(eAng);
+    const eY = cy + R_MID * S * Math.sin(eAng);
+    return Math.hypot(px - sX, py - sY) <= hw2 || Math.hypot(px - eX, py - eY) <= hw2;
+  })();
+  if (inArc) {
+    r = WHITE[0];
+    g = WHITE[1];
+    b = WHITE[2];
+  }
+
+  // Центральная точка: белое кольцо с ядром в цвете бренда
+  if (d <= DOT_R * S) {
+    r = WHITE[0];
+    g = WHITE[1];
+    b = WHITE[2];
+    if (d <= DOT_INNER_R * S) {
+      r = BRAND[0];
+      g = BRAND[1];
+      b = BRAND[2];
+    }
+  }
+
+  return [r * 255, g * 255, b * 255, 255];
+}
+
+function rasterizeOg(ss = 3) {
+  const buf = Buffer.alloc(OG_W * OG_H * 4);
+  for (let y = 0; y < OG_H; y++) {
+    for (let x = 0; x < OG_W; x++) {
+      let ar = 0;
+      let ag = 0;
+      let ab = 0;
+      for (let sy = 0; sy < ss; sy++) {
+        for (let sx = 0; sx < ss; sx++) {
+          const px = x + (sx + 0.5) / ss;
+          const py = y + (sy + 0.5) / ss;
+          const [cr, cg, cb] = ogPixel(px, py);
+          ar += cr;
+          ag += cg;
+          ab += cb;
+        }
+      }
+      const n = ss * ss;
+      const o = (y * OG_W + x) * 4;
+      buf[o] = Math.round(ar / n);
+      buf[o + 1] = Math.round(ag / n);
+      buf[o + 2] = Math.round(ab / n);
+      buf[o + 3] = 255;
+    }
+  }
+  return buf;
+}
+
 // ---------- Растр с суперсэмплингом ----------
 function rasterize(S, maskable = false, ss = 3) {
   const buf = Buffer.alloc(S * S * 4);
@@ -178,17 +275,17 @@ function chunk(type, data) {
   crc.writeUInt32BE(crc32(td));
   return Buffer.concat([len, td, crc]);
 }
-function encodePng(S, rgba) {
+function encodePng(W, H, rgba) {
   const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(S, 0);
-  ihdr.writeUInt32BE(S, 4);
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(H, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // RGBA
-  const raw = Buffer.alloc((S * 4 + 1) * S);
-  for (let y = 0; y < S; y++) {
-    raw[y * (S * 4 + 1)] = 0; // filter: none
-    rgba.copy(raw, y * (S * 4 + 1) + 1, y * S * 4, (y + 1) * S * 4);
+  const raw = Buffer.alloc((W * 4 + 1) * H);
+  for (let y = 0; y < H; y++) {
+    raw[y * (W * 4 + 1)] = 0; // filter: none
+    rgba.copy(raw, y * (W * 4 + 1) + 1, y * W * 4, (y + 1) * W * 4);
   }
   const idat = deflateSync(raw, { level: 9 });
   return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
@@ -243,7 +340,12 @@ const jobs = [
 ];
 for (const j of jobs) {
   const rgba = rasterize(j.size, j.maskable);
-  writeFileSync(join(OUT, j.file), encodePng(j.size, rgba));
+  writeFileSync(join(OUT, j.file), encodePng(j.size, j.size, rgba));
   console.log(`✓ public/${j.file} (${j.size}×${j.size})`);
 }
+
+// OG-карточка 1200×630 (соцсети: Telegram, VK, Slack, Facebook).
+const ogRgba = rasterizeOg();
+writeFileSync(join(OUT, "og-image.png"), encodePng(OG_W, OG_H, ogRgba));
+console.log(`✓ public/og-image.png (${OG_W}×${OG_H})`);
 console.log("Готово.");

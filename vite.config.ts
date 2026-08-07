@@ -2,11 +2,29 @@ import { vlyPlugin } from "@vly-ai/integrations";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+// Прод-URL для canonical/og:url/sitemap. SITE_URL задаётся в CI/Convex,
+// VITE_SITE_URL — локальный вариант; дефолт для dev-сборок.
+const SITE_URL = (
+  process.env.SITE_URL ||
+  process.env.VITE_SITE_URL ||
+  "https://fitplan-hub.vercel.app"
+).replace(/\/+$/, "");
+
+/** Подставляет %SITE_URL% в index.html (canonical, OG, JSON-LD). */
+function siteUrlPlugin(): Plugin {
+  return {
+    name: "site-url",
+    transformIndexHtml(html) {
+      return html.replaceAll("%SITE_URL%", SITE_URL);
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), vlyPlugin(), tailwindcss()],
+  plugins: [react(), vlyPlugin(), tailwindcss(), siteUrlPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -36,6 +54,9 @@ export default defineConfig({
           ],
           // Heavy optional libraries - separate chunks for better lazy loading
           'framer-motion': ['framer-motion'],
+          // Иконки: один чанк вместо десятка мини-запросов (экономит RTT
+          // на первом экране — критично для LCP под сетевой задержкой).
+          'lucide': ['lucide-react'],
         },
         // Optimize chunk size
         chunkFileNames: 'assets/[name]-[hash].js',

@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /overview
+Disallow: /meals
+Disallow: /workouts
+Disallow: /progress
+Disallow: /profile
+
+Sitemap: https://fitplan-hub.vercel.app/sitemap.xml

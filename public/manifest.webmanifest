@@ -3,6 +3,7 @@
   "short_name": "КИЛО",
   "description": "Трекер питания, воды, тренировок и веса",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#002c26",
   "theme_color": "#00685d",

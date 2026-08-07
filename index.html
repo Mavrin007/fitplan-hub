@@ -8,10 +8,75 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="КИЛО — фитнес и питание в цифрах. Калории, макросы, план питания и тренировки." />
+  <meta name="theme-color" content="#00685d" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="robots" content="index,follow" />
+  <!-- %SITE_URL% подставляется плагином vite (см. vite.config.ts): SITE_URL
+       из окружения, иначе дефолт. Canonical и OG обязаны быть абсолютными. -->
+  <link rel="canonical" href="%SITE_URL%/" />
+
+  <!-- Open Graph (шеринг в Telegram, VK, Slack, Facebook) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="КИЛО" />
+  <meta property="og:locale" content="ru_RU" />
+  <meta property="og:title" content="КИЛО — фитнес, измеренный в цифрах" />
+  <meta property="og:description" content="Личный трекер питания, воды, тренировок и веса: реалистичные планы питания и тренировок под ваши цели." />
+  <meta property="og:url" content="%SITE_URL%/" />
+  <meta property="og:image" content="%SITE_URL%/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="КИЛО — фитнес, измеренный в цифрах" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="КИЛО — фитнес, измеренный в цифрах" />
+  <meta name="twitter:description" content="Личный трекер питания, воды, тренировок и веса: реалистичные планы под ваши цели." />
+  <meta name="twitter:image" content="%SITE_URL%/og-image.png" />
+
+  <!-- Schema.org: приложение + организация. Без выдуманных рейтингов/отзывов. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "КИЛО",
+    "alternateName": "KILO — fitness & nutrition tracker",
+    "description": "Фитнес и питание в цифрах: калории, макросы, вода, вес, план питания и тренировок.",
+    "applicationCategory": "HealthApplication",
+    "operatingSystem": "Any",
+    "inLanguage": "ru",
+    "url": "%SITE_URL%/",
+    "image": "%SITE_URL%/og-image.png",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BYN" },
+    "publisher": {
+      "@type": "Organization",
+      "name": "КИЛО",
+      "url": "%SITE_URL%/",
+      "logo": { "@type": "ImageObject", "url": "%SITE_URL%/logo.svg" }
+    }
+  }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Прелоад критичного display-шрифта (Onest — вариативный: файлы 600/700
+       одни и те же). Заголовки — элемент LCP на лендинге, поэтому кириллицу
+       и латиницу подтягиваем заранее, пока CSS/JS грузятся. crossorigin
+       обязателен для шрифтов. -->
   <link
-    href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    rel="preload"
+    href="https://fonts.gstatic.com/s/onest/v9/gNMKW3F-SZuj7xmb-HY6EQ.woff2"
+    as="font"
+    type="font/woff2"
+    crossorigin
+  />
+  <link
+    rel="preload"
+    href="https://fonts.gstatic.com/s/onest/v9/gNMKW3F-SZuj7xmf-HY.woff2"
+    as="font"
+    type="font/woff2"
+    crossorigin
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Onest:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
     rel="stylesheet"
   />
   <title>КИЛО — фитнес, измеренный в цифрах</title>

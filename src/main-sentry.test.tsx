@@ -72,8 +72,12 @@ describe("Error boundaries main.tsx", () => {
         <Bomb />
       </RootErrorBoundary>,
     );
-    expect(screen.getByText("Ошибка приложения")).toBeInTheDocument();
+    expect(screen.getByText("Что-то пошло не так")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+    // Кнопка перезагрузки — основной выход из фолбэка.
+    expect(
+      screen.getByRole("button", { name: "Перезагрузить" }),
+    ).toBeInTheDocument();
     // jsdom-ошибки имеют стек → блок <pre> отрисовывается.
     expect(document.querySelector("pre")).not.toBeNull();
     // Sentry выключен — событие никуда не уходит.
@@ -86,8 +90,12 @@ describe("Error boundaries main.tsx", () => {
         <Bomb message="" />
       </RootErrorBoundary>,
     );
-    // error.message = "" → фолбэк «Unknown runtime error».
-    expect(screen.getByText("Unknown runtime error")).toBeInTheDocument();
+    // Пустое сообщение не ломает фолбэк: копия не зависит от текста ошибки,
+    // стек скрыт под details (по умолчанию свёрнут).
+    expect(screen.getByText("Что-то пошло не так")).toBeInTheDocument();
+    expect(screen.queryByText("Технические детали")).toBeInTheDocument();
+    const details = document.querySelector("details");
+    expect(details?.open).toBe(false);
   });
 
   it("RootErrorBoundary без ошибки рендерит детей", () => {

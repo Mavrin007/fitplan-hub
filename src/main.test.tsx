@@ -46,6 +46,7 @@ vi.mock("./pages/Workouts", () => ({ default: () => <div /> }));
 vi.mock("./pages/Progress", () => ({ default: () => <div /> }));
 vi.mock("./pages/Profile", () => ({ default: () => <div /> }));
 vi.mock("./pages/NotFound", () => ({ default: () => <div /> }));
+vi.mock("./pages/Privacy", () => ({ default: () => <div /> }));
 
 import { ReactElement } from "react";
 import { redactPii, sanitizeBeforeSend, scrubPii } from "./main";
