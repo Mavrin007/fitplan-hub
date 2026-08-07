@@ -29,6 +29,41 @@ muscle gain (second snack on a bulk), goal-aware portion scaling, dishes don't
 repeat within a week, day total converges to the calorie target.
 - Guest-first flow with email attach, nutrition diary, water tracking, weight/
 progress charts and CSV export.
+- **Food catalog search** (`src/lib/productSearch.ts`) — curated in-app library
+  (~70 products with per-serving macros and prices) plus **Open Food Facts**
+  fallback: type a query in the add-to-diary dialog and pull real per-100 g
+  macros from the open barcode database (no API key; 8 s timeout, offline-safe
+  — the dialog keeps working with the local library).
+- **Photo meal tracking** (`src/convex/photo.ts`) — snap a plate, Gemini Vision
+  recognizes the dish and returns per-item KBJU which lands straight in the
+  diary (5 analyses/hour rate limit; JPEG/PNG/WebP ≤ 2.5 MB; requires
+  `GEMINI_API_KEY`, model tunable via `GEMINI_PHOTO_MODEL`).
+- **Explained goal projection** (`src/lib/projection.ts`) — linear regression on
+  weight entries projects the target date and explains it in plain words:
+  «Если продолжишь в текущем темпе (0,5 кг в неделю), снизишь до 82,0 кг за
+  ~3 месяца — к 28 октября 2026 г. Осталось 5,5 кг», with an honest
+  «предварительный» caveat when there are too few measurements.
+- **Weekly email digest** (`src/convex/digest.ts` + `src/convex/crons.ts`) —
+  every Monday 08:00 UTC the backend aggregates the past week (weight delta,
+  average calories/protein, workouts + tonnage, water, active days) and emails a
+  plain-language summary through the same `vly.email.send` gateway as OTP. Users
+  without an email, guests, and weeks with no data are skipped; a failed
+  recipient never breaks the run (`getMyWeeklyDigest` returns the same summary
+  for the in-app view). Disable with `DIGEST_DISABLED=1`.
+
+### Product catalog & Open Food Facts
+
+`searchOpenFoodFacts` calls `world.openfoodfacts.org` (search API, `json=1`,
+`fields=product_name,brands,code,nutriments`, page size 8). Products are
+normalized to per-100 g macros (kcal preferred, kJ ÷ 4.184 fallback), junk
+entries and duplicates are filtered. Network/HTTP failures surface as
+«каталог недоступен» in the dialog instead of breaking it. Attribution:
+Open Food Facts is a free, open database under the ODbL license; a link to
+<https://world.openfoodfacts.org> on the marketing page is recommended when
+shipping the feature.
+
+Respect the API's fair-use limits: search is user-triggered (explicit button,
+not per-keystroke), so the app stays well within the free quota.
 
 Use **npm** as the package manager (Node 22+):
 
@@ -47,6 +82,73 @@ preview needs two processes: `CONVEX_DEV_DEPLOYMENT=local npx convex dev` and
 ## Setup
 
 This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
+
+## Tests
+
+- **Unit / component tests (vitest):** `npm test` — business logic, Convex
+  handlers (fake ctx.db, no runtime), React components (convex-react-mock).
+  Coverage gate with thresholds: `npm run test:coverage`.
+- **E2E (Playwright):** `npm run test:e2e` — runs the full local stack
+  (convex dev :3210 + vite :5173, auto-started by `playwright.config.ts`)
+  across three specs: the critical path (guest → onboarding profile →
+  generate workout plan → attach email via dev-OTP → sign out → sign in by
+  email → data persisted), a **scoped axe accessibility audit** (0
+  critical/serious violations on /auth and all five dashboard pages) and a
+  **mobile spec** (375px viewport: no horizontal scroll on any dashboard
+  page). See `.freebuff/run.md` → “E2E (Playwright)” for details.
+
+## Performance & Web Vitals
+
+- **Lighthouse gate in CI** (`perf` job): `scripts/lighthouse-check.mjs` serves
+  the production build (`vite preview` from `dist`) and asserts Web Vitals on
+  the public landing page (mobile, simulated throttling; best of 2 runs — CI
+  runners are noisy). Local check: `npm run build && npm run perf:check`.
+- **Targets (Google Web Vitals / Lighthouse):**
+  - `LCP < 2500 ms` — largest contentful paint;
+  - `CLS < 0.1` — layout shift;
+  - `TBT < 300 ms` — blocking time (proxy for FID);
+  - `FCP < 1800 ms` — first contentful paint.
+  Current baseline and regressions are visible in the CI run log (each run
+  prints the best numbers). Raising the font load / trimming the initial JS
+  bundle directly moves LCP — see “known bottlenecks” below.
+- **Fonts:** 3 families (Roboto body, Onest display, IBM Plex Mono for
+  numbers). The critical display font (Onest, variable — covers 600/700) is
+  `preload`ed for Cyrillic + Latin in `index.html`; all loads use
+  `font-display: swap`. Inter was dropped earlier as a fallback-only family.
+- **Images:** there are no raster images in the app — illustrations are inline
+  SVG (theme-aware), icons are lucide, so webp/avif/srcset don't apply; the
+  only PNGs are PWA icons/favicon. If photos are added later, ship webp/avif
+  with `srcset` + `loading="lazy"`.
+- **Code splitting:** all 10 pages are `React.lazy` + `Suspense` with manual
+  vendor chunks (react-vendor, radix-ui, framer-motion). `AssistantChat` and
+  the Vly toolbar are lazy too — they're not on the first screen (the main
+  bundle dropped from ~530 kB to ~324 kB / gzip ~99 kB). lucide icons are
+  merged into one chunk to cut RTT on slow networks.
+
+## SEO
+
+The app lives behind auth — only the landing page, `/auth` and `/privacy` are
+public, so SEO effort is concentrated there (it's also what social shares
+render).
+
+- **Meta:** `title`, `description`, `lang="ru"`, `theme-color`, `robots
+  meta`, canonical.
+- **Open Graph + Twitter Card:** `og:type/site_name/locale/title/
+  description/url/image` (1200×630 `public/og-image.png`, generated from the
+  same brand geometry as the logo/icons) and `twitter:card`
+  (`summary_large_image`).
+- **Schema.org:** `WebApplication` + `Organization` JSON-LD in `index.html`
+  (no fake ratings/reviews).
+- **`robots.txt` + `sitemap.xml`:** generated by `scripts/generate-seo.mjs`
+  (npm `seo:gen`), listing only the public paths; dashboard routes are
+  `Disallow`ed. The domain is `SITE_URL` (env, set in CI/Vercel), falling
+  back to `https://fitplan-hub.vercel.app`.
+- **Canonical/OG URLs** are absolute — `%SITE_URL%` is substituted by a
+  tiny Vite plugin (`siteUrl` in `vite.config.ts`) so the same `index.html`
+  works for dev and prod builds.
+- Known limitation (honest): it's a client-rendered SPA — Google renders JS
+  fine, but non-JS crawlers only see the app shell. SSR/prerender is the
+  natural next step if organic traffic to the landing becomes a priority.
 
 ## Environment Variables
 
@@ -68,9 +170,46 @@ auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code throug
 the sender name in the letter. A verified sender domain is required in the VLY
 dashboard (`vly.email.verifyDomain` / `listDomains`) for letters to be delivered.
 
+The weekly digest cron reuses the same gateway: it runs only when
+`VLY_INTEGRATION_KEY` is set and can be switched off with `DIGEST_DISABLED=1`
+(dev/staging usually disable it).
+
+### AI-assistant per-user limits (`src/convex/assistantLimits.ts`)
+
+The chat action enforces a **server-side quota per user per day** before any AI
+provider call (an exhausted quota costs the provider nothing):
+
+- **Message quota** — `ASSISTANT_DAILY_MESSAGE_LIMIT` (default 30/day).
+- **Token quota** — `ASSISTANT_DAILY_TOKEN_LIMIT` (default 150 000/day,
+  ≈30 messages × ~5k tokens each). A long, expensive conversation burns the
+  budget faster than 30 short ones; the client pre-checks `getMyLimit` and shows
+  the remaining messages and tokens in the chat footer.
+- **Anti-spam interval** — `ASSISTANT_MIN_INTERVAL_MS` (default 2000 ms).
+
+Set these in the Convex Dashboard (Project → Settings → Environment Variables)
+to tune them per deployment without touching code. The chat action also has a
+**60-second timeout** per AI request (`AI_REQUEST_TIMEOUT_MS` in
+`src/convex/assistant.ts`) — a hung provider never hangs the user's chat.
+
 Frontend error tracking (Sentry) is enabled only when `VITE_SENTRY_DSN` is set;
 `beforeSend` strips emails, JWTs and API keys before events leave the browser.
 Read-only helper values (`GEMINI_MODEL`, optional) tune the model used.
+
+### Schema migrations
+
+`schemaValidation: false` (template default) is a deliberate choice at this
+project size: old documents are not re-validated on read, and new *optional*
+fields are added as **soft migrations** — the code reads them via `?? 0` and
+patches rows lazily on the next write (see `totalTokens` on `assistantLimits`:
+pre-existing rows simply lack the field until the next `checkAndConsume`).
+Backfill jobs become worthwhile only when a field starts driving queries or
+aggregations; until then soft migration keeps the DB stable without a migration
+framework.
+
+Heavy calculations are cached: workout plans are generated once and stored in
+`workoutPlans` (regenerated when the profile changes), and progress charts
+derive from the user's own logs with client-side memoization — no per-render
+recomputation, and no denormalized weekly summary is needed at this scale.
 
 ## Production: Convex cloud + Vercel
 
@@ -178,6 +317,64 @@ Without these secrets the CI `deploy` job is skipped and only the `check` job ru
 
 You must follow these conventions when using authentication.
 
+## DevOps & CI
+
+### Pipelines
+
+- **`.github/workflows/ci.yml`** — on push to `main` and on PRs: lint,
+  typecheck, unit tests, coverage gate (see “Tests”), build, dead-file and
+  CSS audits; then, depending on the event:
+  - **`perf`** — Lighthouse Web Vitals gate against the built landing page
+    (see “Performance & Web Vitals”);
+  - **`e2e`** — Playwright critical path + axe + mobile (push to `main` only);
+  - **`deploy`** — production deploy to Convex cloud (`CONVEX_DEPLOY_TOKEN`)
+    and Vercel (`VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID`),
+    with the `VITE_CONVEX_URL` guard and smoke test of the deployed URL.
+    No GitHub Environment is used (a previously set `environment: production`
+    made the job hang in the queue waiting for manual approval) — secrets are
+    read from the repository directly, and `cancel-in-progress: false` lets a
+    running deploy finish instead of being interrupted by the next push.
+  - **`deploy-preview`** — Vercel **preview (staging) deploy on every PR**
+    (only for PRs from this repo, since forks don't get secrets): unique
+    staging URL is smoke-tested and commented on the PR. Preview env vars
+    must be set in the Vercel panel the same way as production; if they are
+    missing, the guard fails honestly instead of deploying an empty build.
+- **`.github/workflows/nightly.yml`** — full run against `main` every day at
+  03:00 UTC (lint, audit, typecheck, tests + coverage, build). Catches flaky
+  tests and dependency rot that PRs hide behind stable green runs. On failure
+  it posts to `DEPLOY_ALERT_WEBHOOK` if that secret is set.
+- **`.github/dependabot.yml`** — weekly npm updates (minor/patch grouped,
+  major bumps and Convex packages come as separate manual PRs) and monthly
+  GitHub Actions updates.
+
+### Alerting
+
+Set the optional secret **`DEPLOY_ALERT_WEBHOOK`** (Telegram bot API URL, Slack
+Incoming Webhook, …) to get notified when a deploy or the nightly run fails.
+Without the secret the steps are skipped and CI stays green in local
+repositories without monitoring.
+
+### Monitoring
+
+- **Frontend:** Sentry (browser) via `VITE_SENTRY_DSN` — error tracking with
+  a `beforeSend` that strips emails, JWTs and API keys. Client-side only.
+- **Backend:** Convex ships built-in observability (function logs, error
+  traces, HTTP status, dashboard) — no extra setup needed. For server-side
+  error alerting, Convex supports Sentry for actions: install `@sentry/node`,
+  initialize it in the action runtime with the `SENTRY_DSN` backend env var
+  and wrap the `assistant.chat` / `envStatus` actions (see Convex docs,
+  “Sentry”); this is optional and documented here rather than wired in code
+  because it requires a real DSN to be useful.
+
+### Docker
+
+Intentionally not used. The stack is serverless: Convex runs the backend
+functions in its cloud (no containers to manage), Vercel serves the static
+frontend. A Dockerfile would add packaging work with zero operational benefit
+for this architecture. If you need a portable local environment, `node 22`
+(engines in `package.json`) plus `npm ci` is the full requirement — see
+`.freebuff/run.md`.
+
 ## Auth is already set up.
 
 All convex authentication functions are already set up. The auth currently uses email OTP, Google OAuth and anonymous (guest) users.
@@ -266,6 +463,42 @@ You can perform authorization checks on the frontend and backend.
 On the frontend, you can use the `useAuth` hook to get the current user's data and authentication state.
 
 You should also be protecting queries, mutations, and actions at the base level, checking for authorization securely.
+
+**Role model (SaaS-ready):** `src/convex/roles.ts` implements a working
+`ROLES` layer — `myRole` query, `getUserRole` helper (default `USER` for
+legacy accounts), `assertRole` guard, and an admin-only `setUserRole`
+mutation with last-admin protection. See `ARCHITECTURE.md` for conventions
+(feature folders, i18n strategy).
+
+## Security & privacy
+
+**CSRF.** Authentication uses Convex bearer tokens from the same-origin
+client — there are no cookies, so classic cross-site request forgery does not
+apply. `auth.config.ts` validates federated JWTs against a pinned JWKS;
+`convex/http.ts` (auth callback routes) only binds the self-issued
+`CONVEX_SITE_URL` issuer.
+
+**Global rate limiting (anti-flood).** Write mutations (water, meal log,
+foods, weight, workout logs, plan saves) are throttled by
+`src/convex/rateLimit.ts` (`rateLimitEvents` table, sliding window,
+`retryAfterSec` error). The AI assistant has its own per-user daily quota
+(messages + tokens) and anti-spam interval — see `assistantLimits.ts`. OTP
+sending is additionally limited to once per 60 s per email, and code-entry
+failures to 5 per hour (built into `@convex-dev/auth`).
+
+**Account export & deletion (GDPR).** `src/convex/account.ts`:
+`exportMyData` returns every table of the current user (UI button downloads a
+JSON bundle), `deleteMyAccount` wipes all app data, sessions, linked
+providers and the user document. Both are reachable from Профиль → «Данные и
+приватность»; the policy itself lives at `/privacy` (static page,
+`src/pages/Privacy.tsx`).
+
+**Google ↔ email account linking.** `createOrUpdateUser` in `src/convex/auth.ts`
+links a verified-email sign-in (Google OAuth or email OTP after code
+verification) to an existing user with that verified email, so signing in via
+Google and then email (or vice versa) does not create duplicate accounts.
+Anonymous-session linking (guest → email) takes precedence and preserves all
+guest data.
 
 ## Adding a redirect after auth
 
