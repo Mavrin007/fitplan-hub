@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
+import { MotionConfig } from "framer-motion";
 import { renderWithRouter } from "@/test/utils";
 import Landing from "./Landing";
 
@@ -61,5 +62,30 @@ describe("Landing", () => {
     for (const cta of ctas) {
       expect(cta).toHaveAttribute("href", "/auth");
     }
+  });
+
+  /**
+   * Контроль к Landing.reduced-motion.test.tsx: БЕЗ системного
+   * prefers-reduced-motion трансформ-анимация hero-карточки реально идёт.
+   * (Этот файл рендерит Landing первым — framer-motion кэширует настройку
+   * reduced-motion на время жизни модуля, и здесь она равна false.)
+   */
+  it("контроль: без reduced-motion hero-карточка анимируется (трансформ в полёте)", async () => {
+    renderWithRouter(
+      <MotionConfig reducedMotion="user">
+        <Landing />
+      </MotionConfig>,
+    );
+
+    // Продвигаем кадры (rAF-стаб = setTimeout 0): 450 мс — середина
+    // анимации hero (delay 0.3 + duration 0.7), трансформ ещё не в финале.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+
+    const hero = document.querySelector<HTMLElement>(".glow.overflow-hidden");
+    expect(hero).not.toBeNull();
+    // y/scale анимируются: transform не "none" (не конечное состояние).
+    expect(hero!.style.transform).not.toBe("none");
   });
 });
