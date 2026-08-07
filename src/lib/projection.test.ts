@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { humanizeDistance, projectGoal, type WeightSample } from "./projection";
+import {
+  describeProjection,
+  humanizeDistance,
+  projectGoal,
+  type GoalProjection,
+  type WeightSample,
+} from "./projection";
 
 /** Серия замеров с одинаковым темпом −0.2 кг/день (примерно −1.4 кг/нед). */
 function losingSeries(): WeightSample[] {
@@ -156,5 +162,48 @@ describe("humanizeDistance", () => {
     expect(humanizeDistance("2026-01-10", "2026-01-05")).toBe("5 дней");
     expect(humanizeDistance("2026-01-26", "2026-01-05")).toContain("3");
     expect(humanizeDistance("2026-04-05", "2026-01-05")).toContain("3");
+  });
+});
+
+describe("describeProjection", () => {
+  const proj: GoalProjection = {
+    etaDate: "2026-10-28",
+    ratePerWeek: -0.5,
+    remainingKg: 5.5,
+    confident: true,
+  };
+
+  it("уверенный прогноз: темп, направление, дистанция, дата, остаток", () => {
+    const text = describeProjection(proj, 82, 87.5, "2026-08-07");
+    expect(text).toContain("снизить");
+    expect(text).toContain("0,5 кг в неделю");
+    expect(text).toContain("82,0 кг");
+    expect(text).toContain("28 октября 2026");
+    expect(text).toContain("5,5 кг");
+    expect(text).toContain("~3 месяца");
+    expect(text).not.toContain("предварительный");
+  });
+
+  it("набор массы: направление «набрать», положительный темп", () => {
+    const gain: GoalProjection = {
+      etaDate: "2027-02-01",
+      ratePerWeek: 0.3,
+      remainingKg: 4,
+      confident: true,
+    };
+    const text = describeProjection(gain, 80, 76, "2026-08-07");
+    expect(text).toContain("набрать");
+    expect(text).toContain("0,3 кг в неделю");
+  });
+
+  it("неуверенный прогноз: добавляется оговорка про замеры", () => {
+    const text = describeProjection(
+      { ...proj, confident: false },
+      82,
+      87.5,
+      "2026-08-07",
+    );
+    expect(text).toContain("предварительный");
+    expect(text).toContain("пару замеров");
   });
 });

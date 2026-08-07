@@ -25,10 +25,28 @@ const ALL_MEALS_RANGE = { from: "0000-01-01", to: "9999-12-31" };
  *  меняет args запроса, и без заданного результата мок вернул бы
  *  undefined (компонент ушёл бы в скелетон). */
 function seedMealRanges(meals: MealEntry[] = []) {
+  // График калорий/макросов считает итоги на сервере (getDailyTotals) —
+  // мокаем агрегат по дням для каждого периода, а не полные записи.
   for (const p of [7, 30, 90]) {
-    setQuery(api.mealLog.getByRange, mealRange(p), meals);
+    setQuery(api.mealLog.getDailyTotals, mealRange(p), toTotals(meals));
   }
+  // Экспорт «Питание (N)» по-прежнему тянет все записи за всё время.
   setQuery(api.mealLog.getByRange, ALL_MEALS_RANGE, meals);
+}
+
+/** Сворачивает записи дневника в итоги дня (как convex/mealLog.getDailyTotals). */
+function toTotals(meals: MealEntry[]) {
+  const byDate = new Map<string, { calories: number; protein: number; carbs: number; fat: number; count: number }>();
+  for (const e of meals) {
+    const cur = byDate.get(e.date) ?? { calories: 0, protein: 0, carbs: 0, fat: 0, count: 0 };
+    cur.calories += e.calories;
+    cur.protein += e.protein;
+    cur.carbs += e.carbs;
+    cur.fat += e.fat;
+    cur.count += 1;
+    byDate.set(e.date, cur);
+  }
+  return [...byDate.entries()].map(([date, t]) => ({ date, ...t }));
 }
 
 function mealEntry(
@@ -61,15 +79,15 @@ function weightEntry(date: string, weightKg: number): WeightEntry {
 /** Пустые списки воды и своих продуктов (кнопки экспорта «Вода (0)» и
  *  «Продукты (0)» без них ушли бы в скелетон). */
 function seedEmptyWaterAndFoods() {
-  setQuery(api.water.listMyWater, {}, []);
+  setQuery(api.water.listMyWater, { limit: 730 }, []);
   setQuery(api.foods.listMyFoods, {}, []);
 }
 
 /** Профиль + пустые данные: все графики показывают EmptyChart. */
 function setupEmpty() {
   setQuery(api.profiles.getMyProfile, undefined, profile);
-  setQuery(api.weightEntries.listMyWeights, {}, []);
-  setQuery(api.workouts.listLogs, {}, []);
+  setQuery(api.weightEntries.listMyWeights, { limit: 730 }, []);
+  setQuery(api.workouts.listLogs, { limit: 500 }, []);
   seedEmptyWaterAndFoods();
   seedMealRanges([]);
 }
@@ -86,8 +104,8 @@ describe("Progress", () => {
 
   it("без профиля предлагает настроить его", () => {
     setQuery(api.profiles.getMyProfile, undefined, null);
-    setQuery(api.weightEntries.listMyWeights, {}, []);
-    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, []);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     seedMealRanges([]);
     renderWithRouter(<Progress />);
@@ -137,8 +155,8 @@ describe("Progress", () => {
       weightEntry(todayKey(), 80),
     ];
     setQuery(api.profiles.getMyProfile, undefined, profile);
-    setQuery(api.weightEntries.listMyWeights, {}, recent);
-    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, recent);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     const meals = [
       mealEntry("m1", toDateKey(new Date(now.getTime() - 1 * 86400000)), 500),
@@ -192,15 +210,39 @@ describe("Progress", () => {
   it("тренд вверх показывает плюс-дельту", () => {
     const now = new Date();
     setQuery(api.profiles.getMyProfile, undefined, profile);
-    setQuery(api.weightEntries.listMyWeights, {}, [
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
       weightEntry(toDateKey(new Date(now.getTime() - 7 * 86400000)), 78),
       weightEntry(todayKey(), 79.5),
     ]);
-    setQuery(api.workouts.listLogs, {}, []);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     seedMealRanges([]);
     renderWithRouter(<Progress />);
 
     expect(screen.getByText("+1.5 кг")).toBeInTheDocument();
+  });
+
+  it("вес, прошедший цель, показывает зелёное состояние «цель достигнута»", () => {
+    const now = new Date();
+    // Старт 82 кг, цель 75 — текущий 74 кг прошёл цель: путь 82→74 = 8 из 7 кг →
+    // перебор ~14%.
+    setQuery(api.profiles.getMyProfile, undefined, profile);
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 82),
+      weightEntry(todayKey(), 74),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // Кольцо сигналит превышение (цель достигнута и пройдена дальше).
+    expect(
+      screen.getByRole("img", { name: "Превышение на 14%" }),
+    ).toBeInTheDocument();
+    // Внутри кольца: «+14%» и подпись «цель достигнута» (зелёная, не красная).
+    const over = screen.getByText("+14%");
+    expect(over.style.color).toBe("var(--macro-over)");
+    expect(screen.getByText("цель достигнута")).toBeInTheDocument();
   });
 });

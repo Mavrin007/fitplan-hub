@@ -109,3 +109,51 @@ export function humanizeDistance(etaDate: string, fromDate: string): string {
   const m = Math.round(days / 30);
   return `~${m} ${pluralMonths(m)}`;
 }
+
+/**
+ * Человекочитаемое объяснение прогноза для карточки «Прогноз»:
+ * темп в неделю, оставшиеся килограммы и дистанция до цели.
+ *
+ * «Если продолжишь в текущем темпе (−0,5 кг в неделю), достигнешь 82 кг
+ * через ~12 недель — к 2 ноября 2026. Осталось 5,5 кг.»
+ * Для неуверенного прогноза добавляется оговорка про малое число замеров.
+ */
+export function describeProjection(
+  projection: GoalProjection,
+  targetWeightKg: number,
+  latestWeightKg: number,
+  fromDateKey: string,
+): string {
+  // Медленный темп не должен выглядеть как «0,0 кг в неделю» — округляем до
+  // значащей цифры (минимум 0,1), а «в ноль» говорим «почти нулевой».
+  const rate = Math.abs(projection.ratePerWeek);
+  const rateText =
+    rate < 0.05
+      ? "почти нулевой (менее 0,1 кг в неделю)"
+      : `${Math.max(0.1, rate).toFixed(1).replace(".", ",")} кг в неделю`;
+  // Направление только когда вес отличается от цели; на цели карточка и так
+  // заменяется блоком «Цель достигнута» — но функция не должна врать.
+  const direction =
+    targetWeightKg < latestWeightKg - 0.01
+      ? "снизить"
+      : targetWeightKg > latestWeightKg + 0.01
+        ? "набрать"
+        : "удержать";
+  const distance = humanizeDistance(projection.etaDate, fromDateKey);
+  const remaining = Math.abs(targetWeightKg - latestWeightKg)
+    .toFixed(1)
+    .replace(".", ",");
+
+  const base = `Если продолжишь в текущем темпе (${rateText}), ${direction} до ${targetWeightKg
+    .toFixed(1)
+    .replace(".", ",")} кг за ${distance} — к ${new Date(
+    projection.etaDate + "T00:00:00",
+  ).toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })}. Осталось ${remaining} кг.`;
+
+  if (projection.confident) return base;
+  return `${base} Прогноз предварительный: добавьте ещё пару замеров, чтобы уточнить темп.`;
+}

@@ -5,13 +5,14 @@ import type { ReactNode } from "react";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { ProgressRing } from "@/components/progress-ring";
 import { PageAurora } from "@/components/page-aurora";
+import { PageLoading } from "@/components/page-loading";
 import { ChartScene } from "@/components/illustrations";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import { CHART_HEIGHT, SVGAreaChart, SVGBarChart } from "@/lib/charts";
 import { computeTargets } from "@/lib/nutrition";
 import { lastNDays, shortDate, todayKey } from "@/lib/dates";
-import { projectGoal, humanizeDistance } from "@/lib/projection";
+import { describeProjection, projectGoal } from "@/lib/projection";
 import {
   exportWeights,
   exportMeals,
@@ -31,6 +32,7 @@ import {
   GlassWater,
   Apple,
 } from "lucide-react";
+import { UNITS } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const PERIODS = [
@@ -77,15 +79,20 @@ function EmptyChart({ icon, text }: { icon: ReactNode; text: string }) {
 
 export default function Progress() {
   const profile = useQuery(api.profiles.getMyProfile);
-  const weights = useQuery(api.weightEntries.listMyWeights, {});
-  const workoutLogs = useQuery(api.workouts.listLogs, {});
-  const waterLogs = useQuery(api.water.listMyWater, {});
+  // Графики/тренды: лимиты вместо полной выгрузки (730 записей ≈ 2 года
+  // ежедневных замеров — для чартов с запасом; экспорт «Скачать свои данные»
+  // остаётся без лимита и выгружает всё).
+  const weights = useQuery(api.weightEntries.listMyWeights, { limit: 730 });
+  const workoutLogs = useQuery(api.workouts.listLogs, { limit: 500 });
+  const waterLogs = useQuery(api.water.listMyWater, { limit: 730 });
   const foods = useQuery(api.foods.listMyFoods, {});
 
   const [period, setPeriod] = useState<Period>(30);
   const days = useMemo(() => lastNDays(period), [period]);
 
-  const mealRange = useQuery(api.mealLog.getByRange, {
+  // Итоги дней считаются на сервере (getDailyTotals): график получает одну
+  // строку на дату вместо тысяч записей дневника целиком (projection+sum).
+  const dailyTotals = useQuery(api.mealLog.getDailyTotals, {
     from: days[0],
     to: days[days.length - 1],
   });
@@ -125,6 +132,14 @@ export default function Progress() {
     );
   }, [weights, targetWeight]);
 
+  // Текущий (последний по дате) вес — для объяснения прогноза («осталось X кг»).
+  const latestWeightKg = useMemo(() => {
+    const sorted = [...(weights ?? [])].sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+    return sorted.length > 0 ? sorted[sorted.length - 1].weightKg : null;
+  }, [weights]);
+
   // Пройденный путь к цели: от первого замера к текущему, доля от всего
   // расстояния до целевого веса. Работает в обе стороны (похудение и набор):
   // старт = 0%, достижение цели = 100%. Перебор (goalProgress > 1) — цель
@@ -144,26 +159,17 @@ export default function Progress() {
   }, [weights, targetWeight]);
 
   const calorieData = useMemo(() => {
-    const byDate = new Map<string, number>();
-    for (const e of mealRange ?? []) {
-      byDate.set(e.date, (byDate.get(e.date) ?? 0) + e.calories);
-    }
+    const byDate = new Map((dailyTotals ?? []).map((t) => [t.date, t.calories]));
     return days.map((d) => ({
       date: shortDate(d),
       calories: byDate.get(d) ?? 0,
     }));
-  }, [mealRange, days]);
+  }, [dailyTotals, days]);
 
   const macroData = useMemo(() => {
-    const byDate = new Map<string, { p: number; c: number; f: number }>();
-    for (const e of mealRange ?? []) {
-      const cur = byDate.get(e.date) ?? { p: 0, c: 0, f: 0 };
-      byDate.set(e.date, {
-        p: cur.p + e.protein,
-        c: cur.c + e.carbs,
-        f: cur.f + e.fat,
-      });
-    }
+    const byDate = new Map(
+      (dailyTotals ?? []).map((t) => [t.date, { p: t.protein, c: t.carbs, f: t.fat }]),
+    );
     return days.map((d) => {
       const cur = byDate.get(d) ?? { p: 0, c: 0, f: 0 };
       return {
@@ -173,7 +179,7 @@ export default function Progress() {
         Жиры: Math.round(cur.f),
       };
     });
-  }, [mealRange, days]);
+  }, [dailyTotals, days]);
 
   const workoutData = useMemo(() => {
     const weeks = Math.max(1, Math.ceil(period / 7));
@@ -206,22 +212,14 @@ export default function Progress() {
   const loading =
     profile === undefined ||
     weights === undefined ||
-    mealRange === undefined ||
+    dailyTotals === undefined ||
     allMeals === undefined ||
     workoutLogs === undefined ||
     waterLogs === undefined ||
     foods === undefined;
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-4xl space-y-4">
-        <div className="h-8 w-40 animate-pulse rounded bg-muted" />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="h-72 animate-pulse rounded-lg border bg-muted/40" />
-          <div className="h-72 animate-pulse rounded-lg border bg-muted/40" />
-        </div>
-      </div>
-    );
+    return <PageLoading />;
   }
 
   return (
@@ -283,12 +281,16 @@ export default function Progress() {
                         month: "long",
                       })}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Темп {projection!.ratePerWeek.toFixed(1)} кг/нед · до цели{" "}
-                      {humanizeDistance(projection!.etaDate, todayKey())} · осталось{" "}
-                      {projection!.remainingKg.toFixed(1)} кг
-                      {!projection!.confident && " · прогноз предварительный"}
-                    </p>
+                    {latestWeightKg !== null && (
+                      <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                        {describeProjection(
+                          projection!,
+                          targetWeight!,
+                          latestWeightKg,
+                          todayKey(),
+                        )}
+                      </p>
+                    )}
                   </>
                 )}
               </div>
@@ -436,7 +438,7 @@ export default function Progress() {
                 key={`cal-${period}`}
                 data={calorieData}
                 xKey="date"
-                series={[{ key: "calories", name: "ккал", fill: "var(--brand)" }]}
+                series={[{ key: "calories", name: UNITS.kcal, fill: "var(--brand)" }]}
                 height={CHART_HEIGHT}
                 labelInterval={labelInterval}
                 referenceY={targets.calories}
@@ -524,7 +526,9 @@ export default function Progress() {
           {
             icon: UtensilsCrossed,
             label: "Приёмов пищи",
-            value: String((mealRange ?? []).length),
+            value: String(
+              (dailyTotals ?? []).reduce((s, t) => s + t.count, 0),
+            ),
           },
           {
             icon: Activity,
