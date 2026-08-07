@@ -3,9 +3,23 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { vly } from "../lib/vly-integrations";
 import { FOOD_LIBRARY } from "../lib/mealLibrary";
+import {
+  AI_REQUEST_TIMEOUT_MS,
+  AI_TOTAL_BUDGET_MS,
+  MAX_OUTPUT_TOKENS,
+  asString,
+  clampNum,
+  describeError,
+  estimateTokens,
+  extractLogBlock,
+  stripLogBlock,
+  toMealType,
+  withTimeout,
+} from "../lib/assistantCore";
+import { geminiGenerateContent, type GeminiMessage } from "../lib/geminiClient";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 
@@ -18,204 +32,11 @@ const GEMINI_MODELS = [
   "gemini-2.0-flash",
 ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-const MAX_OUTPUT_TOKENS = 1024;
-
-/** Приводит русские/английские названия приёмов пищи к валидным значениям. */
-const MEAL_TYPE_ALIASES: Record<string, string> = {
-  завтрак: "breakfast",
-  breakfast: "breakfast",
-  обед: "lunch",
-  lunch: "lunch",
-  ужин: "dinner",
-  dinner: "dinner",
-  перекус: "snack",
-  снек: "snack",
-  snack: "snack",
-};
-
-function toMealType(raw: unknown): string {
-  const key = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  return MEAL_TYPE_ALIASES[key] ?? "snack";
-}
-
-function clampNum(
-  value: unknown,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const n =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? parseFloat(value)
-        : NaN;
-  if (Number.isNaN(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(n * 10) / 10));
-}
-
-function asString(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : fallback;
-}
-
-/** Достаёт JSON-блок из ответа модели (между <<<LOG>>> и <<<END>>> или в
- *  тройных кавычках). Устойчив к обрезанным ответам. Возвращает null, если
- *  блока нет. */
-function extractLogBlock(text: string): string | null {
-  const marker = text.match(/<<<LOG>>>([\s\S]*?)<<<END>>>/);
-  if (marker) return marker[1].trim();
-
-  // Обрезанный ответ: маркер есть, а <<<END>>> нет. Пробуем извлечь из хвоста
-  // валидный JSON (до последней закрывающей скобки).
-  const start = text.indexOf("<<<LOG>>>");
-  if (start !== -1) {
-    const tail = text.slice(start + "<<<LOG>>>".length);
-    const lastBrace = tail.lastIndexOf("}");
-    if (lastBrace !== -1) {
-      const json = tail.slice(0, lastBrace + 1);
-      try {
-        JSON.parse(json);
-        return json;
-      } catch {
-        // невалидно — пробуем другие варианты ниже
-      }
-    }
-  }
-
-  const fenced = text.match(/```(?:json)?([\s\S]*?)```/);
-  if (fenced) {
-    const candidate = fenced[1].trim();
-    if (candidate.startsWith("{") && candidate.endsWith("}")) return candidate;
-  }
-  const bare = text.match(/\{[\s\S]*?\}/);
-  return bare ? bare[0] : null;
-}
-
-/** Убирает служебные JSON-блоки из текста, оставляя только ответ пользователю.
- *  Не допускает утечки сырых блоков даже при обрезанном ответе модели. */
-function stripLogBlock(text: string): string {
-  let cleaned = text
-    .replace(/<<<LOG>>>[\s\S]*?<<<END>>>/g, "")
-    .replace(/```(?:json)?[\s\S]*?```/g, "");
-  // Обрезанный ответ: блок начался, но не закрылся — отрезаем весь хвост.
-  const logIdx = cleaned.indexOf("<<<LOG>>>");
-  if (logIdx !== -1) cleaned = cleaned.slice(0, logIdx);
-  // Незакрытый код-фенс тоже отрезаем (нечётное количество ```).
-  const backticks = (cleaned.match(/```/g) ?? []).length;
-  if (backticks % 2 === 1) {
-    const fenceIdx = cleaned.indexOf("```");
-    if (fenceIdx !== -1) cleaned = cleaned.slice(0, fenceIdx);
-  }
-  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
-}
-
 interface CompletionResult {
   success: boolean;
   text: string;
   model?: string;
   error?: string;
-}
-
-/** Превращает сырую ошибку ИИ-провайдера в понятное сообщение на русском
- *  с подсказкой, что делать. */
-function describeError(raw: string): string {
-  const e = raw.toLowerCase();
-
-  if (/не задан|ключ/.test(e) && !/invalid/.test(e)) {
-    return (
-      "Для работы ассистента нужен ключ ИИ: добавьте GEMINI_API_KEY (или " +
-      "VLY_INTEGRATION_KEY) в переменные окружения проекта. Как только ключ " +
-      "появится, ассистент заработает без изменений кода."
-    );
-  }
-  if (/429|quota|rate.?limit|too many|exhausted|resource|лимит/.test(e)) {
-    return (
-      "Исчерпан дневной лимит бесплатного тарифа Gemini — это временно. " +
-      "Лимит обычно обновляется раз в сутки (у flash-моделей ~1500 запросов). " +
-      "Попробуйте ещё раз позже."
-    );
-  }
-  if (
-    /401|403|invalid|api.?key|permission|forbidden|unauthorized|not.?valid/.test(
-      e,
-    )
-  ) {
-    return (
-      "Похоже, API-ключ недействителен. Проверьте GEMINI_API_KEY в переменных " +
-      "окружения проекта: скопируйте его заново из Google AI Studio и сохраните."
-    );
-  }
-  if (/404|not.?found/.test(e)) {
-    return (
-      "Выбранная модель ИИ сейчас недоступна (возможно, Google переименовал " +
-      "её). Нажмите «Проверить подключение» — ассистент подберёт рабочую модель."
-    );
-  }
-  if (
-    /fetch|network|econn|timeout|dns|socket|unreachable|offline|нет связи/.test(
-      e,
-    )
-  ) {
-    return (
-      "Нет связи с сервисом ИИ — возможно, временный сбой сети. Попробуйте " +
-      "ещё раз через несколько секунд."
-    );
-  }
-  return (
-    `Сервис ИИ временно недоступен (${raw}). Попробуйте ещё раз или нажмите ` +
-    "«Проверить подключение» в шапке чата."
-  );
-}
-
-/** Один запрос к Gemini. Возвращает текст или сообщение об ошибке. */
-async function geminiGenerate(
-  key: string,
-  model: string,
-  system: string,
-  contents: { role: "user" | "model"; parts: { text: string }[] }[],
-  maxTokens: number,
-): Promise<{ ok: boolean; text?: string; error?: string }> {
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": key,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents,
-          generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
-        }),
-      },
-    );
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const err = (await res.json()) as { error?: { message?: string } };
-        if (err.error?.message) detail = err.error.message;
-      } catch {
-        // Тело ошибки не JSON — оставляем статус.
-      }
-      return { ok: false, error: detail };
-    }
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text =
-      data.candidates?.[0]?.content?.parts
-        ?.map((p) => p.text ?? "")
-        .join("") ?? "";
-    return { ok: true, text };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
 }
 
 /** Вызывает Gemini с автоподбором рабочей модели. */
@@ -225,25 +46,33 @@ async function geminiChat(
   messages: { role: "user" | "assistant"; content: string }[],
 ): Promise<CompletionResult> {
   // Gemini ожидает чередование ролей user/model — склеиваем подряд идущие.
-  const contents: { role: "user" | "model"; parts: { text: string }[] }[] = [];
+  const contents: GeminiMessage[] = [];
   for (const m of messages) {
     const role = m.role === "assistant" ? "model" : "user";
     const last = contents[contents.length - 1];
     if (last && last.role === role) {
-      last.parts[0].text += "\n\n" + m.content;
+      last.parts[0].text = (last.parts[0].text ?? "") + "\n\n" + m.content;
     } else {
       contents.push({ role, parts: [{ text: m.content }] });
     }
   }
 
   let lastError = "unknown error";
+  // Общий бюджет: оставшееся время передаётся каждой попытке, чтобы цикл
+  // автоподбора моделей не превысил дедлайн всего ответа (Convex обрывает
+  // action на 120с — пользователь не должен упираться в этот лимит).
+  const deadline = Date.now() + AI_TOTAL_BUDGET_MS;
   for (const model of GEMINI_MODELS) {
-    const result = await geminiGenerate(
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const result = await geminiGenerateContent(
       key,
       model,
       system,
       contents,
       MAX_OUTPUT_TOKENS,
+      // Таймаут попытки не длиннее оставшегося бюджета.
+      Math.min(AI_REQUEST_TIMEOUT_MS, remaining),
     );
     if (result.ok) {
       return { success: true, text: result.text ?? "", model };
@@ -268,12 +97,17 @@ async function getCompletion(
   const vlyKey = process.env.VLY_INTEGRATION_KEY;
   if (vlyKey) {
     try {
-      const completion = await vly.ai.completion({
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: system }, ...messages],
-        temperature: 0.3,
-        maxTokens: MAX_OUTPUT_TOKENS,
-      });
+      // VLY-шлюз: свой таймаут через Promise.race (vly.ai.completion не
+      // принимает signal) — зависший шлюз не вешает чат.
+      const completion = await withTimeout(
+        vly.ai.completion({
+          model: "gpt-4o-mini",
+          messages: [{ role: "system", content: system }, ...messages],
+          temperature: 0.3,
+          maxTokens: MAX_OUTPUT_TOKENS,
+        }),
+        AI_TOTAL_BUDGET_MS,
+      );
       if (!completion.success || !completion.data) {
         return {
           success: false,
@@ -419,9 +253,68 @@ export const chat = action({
     ),
     date: v.string(),
   },
-  handler: async (ctx, { messages, date }) => {
+  handler: async (ctx, { messages, date }): Promise<{
+    reply: string;
+    logged: { kind: string; label: string }[];
+    error: boolean;
+    limited: boolean;
+    remaining?: number;
+  }> => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Не авторизован");
+
+    // Дневная квота (сообщения + токены) и анти-спам интервал. Проверяем ДО
+    // вызова ИИ-провайдера: исчерпанный лимит не тратит кредиты Gemini/VLY.
+    // estimatedTokens — консервативная оценка «сколько мы собираемся сжечь»
+    // (вход: system + история + реплики; выход: полный бюджет ответа), чтобы
+    // дорогой разговор с длинной историей исчерпывал квоту раньше, чем 30
+    // коротких сообщений. Ошибка ConvexError приходит с кодом — превращаем
+    // в понятный ответ UI (limited: true). internalMutation доступен только
+    // через `internal` (public-фильтр `api` его скрывает — это и есть
+    // серверный барьер квоты).
+    try {
+      await ctx.runMutation(internal.assistantLimits.checkAndConsume, {
+        userId,
+        estimatedTokens: estimateTokens(
+          // Системный промпт уже учтён константой SYSTEM_PROMPT_ESTIMATE_TOKENS
+          // внутри estimateTokens — здесь только история диалога.
+          messages.map((m) => m.content),
+        ),
+      });
+    } catch (err) {
+      const data = (err as { data?: { code?: string; message?: string } })
+        .data;
+      const code = data?.code;
+      const message = data?.message;
+      if (code === "assistant_limit_reached") {
+        return {
+          reply: message ?? "Дневной лимит ассистента исчерпан.",
+          logged: [],
+          error: true,
+          limited: true,
+          remaining: 0,
+        };
+      }
+      if (code === "assistant_token_limit_reached") {
+        return {
+          reply: message ?? "Исчерпан дневной лимит токенов ассистента.",
+          logged: [],
+          error: true,
+          limited: true,
+          remaining: 0,
+        };
+      }
+      if (code === "assistant_rate_limited") {
+        return {
+          reply: message ?? "Слишком часто — попробуйте через несколько секунд.",
+          logged: [],
+          error: true,
+          limited: true,
+        };
+      }
+      // Любая другая ошибка лимита — не блокируем чат, но и не списываем.
+      console.error("[assistant] limit check failed:", err);
+    }
 
     // Собираем контекст из данных пользователя (только его собственные записи).
     const [profile, todaysMeals, customFoods, plan] = await Promise.all([
@@ -556,6 +449,7 @@ JSON-блок всегда начинай с <<<LOG>>> и ОБЯЗАТЕЛЬНО
         reply: describeError(completion.error ?? "unknown error"),
         logged: [],
         error: true,
+        limited: false,
       };
     }
 
@@ -635,6 +529,6 @@ JSON-блок всегда начинай с <<<LOG>>> и ОБЯЗАТЕЛЬНО
       }
     }
 
-    return { reply: stripLogBlock(text), logged };
+    return { reply: stripLogBlock(text), logged, error: false, limited: false };
   },
 });

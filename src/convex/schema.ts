@@ -257,6 +257,36 @@ const schema = defineSchema(
       lastSentAt: v.number(),
     }).index("by_email", ["email"]),
 
+    // Глобальный throttle записей (анти-флуд): одна строка = одно событие
+    // consumeRateLimit (rateLimit.ts). События считаются по ключу в скользящем
+    // окне; протухшие удаляются при следующем обращении, поэтому размер
+    // таблицы ограничен лимитом на ключ в окне. Ассистент лимитируется
+    // отдельно (assistantLimits — дневная квота), здесь — обычные мутации.
+    rateLimitEvents: defineTable({
+      key: v.string(), // "<userId>:<операция>" — ключ лимита
+      timestamp: v.number(), // когда произошло событие (Date.now())
+    }).index("by_key_timestamp", ["key", "timestamp"]),
+
+    // Daily AI-assistant usage limits: одна строка на пользователя на день.
+    // Дневная квота сообщений + минимальный интервал между сообщениями
+    // (анти-спам) + накопленный расход токенов (приблизительно).
+    // Проверяется в assistant.ts chat action перед вызовом ИИ.
+    //
+    // totalTokens — optional, а не required: это «мягкая миграция». Старые
+    // документы (созданные до введения учёта токенов) не имеют этого поля, и
+    // schemaValidation: false не даст им упасть при чтении; код читает его
+    // через `?? 0` (см. assistantLimits.ts). При следующем же обращении
+    // checkAndConsume патчит строку с totalTokens — поля постепенно
+    // подтягиваются сами, без backfill-джобы. Это осознанный компромисс:
+    // жёсткая миграция не нужна при размере данных проекта.
+    assistantLimits: defineTable({
+      userId: v.id("users"),
+      day: v.string(), // YYYY-MM-DD (локальная дата пользователя)
+      count: v.number(), // сколько сообщений отправлено за день
+      totalTokens: v.optional(v.number()), // накопленный расход токенов за день (мягкая миграция: ?? 0)
+      lastMessageAt: v.number(), // время последнего сообщения (для интервала)
+    }).index("by_user_day", ["userId", "day"]),
+
     // Completed workout sessions.
     workoutLogs: defineTable({
       userId: v.id("users"),

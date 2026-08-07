@@ -4,6 +4,7 @@ import { convexAuth, getAuthSessionId } from "@convex-dev/auth/server";
 import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
 import Google from "@auth/core/providers/google";
 import { emailOtp } from "./auth/emailOtp";
+import { ROLES } from "./schema";
 
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
@@ -38,6 +39,53 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         }
       }
       const { emailVerified, phoneVerified, ...profileRest } = profile;
+      // Линковка по подтверждённой почте (Google OAuth ↔ email-OTP):
+      // дефолтный createOrUpdateUser @convex-dev/auth делает это сам, но наш
+      // кастомный колбэк его обходит — без этого шага вход через Google, а
+      // затем через email с тем же адресом плодил бы два отдельных аккаунта.
+      // Привязываемся к существующему пользователю только если почта уже
+      // подтверждена (Google подтверждает при выдаче, OTP — после ввода кода);
+      // на шаге «отправить код» (type: "email") почта ещё не верифицирована,
+      // поэтому линковки не происходит.
+      if (userId === null) {
+        const email =
+          typeof profileRest.email === "string" ? profileRest.email : null;
+        const verified =
+          emailVerified === true ||
+          (type === "oauth" && email !== null);
+        if (email !== null && verified) {
+          // ctx колбэка типизирован GenericMutationCtx<AnyDataModel> (без
+          // конкретной схемы), поэтому индексный запрос идёт через локальный
+          // структурный каст — как в rateLimit.ts.
+          const db = ctx.db as unknown as {
+            query(table: string): {
+              withIndex(
+                name: string,
+                fn: (q: { eq(f: string, v: unknown): unknown }) => void,
+              ): {
+                filter(fn: (q: {
+                  field(f: string): unknown;
+                  gte(a: unknown, b: unknown): boolean;
+                }) => boolean): {
+                  take(n: number): Promise<Array<{ _id: string }>>;
+                };
+              };
+            };
+          };
+          const existing = await db
+            .query("users")
+            .withIndex("email", (q) => q.eq("email", email))
+            .filter((q) =>
+              q.gte(q.field("emailVerificationTime"), 1),
+            )
+            .take(2);
+          // Привязываемся только когда кандидат ровно один — при дублях
+          // лучше создать нового пользователя, чем «склеить» чужие данные.
+          if (existing.length === 1) {
+            userId = existing[0]._id as unknown as typeof userId;
+          }
+        }
+      }
       // Google OAuth: email приходит уже верифицированным провайдером —
       // аккаунт сразу не-анонимный, email и время верификации сохраняются.
       // (Для email-OTP это происходит только после подтверждения кода.)
@@ -87,6 +135,10 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         ...(isVerifiedSignIn && typeof profileRest.email === "string"
           ? { isAnonymous: false }
           : null),
+        // Явный дефолт роли при создании (см. src/convex/roles.ts): новые
+        // аккаунты — USER. При patch (уже существующий пользователь) роль
+        // не трогаем, чтобы не затирать назначенные админом роли.
+        ...(userId === null ? { role: ROLES.USER } : null),
       };
       if (userId !== null) {
         await ctx.db.patch(userId, userData);

@@ -25,7 +25,12 @@ vi.mock("@/hooks/use-auth", () => ({
   }),
 }));
 
-import { api, resetConvexMock, setAction } from "@/test/convex-react-mock";
+import {
+  api,
+  resetConvexMock,
+  setAction,
+  setQuery,
+} from "@/test/convex-react-mock";
 import { resetMocks, toast } from "@/test/utils";
 import { AssistantChat } from "./AssistantChat";
 
@@ -160,5 +165,123 @@ describe("AssistantChat", () => {
     expect(toast.success).toHaveBeenCalledWith("Подключение работает", {
       description: "Всё в порядке",
     });
+  });
+
+  it("исчерпанная квота сообщений блокирует ввод и показывает счётчик", async () => {
+    const user = userEvent.setup();
+    setQuery(api.assistantLimits.getMyLimit, undefined, {
+      used: 30,
+      limit: 30,
+      remaining: 0,
+      tokensUsed: 150_000,
+      tokenLimit: 150_000,
+      tokensRemaining: 0,
+    });
+    renderChat();
+    const dialog = await openChat(user);
+
+    // Счётчик остатка в подвале чата.
+    expect(
+      within(dialog).getByText("Дневной лимит ассистента исчерпан"),
+    ).toBeInTheDocument();
+    // Ввод и кнопка отправки заблокированы.
+    expect(
+      within(dialog).getByPlaceholderText(/Например: съел 200 г курицы/),
+    ).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Отправить" })).toBeDisabled();
+  });
+
+  it("исчерпанная квота ТОКЕНОВ тоже блокирует ввод", async () => {
+    const user = userEvent.setup();
+    // Сообщения ещё есть (remaining=5), но токены кончились — блокируем:
+    // дорогой чат сжигает бюджет раньше, чем 30 коротких сообщений.
+    setQuery(api.assistantLimits.getMyLimit, undefined, {
+      used: 25,
+      limit: 30,
+      remaining: 5,
+      tokensUsed: 150_000,
+      tokenLimit: 150_000,
+      tokensRemaining: 0,
+    });
+    renderChat();
+    const dialog = await openChat(user);
+
+    expect(
+      within(dialog).getByText("Дневной лимит ассистента исчерпан"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByPlaceholderText(/Например: съел 200 г курицы/),
+    ).toBeDisabled();
+  });
+
+  it("показывает остаток токенов в подвале чата", async () => {
+    const user = userEvent.setup();
+    setQuery(api.assistantLimits.getMyLimit, undefined, {
+      used: 5,
+      limit: 30,
+      remaining: 25,
+      tokensUsed: 25_000,
+      tokenLimit: 150_000,
+      tokensRemaining: 125_000,
+    });
+    renderChat();
+    const dialog = await openChat(user);
+
+    expect(within(dialog).getByText(/Осталось сообщений: 25/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/токенов: 125k/)).toBeInTheDocument();
+  });
+
+  it("ответ с limited=true и remaining=0 показывает тост о квоте", async () => {
+    const user = userEvent.setup();
+    setAction(api.assistant.chat, async () => ({
+      reply: "Дневной лимит ассистента исчерпан.",
+      logged: [],
+      error: true,
+      limited: true,
+      remaining: 0,
+    }));
+    renderChat();
+    const dialog = await openChat(user);
+
+    await user.type(
+      within(dialog).getByPlaceholderText(/Например: съел 200 г курицы/),
+      "привет",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Отправить" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Дневной лимит ассистента исчерпан", {
+      description: expect.stringContaining("Лимит обновится завтра"),
+    });
+  });
+
+  it("rate-limit (remaining>0): тост «Слишком быстро» без бейджа ошибки", async () => {
+    const user = userEvent.setup();
+    setAction(api.assistant.chat, async () => ({
+      reply: "Слишком быстро — подождите 2 с",
+      logged: [],
+      error: true,
+      limited: true,
+      remaining: 27,
+    }));
+    renderChat();
+    const dialog = await openChat(user);
+
+    await user.type(
+      within(dialog).getByPlaceholderText(/Например: съел 200 г курицы/),
+      "привет",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Отправить" }));
+
+    expect(toast.error).toHaveBeenCalledWith("Слишком быстро", {
+      description: expect.stringContaining("Подождите пару секунд"),
+    });
+    // Лимитное сообщение — без красного бейджа «Не удалось получить ответ»:
+    // текст ответа и есть понятное объяснение.
+    expect(
+      within(dialog).getByText("Слишком быстро — подождите 2 с"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Не удалось получить ответ"),
+    ).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useAction } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { todayKey } from "@/lib/dates";
 import { toast } from "sonner";
@@ -22,6 +22,9 @@ interface ChatMessage {
   content: string;
   logged?: { kind: string; label: string }[];
   error?: boolean;
+  /** Ответ — лимит/квота, а не сбой провайдера: показываем текст как есть,
+   *  без красного бейджа «Не удалось получить ответ». */
+  limited?: boolean;
 }
 
 /** Базовый префикс ключа. Полный ключ включает user.id: истории разных
@@ -60,6 +63,7 @@ function loadHistory(key: string | null): ChatMessage[] {
 export function AssistantChat() {
   const runChat = useAction(api.assistant.chat);
   const checkConnection = useAction(api.assistant.checkConnection);
+  const limit = useQuery(api.assistantLimits.getMyLimit);
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const location = useLocation();
 
@@ -74,6 +78,7 @@ export function AssistantChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [limitHit, setLimitHit] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -163,8 +168,24 @@ export function AssistantChat() {
           content: sanitizeReply(res.reply),
           logged: res.logged,
           error: res.error ?? false,
+          limited: res.limited ?? false,
         },
       ]);
+      // 429 от сервера: дневная квота исчерпана или слишком часто. Блокируем
+      // ввод до конца дня (квота) или на пару секунд (интервал).
+      if (res.limited) {
+        setLimitHit(true);
+        if (res.remaining === 0) {
+          toast.error("Дневной лимит ассистента исчерпан", {
+            description: "Лимит обновится завтра. До этого чат доступен только для чтения.",
+          });
+        } else {
+          toast.error("Слишком быстро", {
+            description: "Подождите пару секунд перед следующим сообщением.",
+          });
+          window.setTimeout(() => setLimitHit(false), 2500);
+        }
+      }
       if (res.logged.length > 0) {
         toast.success("Записано в дневник", {
           description: res.logged.map((l) => l.label).join(" · "),
@@ -188,6 +209,14 @@ export function AssistantChat() {
 
   const showIntro = messages.length === 0;
   const canChat = isAuthenticated && !authLoading;
+  const remaining = limit?.remaining ?? null;
+  const tokensRemaining = limit?.tokensRemaining ?? null;
+  // Квота исчерпана, когда остаток 0 (данные приходят из getMyLimit — счётчик
+  // живёт на сервере и переживает перезагрузку). limitHit — короткое окно
+  // анти-спама: ввод разблокируется сам через пару секунд.
+  const quotaExhausted =
+    remaining !== null && (remaining === 0 || tokensRemaining === 0);
+  const inputBlocked = quotaExhausted || limitHit;
   const returnTo = `${location.pathname}${location.search}`;
 
   return (
@@ -287,7 +316,7 @@ export function AssistantChat() {
                         m.error && "border-amber-500/50",
                       )}
                     >
-                      {m.error && (
+                      {m.error && !m.limited && (
                         <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
                           <TriangleAlert className="size-3.5" />
                           Не удалось получить ответ
@@ -325,6 +354,49 @@ export function AssistantChat() {
             )}
           </div>
 
+          {/* Лимит: остаток сообщений и токенов на сегодня */}
+          {canChat && remaining !== null && (
+            <div
+              className={cn(
+                "flex items-center justify-between gap-2 border-t px-4 py-2",
+                (remaining === 0 || tokensRemaining === 0) && "bg-amber-500/10",
+              )}
+            >
+              <span className="text-[11px] text-muted-foreground">
+                {remaining === 0 || tokensRemaining === 0
+                  ? "Дневной лимит ассистента исчерпан"
+                  : `Осталось сообщений: ${remaining}`}
+                {tokensRemaining !== null && tokensRemaining > 0 && (
+                  <span className="num">
+                    {" · "}
+                    токенов:{" "}
+                    {Math.round(tokensRemaining / 1000)}k
+                  </span>
+                )}
+              </span>
+              <div
+                className="h-1.5 flex-1 max-w-24 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-label="Остаток сообщений ассистента"
+                aria-valuenow={remaining}
+                aria-valuemin={0}
+                aria-valuemax={limit?.limit ?? 1}
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    remaining === 0
+                      ? "bg-amber-500"
+                      : remaining <= 5
+                        ? "bg-amber-400"
+                        : "bg-brand",
+                  )}
+                  style={{ width: `${((limit?.limit ?? 1) - remaining) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Быстрые действия */}
           {canChat && showIntro && !busy && (
             <div className="flex flex-col gap-1.5 border-t px-4 py-3">
@@ -356,14 +428,14 @@ export function AssistantChat() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Например: съел 200 г курицы и гречку…"
                 className="h-9 flex-1 rounded-md border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring"
-                disabled={busy}
+                disabled={busy || inputBlocked}
               />
               <button
                 type="submit"
-                disabled={busy || !input.trim()}
+                disabled={busy || inputBlocked || !input.trim()}
                 className={cn(
                   "flex size-9 shrink-0 items-center justify-center rounded-md border transition-all",
-                  input.trim() && !busy
+                  input.trim() && !busy && !inputBlocked
                     ? "bg-foreground text-background hover:opacity-90 active:scale-95"
                     : "text-muted-foreground opacity-50",
                 )}
