@@ -308,4 +308,53 @@ describe("Progress", () => {
     // Карточка-инсайт: заголовок «Цель достигнута» и поздравление.
     expect(screen.getByText("75.0 кг — вы справились! 🎉")).toBeInTheDocument();
   });
+
+  it("набор с перебором: вес прошёл цель выше (75 → 85, цель 80 = +100% зелёным)", () => {
+    const now = new Date();
+    // Цель набора 80 кг; старт 75 ниже цели, текущий 85 выше: путь 75→85 = 10 из
+    // 5 кг → goalProgress ровно 2.0 (перебор +100%, зелёный, не красный).
+    setQuery(api.profiles.getMyProfile, undefined, { ...profile, targetWeightKg: 80 });
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 75),
+      weightEntry(todayKey(), 85),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // Перебор +100%: кольцо зелёное, подпись «цель достигнута».
+    expect(
+      screen.getByRole("img", { name: "Превышение на 100%" }),
+    ).toBeInTheDocument();
+    const over = screen.getByText("+100%");
+    expect(over.style.color).toBe("var(--macro-over)");
+    expect(screen.getByText("цель достигнута")).toBeInTheDocument();
+    expect(screen.getByText("80.0 кг — вы справились! 🎉")).toBeInTheDocument();
+  });
+
+  it("отрицательный прогресс не ломает: старт выше цели набора → кольцо честно на 0%", () => {
+    const now = new Date();
+    // Цель набора 80, но первый замер уже выше (82) и вес растёт дальше (87):
+    // goalProgress = (87−82)/(80−82) = −2.5 → кламп Math.max(0, …) в 0. Карточка
+    // не рисует кольцо перебора, страница рендерится без ошибок.
+    setQuery(api.profiles.getMyProfile, undefined, { ...profile, targetWeightKg: 80 });
+    setQuery(api.weightEntries.listMyWeights, { limit: 730 }, [
+      weightEntry(toDateKey(new Date(now.getTime() - 14 * 86400000)), 82),
+      weightEntry(toDateKey(new Date(now.getTime() - 7 * 86400000)), 84),
+      weightEntry(todayKey(), 87),
+    ]);
+    setQuery(api.workouts.listLogs, { limit: 500 }, []);
+    seedEmptyWaterAndFoods();
+    seedMealRanges([]);
+    renderWithRouter(<Progress />);
+
+    // Ни «цель достигнута», ни «Превышение» — карточка-инсайт скрыта (прогноз
+    // честно null при тренде от цели). Экспорт-кнопка подтверждает рендер.
+    expect(screen.queryByText("цель достигнута")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: /Превышение/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Вес \(3\)/ })).toBeInTheDocument();
+  });
 });
