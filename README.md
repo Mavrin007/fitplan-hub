@@ -310,7 +310,13 @@ secrets exist — Vercel → Account Settings → Tokens:
 - `CONVEX_DEPLOY_TOKEN` (Convex Dashboard → Settings → Deploy Keys) — deploys
   backend functions before the frontend build
 
-Without these secrets the CI `deploy` job is skipped and only the `check` job runs.
+Deployment intentionally does **not** use a GitHub Environment: a previously
+configured `environment: production` made the deploy job hang in the queue
+waiting for manual approval. Instead the secrets above are plain
+**repository-level secrets** (Settings → Secrets and variables → Actions), read
+directly into the job `env` and checked per-step (`if: env.VERCEL_TOKEN != ''`).
+If they are missing, the deploy steps are skipped and CI stays green — only the
+`check` job runs.
 
 
 # Using Authentication (Important!)
