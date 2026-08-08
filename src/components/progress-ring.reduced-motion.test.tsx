@@ -61,4 +61,22 @@ describe("ProgressRing · prefers-reduced-motion", () => {
     const offset = parseFloat(arc!.getAttribute("stroke-dashoffset") ?? "");
     expect(offset).toBeCloseTo(c / 2, 0);
   });
+
+  it("при matches=true капля сразу в финальном состоянии (полный радиус, без scale-анимации)", () => {
+    stubPrefersReducedMotion();
+
+    render(
+      <MotionConfig reducedMotion="user">
+        <ProgressRing value={50} max={100} size={96} stroke={8} />
+      </MotionConfig>,
+    );
+
+    // Капля: beadRadius = max(2.5, stroke/2.1) = max(2.5, 3.81) = 3.81.
+    // При reduced-motion initial={ r: beadRadius } — сразу полный радиус;
+    // без reduced (контроль в progress-ring.test.tsx) она стартует с 0.7×
+    // и «вырастает» на пружине — scale-анимация, которую и отключаем.
+    const bead = document.querySelector("[data-bead]") as SVGCircleElement | null;
+    expect(bead).not.toBeNull();
+    expect(parseFloat(bead!.getAttribute("r") ?? "0")).toBeCloseTo(3.81, 2);
+  });
 });
