@@ -402,13 +402,14 @@ export function SVGAreaChart({
         />
       </svg>
 
-      {/* HTML-тултип: подпись точки (дата) + значение */}
+      {/* HTML-тултип: подпись точки (дата) + значение. Клампим по X, чтобы
+          у крайних точек тултип не вылезал за границы графика (как в баре). */}
       {hoverVal !== null && hoverPoint && (
         <div
           style={{
             ...tooltipStyle,
             position: "absolute",
-            left: hoverPoint.x,
+            left: Math.min(Math.max(hoverPoint.x, 60), width - 60),
             top: hoverPoint.y,
             transform: "translate(-50%, -130%)",
             pointerEvents: "none",
