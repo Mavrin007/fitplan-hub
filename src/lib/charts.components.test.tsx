@@ -111,6 +111,38 @@ describe("SVGAreaChart", () => {
     expect(style.left).toBe("60px");
     expect(parseFloat(style.left)).toBeGreaterThanOrEqual(40);
   });
+
+  it("color-проп красит линию и градиент заливки (не только трек)", () => {
+    const { container } = render(
+      <SVGAreaChart
+        data={[
+          { date: "1 авг", weight: 80 },
+          { date: "2 авг", weight: 79.5 },
+        ]}
+        xKey="date"
+        yKey="weight"
+        name="Вес (кг)"
+        height={200}
+        color="var(--macro-protein)"
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    // Линия рисуется переданным цветом.
+    const line = Array.from(svg.querySelectorAll("path")).find(
+      (p) => p.getAttribute("fill") === "none",
+    );
+    expect(line).not.toBeUndefined();
+    expect(line!.getAttribute("stroke")).toBe("var(--macro-protein)");
+
+    // Градиент заливки строится от переданного цвета (светлее → базовый),
+    // а не от дефолтного var(--brand).
+    const grad = svg.querySelector("linearGradient")!;
+    expect(grad).not.toBeNull();
+    const stops = [...grad.querySelectorAll("stop")].map((s) =>
+      s.getAttribute("stop-color"),
+    );
+    expect(stops[0]).toBe("var(--macro-protein)");
+  });
 });
 
 describe("SVGBarChart", () => {
@@ -230,5 +262,63 @@ describe("SVGBarChart", () => {
     await user.pointer({ target: hitZone, coords: { x: box.left + 1, y: box.top + 1 } });
 
     expect(screen.getByText(/1 200 кг/)).toBeInTheDocument();
+  });
+
+  it("столбцы заливаются вертикальным градиентом серии (светлее сверху → глубже снизу)", () => {
+    const { container } = render(
+      <SVGBarChart
+        data={[{ label: "Н-1", tonnage: 1200 }]}
+        xKey="label"
+        series={[{ key: "tonnage", name: "Тоннаж", fill: "#0ea5e9" }]}
+        height={200}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+
+    // Градиент на серию: id bar-<gid>-tonnage, стопы от цвета серии.
+    const grad = Array.from(svg.querySelectorAll("linearGradient")).find(
+      (g) => g.id.endsWith("-tonnage"),
+    );
+    expect(grad).not.toBeUndefined();
+    expect(grad!.id).toMatch(/^bar-/);
+    const stops = [...grad!.querySelectorAll("stop")].map((s) => ({
+      color: s.getAttribute("stop-color"),
+      opacity: s.getAttribute("stop-opacity"),
+    }));
+    expect(stops.length).toBe(2);
+    // Светлее сверху (opacity 0.6) → насыщеннее у основания (opacity 1).
+    expect(stops[0].color).toBe("#0ea5e9");
+    expect(stops[0].opacity).toBe("0.6");
+    expect(stops[1].color).toBe("#0ea5e9");
+    expect(stops[1].opacity).toBe("1");
+
+    // Столбец ссылается на градиент своей серии, а не на плоский цвет.
+    const bar = Array.from(svg.querySelectorAll("path, rect")).find(
+      (el) => el.getAttribute("fill") === `url(#${grad!.id})`,
+    );
+    expect(bar).not.toBeUndefined();
+  });
+
+  it("каждая серия получает собственный градиент (нет общей заливки)", () => {
+    const { container } = render(
+      <SVGBarChart
+        data={[{ label: "Н-1", Белки: 10, Углеводы: 20 }]}
+        xKey="label"
+        series={[
+          { key: "Белки", name: "Белки", fill: "#22c55e" },
+          { key: "Углеводы", name: "Углеводы", fill: "#f59e0b" },
+        ]}
+        height={200}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    const grads = Array.from(svg.querySelectorAll("linearGradient")).map((g) => g.id);
+    expect(grads.filter((id) => id.endsWith("-Белки")).length).toBe(1);
+    expect(grads.filter((id) => id.endsWith("-Углеводы")).length).toBe(1);
+    // Каждая сегментация ссылается на свой градиент.
+    const бел = svg.querySelector(`[fill*='-Белки)']`) as SVGElement | null;
+    const угл = svg.querySelector(`[fill*='-Углеводы)']`) as SVGElement | null;
+    expect(бел).not.toBeNull();
+    expect(угл).not.toBeNull();
   });
 });
