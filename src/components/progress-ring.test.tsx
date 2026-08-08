@@ -108,6 +108,29 @@ describe("ProgressRing", () => {
     expect(dot.getAttribute("opacity")).toBe("1");
   });
 
+  it("при переборе ореол хвоста пульсирует (opacity-массив) и капля в overColor", async () => {
+    const { container } = render(
+      <ProgressRing value={150} max={100} size={96} stroke={8} overColor="#0f0" />,
+    );
+    const halos = container.querySelectorAll("[data-arc-halo]");
+    // Полный круг + хвост перебора → два ореола; хвост — второй.
+    expect(halos.length).toBe(2);
+    const tailHalo = halos[1];
+
+    // Капля на кончике перебора красится цветом перелива (overColor),
+    // когда tipColor не задан.
+    const dot = tipDot(container);
+    expect(dot.getAttribute("fill")).toBe("#0f0");
+
+    // Пульсация: ждём старта анимации хвоста (полный круг рисуется 1.4 c),
+    // затем opacity меняется между замерами — ореол «дышит», а не стоит.
+    await advanceFrames(1900);
+    const first = parseFloat(tailHalo.getAttribute("opacity") ?? "0");
+    await advanceFrames(300);
+    const second = parseFloat(tailHalo.getAttribute("opacity") ?? "0");
+    expect(first).not.toBeCloseTo(second, 2);
+  });
+
   it("при 0% капля не рендерится вовсе", async () => {
     const { container } = render(
       <ProgressRing value={0} max={100} size={96} stroke={8} />,
