@@ -48,7 +48,10 @@ vi.mock("./pages/Progress", () => ({ default: () => <div /> }));
 vi.mock("./pages/Profile", () => ({ default: () => <div /> }));
 vi.mock("./pages/NotFound", () => ({ default: () => <div /> }));
 
-import { RootErrorBoundary, ToolbarErrorBoundary } from "./main";
+import {
+  RootErrorBoundary,
+  ToolbarErrorBoundary,
+} from "./components/error-boundaries";
 
 /** Дочерний компонент, который падает при рендере — провоцирует boundary. */
 function Bomb({ message }: { message?: string }): React.ReactNode {

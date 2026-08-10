@@ -48,4 +48,23 @@ export default tseslint.config(
       "react-hooks/purity": "off",
     },
   },
+  // vly-toolbar-readonly.tsx — файл генерируется платформой Freebuff
+  // (read-only, «DO NOT MODIFY»): экспорты хелперов — часть контракта
+  // интеграции, выносить их в отдельный файл нельзя. Fast-refresh-правило
+  // к нему неприменимо — выключаем точечно для этого файла.
+  {
+    files: ["vly-toolbar-readonly.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  // src/main.tsx — точка входа (createRoot().render()): fast-refresh к
+  // entry-файлам неприменим, а внутренние компоненты (RouteLoading,
+  // RouteSyncer) выносить некуда и незачем.
+  {
+    files: ["src/main.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

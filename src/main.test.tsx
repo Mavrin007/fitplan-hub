@@ -49,9 +49,9 @@ vi.mock("./pages/NotFound", () => ({ default: () => <div /> }));
 vi.mock("./pages/Privacy", () => ({ default: () => <div /> }));
 
 import { ReactElement } from "react";
-import { redactPii, sanitizeBeforeSend, scrubPii } from "./main";
+import { redactPii, sanitizeBeforeSend, scrubPii } from "./lib/pii";
 
-describe("PII-маскирование (main.tsx)", () => {
+describe("PII-маскирование (src/lib/pii.ts)", () => {
   it("redactPii маскирует почты, JWT, Gemini-ключи и секреты", () => {
     expect(redactPii("пишите на test@example.com быстро")).toBe(
       "пишите на [email] быстро",
