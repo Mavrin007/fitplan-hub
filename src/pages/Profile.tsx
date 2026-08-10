@@ -3,9 +3,6 @@ import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router";
 import { exportAllJson } from "@/lib/export";
 
-// Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
-// и показываем их в attach-форме вместо письма — как на /auth.
-const ATTACH_DEV_OTP_ENABLED = import.meta.env.VITE_EMAIL_DEV_CAPTURE === "1";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -157,13 +154,12 @@ export default function Profile() {
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
 
-  // Dev-only: последний перехваченный код для вводимого адреса (для e2e и
-  // локальной разработки без SMTP). Запрос активен только на OTP-шаге.
+  // На dev/превью-развёртке бэкенд перехватывает OTP-коды (devOtp.ts) —
+  // показываем их в attach-форме вместо письма (как на /auth). Запрос активен
+  // только на OTP-шаге; на боевом деплое сервер вернёт null и блок скроется.
   const attachDevOtpCode = useQuery(
     api.devOtp.getByEmail,
-    ATTACH_DEV_OTP_ENABLED && attachStep === "otp" && attachEmail
-      ? { email: attachEmail }
-      : "skip",
+    attachStep === "otp" && attachEmail ? { email: attachEmail } : "skip",
   );
 
   const handleAttachEmail = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -1294,7 +1290,7 @@ export default function Profile() {
             Политика конфиденциальности
           </Link>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground/80">
+        <p className="mt-3 text-xs text-muted-foreground">
           Удаление стирает профиль, дневник, вес, воду, тренировки, планы и
           привязанные входы без возможности восстановления.
         </p>

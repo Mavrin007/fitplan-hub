@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-// Мок VLY-шлюза: подменяем модуль ДО импорта emailOtp.ts, чтобы тот получил
-// управляемый vly.email.send вместо реального клиента с ключом из окружения.
+// Мок Resend: подменяем модуль ДО импорта emailOtp.ts, чтобы тот получил
+// управляемый sendResendEmail вместо реального клиента с ключом из окружения.
 // vi.hoisted — фабрики vi.mock поднимаются над объявлениями, поэтому моки
 // создаются до них, иначе был бы ReferenceError: Cannot access before init.
 const { sendMock, devOtpInsert, rateLimitCheck } = vi.hoisted(() => ({
@@ -13,12 +13,8 @@ const { sendMock, devOtpInsert, rateLimitCheck } = vi.hoisted(() => ({
   rateLimitCheck: vi.fn(),
 }));
 
-vi.mock("../../lib/vly-integrations", () => ({
-  vly: {
-    email: {
-      send: sendMock,
-    },
-  },
+vi.mock("../../lib/resend", () => ({
+  sendResendEmail: sendMock,
 }));
 
 // emailOtp.ts импортирует только internal из _generated/api — мок безопасен
@@ -92,18 +88,18 @@ describe("emailOtp.sendVerificationRequest", () => {
     vi.clearAllMocks();
     rateLimitCheck.mockResolvedValue({ allowed: true, retryAfterSec: 0 });
     delete process.env.VLY_EMAIL_DEV_CAPTURE;
-    delete process.env.VLY_INTEGRATION_KEY;
+    delete process.env.RESEND_API_KEY;
     delete process.env.VLY_APP_NAME;
   });
 
   afterEach(() => {
     vi.clearAllMocks();
     delete process.env.VLY_EMAIL_DEV_CAPTURE;
-    delete process.env.VLY_INTEGRATION_KEY;
+    delete process.env.RESEND_API_KEY;
     delete process.env.VLY_APP_NAME;
   });
 
-  it("dev-перехват: пишет код в devOtpCodes и не ходит в VLY", async () => {
+  it("dev-перехват: пишет код в devOtpCodes и не ходит в Resend", async () => {
     process.env.VLY_EMAIL_DEV_CAPTURE = "1";
 
     await send({ identifier: "dev@example.com", token: "123456" }, { runMutation });
@@ -121,10 +117,10 @@ describe("emailOtp.sendVerificationRequest", () => {
     });
   });
 
-  it("прод: зовёт vly.email.send с адресом и кодом, без dev-записи", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
+  it("прод: зовёт sendResendEmail с адресом и кодом, без dev-записи", async () => {
+    process.env.RESEND_API_KEY = "test-key";
     process.env.VLY_APP_NAME = "КИЛО";
-    sendMock.mockResolvedValue({ success: true, data: { status: "queued" } });
+    sendMock.mockResolvedValue({ success: true, id: "mocked-id" });
 
     await send({ identifier: "user@example.com", token: "654321" }, { runMutation });
 
@@ -145,8 +141,8 @@ describe("emailOtp.sendVerificationRequest", () => {
     expect(mail.html).toContain("654321");
   });
 
-  it("повторная отправка раньше 60с отклонена, VLY не вызывается", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
+  it("повторная отправка раньше 60с отклонена, Resend не вызывается", async () => {
+    process.env.RESEND_API_KEY = "test-key";
     rateLimitCheck.mockResolvedValue({ allowed: false, retryAfterSec: 42 });
 
     await expect(
@@ -161,9 +157,9 @@ describe("emailOtp.sendVerificationRequest", () => {
   });
 
   it("прод: имя приложения из VLY_APP_NAME попадает в письмо", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
+    process.env.RESEND_API_KEY = "test-key";
     process.env.VLY_APP_NAME = "Фитнес-Хаб";
-    sendMock.mockResolvedValue({ success: true, data: { status: "queued" } });
+    sendMock.mockResolvedValue({ success: true, id: "mocked-id" });
 
     await send({ identifier: "a@b.c", token: "000000" }, { runMutation });
 
@@ -173,8 +169,8 @@ describe("emailOtp.sendVerificationRequest", () => {
   });
 
   it("прод: без VLY_APP_NAME подставляется дефолт «КИЛО»", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
-    sendMock.mockResolvedValue({ success: true, data: { status: "queued" } });
+    process.env.RESEND_API_KEY = "test-key";
+    sendMock.mockResolvedValue({ success: true, id: "mocked-id" });
 
     await send({ identifier: "a@b.c", token: "000000" }, { runMutation });
 
@@ -182,10 +178,10 @@ describe("emailOtp.sendVerificationRequest", () => {
     expect(mail.subject).toContain("КИЛО");
   });
 
-  it("без VLY_INTEGRATION_KEY бросает понятную ошибку и не зовёт шлюз", async () => {
+  it("без RESEND_API_KEY бросает понятную ошибку и не зовёт шлюз", async () => {
     await expect(
       send({ identifier: "user@example.com", token: "123456" }, { runMutation }),
-    ).rejects.toThrow("задайте VLY_INTEGRATION_KEY");
+    ).rejects.toThrow(/RESEND_API_KEY/);
 
     expect(sendMock).not.toHaveBeenCalled();
     // Rate-limit проверка отработала, до отправки не дошло.
@@ -214,8 +210,8 @@ describe("emailOtp.sendVerificationRequest", () => {
     expect(inserts[0]!.code).not.toBe(inserts[1]!.code);
   });
 
-  it("неуспешный ответ шлюза (success:false) бросает ошибку шлюза", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
+  it("неуспешный ответ Resend (success:false) бросает ошибку шлюза", async () => {
+    process.env.RESEND_API_KEY = "test-key";
     sendMock.mockResolvedValue({ success: false, error: "domain not verified" });
 
     await expect(
@@ -223,9 +219,9 @@ describe("emailOtp.sendVerificationRequest", () => {
     ).rejects.toThrow("domain not verified");
   });
 
-  it("ответ со статусом failed бросает ошибку по умолчанию", async () => {
-    process.env.VLY_INTEGRATION_KEY = "test-key";
-    sendMock.mockResolvedValue({ success: true, data: { status: "failed" } });
+  it("ответ без error бросает ошибку по умолчанию", async () => {
+    process.env.RESEND_API_KEY = "test-key";
+    sendMock.mockResolvedValue({ success: false });
 
     await expect(
       send({ identifier: "user@example.com", token: "123456" }, { runMutation }),

@@ -48,6 +48,13 @@ export const RingProgress = memo(function RingProgress({
     () => data.map((d, i) => d.stroke ?? defaultStroke(size, i)),
     [data, size],
   );
+
+  // Запас вокруг композита: ореол дуги и капля выходят за окружность, а при
+  // параллаксе сдвигается и весь svg. Без запаса SVG обрезает свечение по
+  // краю viewport — «кольца обрезаны, особенно фон вокруг них». Увеличиваем
+  // холст и центрируем его отрицательным margin'ом: сами кольца сохраняют
+  // размер и центр, но свечение больше не режется.
+  const bleed = Math.ceil(Math.max(6, ...strokes) * 0.3) + 6;
   const radii = useMemo(() => {
     const concentric = concentricRadii(size, strokes, gapPx);
     return data.map((d, i) => d.radius ?? concentric[i]);
@@ -101,12 +108,19 @@ export const RingProgress = memo(function RingProgress({
           с transform параллакса (framer пишет свой transform на svg). */}
       <div className="transition-transform duration-300 ease-out group-hover:scale-[1.03]">
         <motion.svg
-          width={size}
-          height={size}
-          viewBox={`0 0 ${size} ${size}`}
-          className="-rotate-90 block"
+          width={size + bleed * 2}
+          height={size + bleed * 2}
+          viewBox={`${-bleed} ${-bleed} ${size + bleed * 2} ${size + bleed * 2}`}
+          className="block overflow-visible"
           aria-hidden="true"
-          style={reduced ? undefined : { x: parallaxX, y: parallaxY }}
+          style={{
+            margin: -bleed,
+            // Поворот и параллакс собирает framer в один transform — класс
+            // -rotate-90 не используется, чтобы его не перекрыл inline-
+            // transform параллакса (иначе дуги рисовались бы с 3 часов).
+            rotate: -90,
+            ...(reduced ? {} : { x: parallaxX, y: parallaxY }),
+          }}
         >
           {data.map((d, i) => (
             <Ring

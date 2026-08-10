@@ -1,8 +1,15 @@
 import { Email } from "@convex-dev/auth/providers/Email";
 import type { EmailConfig } from "@convex-dev/auth/server";
 import { RandomReader, generateRandomString } from "@oslojs/crypto/random";
+import { ConvexError } from "convex/values";
 import { internal } from "../_generated/api";
-import { vly } from "../../lib/vly-integrations";
+import { sendResendEmail } from "../../lib/resend";
+import { devCaptureEnabled } from "../devOtp";
+
+// Все пользовательские ошибки бросаются как ConvexError({ message }): Convex
+// гарантированно доносит data до клиента, тогда как обычный Error маскируется
+// как «Server Error Called by client» и реальная причина теряется (клиентский
+// разбор — src/lib/errors.ts). Текст ошибки показывается в форме входа.
 
 // Второй аргумент ctx библиотека передаёт реально (см. server/implementation/signIn.ts),
 // хотя в типах Auth.js его нет. Описываем минимальную форму для своих нужд.
@@ -19,6 +26,33 @@ interface RateLimitResult {
   retryAfterSec: number;
 }
 
+/** Ответ Resend на отправку письма. */
+interface SendMailResult {
+  success: boolean;
+  error?: string;
+  id?: string;
+}
+
+/** Отправка письма с кодом через Resend (общий для dev-фолбэка и прода). */
+async function sendMail(email: string, token: string): Promise<SendMailResult> {
+  const appName = process.env.VLY_APP_NAME || "КИЛО";
+  return sendResendEmail({
+    to: email,
+    subject: `Код входа в ${appName}`,
+    text:
+      `Здравствуйте! Ваш код подтверждения для входа в ${appName}: ${token}.\n\n` +
+      `Код действует 15 минут. Если вы не запрашивали вход — просто проигнорируйте это письмо.`,
+    html:
+      `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">` +
+      `<h2 style="margin:0 0 12px;font-size:20px;">Вход в ${appName}</h2>` +
+      `<p style="margin:0 0 16px;color:#444;font-size:14px;line-height:1.5;">` +
+      `Ваш код подтверждения:</p>` +
+      `<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0b6;">${token}</p>` +
+      `<p style="margin:0;color:#888;font-size:12px;line-height:1.5;">` +
+      `Код действует 15 минут. Если вы не запрашивали вход, просто проигнорируйте это письмо.</p>` +
+      `</div>`,
+  });
+}
 /** 6-значный OTP из цифр (криптостойкий, crypto.getRandomValues). Вынесен из
  *  конфига Email() в именованную функцию, чтобы юнит-тестировать без
  *  auth-рантайма; длина параметризована (по умолчанию 6 — как требует провайдер). */
@@ -54,56 +88,59 @@ export const emailOtp = Email({
       { email },
     )) as RateLimitResult;
     if (!rate.allowed) {
-      throw new Error(
-        `Код уже отправлен. Повторите через ${rate.retryAfterSec} сек.`,
-      );
+      throw new ConvexError({
+        message: `Код уже отправлен. Повторите через ${rate.retryAfterSec} сек.`,
+      });
     }
 
-    // Локальная разработка без внешнего SMTP: не ходим в VLY-шлюз, а печатаем
-    // код в лог бэкенда и сохраняем в таблицу devOtpCodes, чтобы форма входа
-    // показала его прямо в UI.
-    if (process.env.VLY_EMAIL_DEV_CAPTURE === "1") {
+    // Dev/превью-режим (см. devOtp.devCaptureEnabled): внешней почты может
+    // не быть, поэтому код сохраняется в devOtpCodes и форма входа показывает
+    // его прямо в UI — вход по email работает даже без SMTP/интеграции.
+    // Письмо при этом всё равно пробуем отправить (если ключ задан), но
+    // неудача шлюза НЕ роняет вход — код виден в форме.
+    if (devCaptureEnabled()) {
       console.log(`[dev-otp] код для ${email}: ${token}`);
       await ctx.runMutation(internal.devOtp.insert, {
         email,
         code: token,
         createdAt: Date.now(),
       });
+      if (!process.env.RESEND_API_KEY) {
+        return;
+      }
+      try {
+        const res = await sendMail(email, token);
+        if (res.success) return;
+        console.warn(
+          `[dev-otp] Resend не отправил письмо (${res.error ?? "unknown"}) — вход по коду из формы`,
+        );
+      } catch (err) {
+        console.warn(
+          "[dev-otp] ошибка отправки письма — вход по коду из формы",
+          err,
+        );
+      }
       return;
     }
 
-    // Прод: отправляем через VLY-шлюз (VLY_INTEGRATION_KEY, задаётся в панели
-    // Convex/в окружении — никаких ключей в исходниках). Требуется верифицированный
-    // домен отправителя в дашборде VLY (vly.email.listDomains / verifyDomain).
-    if (!process.env.VLY_INTEGRATION_KEY) {
-      throw new Error(
-        "Email-отправка не настроена: задайте VLY_INTEGRATION_KEY в переменных окружения проекта.",
-      );
+    // Прод: отправляем через Resend (RESEND_API_KEY задаётся в панели Convex —
+    // никаких ключей в исходниках). Отправитель — RESEND_EMAIL_FROM; если не
+    // задан, берётся тестовый onboarding@resend.dev (шлёт только на адрес
+    // владельца аккаунта — для реальных пользователей верифицируйте домен
+    // в дашборде Resend и задайте RESEND_EMAIL_FROM).
+    if (!process.env.RESEND_API_KEY) {
+      throw new ConvexError({
+        message:
+          "Отправка кода на email не настроена на сервере. Задайте RESEND_API_KEY в переменных окружения проекта (Convex Dashboard).",
+      });
     }
 
-    const appName = process.env.VLY_APP_NAME || "КИЛО";
-    const res = await vly.email.send({
-      to: email,
-      subject: `Код входа в ${appName}`,
-      text:
-        `Здравствуйте! Ваш код подтверждения для входа в ${appName}: ${token}.\n\n` +
-        `Код действует 15 минут. Если вы не запрашивали вход — просто проигнорируйте это письмо.`,
-      html:
-        `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">` +
-        `<h2 style="margin:0 0 12px;font-size:20px;">Вход в ${appName}</h2>` +
-        `<p style="margin:0 0 16px;color:#444;font-size:14px;line-height:1.5;">` +
-        `Ваш код подтверждения:</p>` +
-        `<p style="margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px;color:#0b6;">${token}</p>` +
-        `<p style="margin:0;color:#888;font-size:12px;line-height:1.5;">` +
-        `Код действует 15 минут. Если вы не запрашивали вход, просто проигнорируйте это письмо.</p>` +
-        `</div>`,
-    });
-
-    if (!res.success || res.data?.status === "failed") {
-      throw new Error(
-        res.error ??
-          "Не удалось отправить письмо с кодом. Попробуйте ещё раз позже.",
-      );
+    const res = await sendMail(email, token);
+    if (!res.success) {
+      throw new ConvexError({
+        message:
+          res.error ?? "Не удалось отправить письмо с кодом. Попробуйте ещё раз позже.",
+      });
     }
   }) as unknown as EmailConfig["sendVerificationRequest"],
 });

@@ -1,6 +1,6 @@
 /**
  * Недельная сводка: агрегирует записи пользователя за последние 7 дней
- * (вес, питание, тренировки, воду) и отправляет письмо через VLY-шлюз.
+ * (вес, питание, тренировки, воду) и отправляет письмо через Resend.
  *
  * - runWeeklyDigest (internalMutation) — вызывается cron-джобой
  *   (src/convex/crons.ts, понедельник 08:00 UTC). Проходит по всем
@@ -11,14 +11,14 @@
  *
  * Отправка не критична для пользователя: сбой одного адреса не роняет
  * остальных (try/catch на каждого получателя). Гейты: DIGEST_DISABLED=1
- * и отсутствие VLY_INTEGRATION_KEY молча пропускают прогон (в dev без
- * шлюза cron не должен падать).
+ * и отсутствие RESEND_API_KEY молча пропускают прогон (в dev без
+ * ключа cron не должен падать).
  */
 import { internalMutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { GenericDatabaseReader } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
-import { vly } from "../lib/vly-integrations";
+import { sendResendEmail } from "../lib/resend";
 import { addDays, toDateKey } from "../lib/dates";
 import {
   buildWeeklyDigest,
@@ -134,7 +134,7 @@ async function loadDigest(
 }
 
 export interface DigestRunResult {
-  skipped: "dev" | "disabled" | "no-vly-key" | null;
+  skipped: "dev" | "disabled" | "no-email-key" | null;
   sent: number;
   noData: number;
   failed: number;
@@ -151,7 +151,7 @@ export const runWeeklyDigest = internalMutation({
   args: {},
   handler: async (ctx): Promise<DigestRunResult> => {
     // Cron работает и на локальном convex dev: без этого гейта дев-бэкенд
-    // с заданным VLY_INTEGRATION_KEY слал бы реальные письма тестовым
+    // с заданным RESEND_API_KEY слал бы реальные письма тестовым
     // пользователям по понедельникам. NODE_ENV выставляет сам Convex.
     if (process.env.NODE_ENV === "development") {
       return { skipped: "dev", sent: 0, noData: 0, failed: 0 };
@@ -160,9 +160,9 @@ export const runWeeklyDigest = internalMutation({
       console.log("[digest] выключен (DIGEST_DISABLED=1)");
       return { skipped: "disabled", sent: 0, noData: 0, failed: 0 };
     }
-    if (!process.env.VLY_INTEGRATION_KEY) {
-      console.log("[digest] пропуск: нет VLY_INTEGRATION_KEY");
-      return { skipped: "no-vly-key", sent: 0, noData: 0, failed: 0 };
+    if (!process.env.RESEND_API_KEY) {
+      console.log("[digest] пропуск: нет RESEND_API_KEY");
+      return { skipped: "no-email-key", sent: 0, noData: 0, failed: 0 };
     }
 
     const dayKeys = weekWindowKeys();
@@ -185,17 +185,17 @@ export const runWeeklyDigest = internalMutation({
           typeof user.name === "string" && user.name.length > 0
             ? user.name
             : undefined;
-        const res = await vly.email.send({
+        const res = await sendResendEmail({
           to: email,
           subject: "Ваша неделя в КИЛО",
           text: renderDigestText(digest, { name }),
           html: renderDigestHtml(digest, { name }),
         });
-        if (!res.success || res.data?.status === "failed") {
+        if (!res.success) {
           failed += 1;
           console.error(
             `[digest] не отправлено ${email}:`,
-            res.error ?? "status failed",
+            res.error ?? "unknown",
           );
         } else {
           sent += 1;

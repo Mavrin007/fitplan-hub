@@ -235,9 +235,7 @@ export const Ring = memo(function Ring({
         };
         return (
           <g key={i}>
-            {/* Ореол вокруг дуги — у хвоста перебора ярче и «дышит»
-                (opacity-массив с повторением): перебор заметен даже в покое.
-                При reduced-motion пульсация отключается — статичная яркость. */}
+            {/* Ореол вокруг дуги — у хвоста перебора ярче */}
             <motion.circle
               {...common}
               data-arc-halo
@@ -248,40 +246,8 @@ export const Ring = memo(function Ring({
               }}
               animate={{
                 strokeDashoffset: target,
-                opacity: reduced
-                  ? seg.overflow
-                    ? OVERFLOW_HALO_OPACITY
-                    : HALO_OPACITY
-                  : seg.overflow
-                    ? [
-                        OVERFLOW_HALO_OPACITY,
-                        OVERFLOW_HALO_OPACITY * 1.9,
-                        OVERFLOW_HALO_OPACITY,
-                      ]
-                    : HALO_OPACITY,
+                opacity: seg.overflow ? OVERFLOW_HALO_OPACITY : HALO_OPACITY,
               }}
-              transition={
-                seg.overflow && !reduced
-                  ? {
-                      strokeDashoffset: {
-                        duration: seg.segmentDuration,
-                        delay: seg.delay,
-                        ease: APPLE_EASE,
-                      },
-                      opacity: {
-                        duration: 1.1,
-                        delay: seg.delay,
-                        repeat: Infinity,
-                        repeatType: "mirror",
-                        ease: "easeInOut",
-                      },
-                    }
-                  : {
-                      duration: seg.segmentDuration,
-                      delay: seg.delay,
-                      ease: APPLE_EASE,
-                    }
-              }
             />
             <motion.circle {...common} data-arc strokeWidth={stroke} />
           </g>

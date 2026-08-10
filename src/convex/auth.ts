@@ -2,13 +2,12 @@
 
 import { convexAuth, getAuthSessionId } from "@convex-dev/auth/server";
 import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
-import Google from "@auth/core/providers/google";
 import { emailOtp } from "./auth/emailOtp";
 import { ROLES } from "./schema";
 
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [emailOtp, Google, Anonymous],
+  providers: [emailOtp, Anonymous],
   signIn: {
     // Лимит неудачных попыток ввода OTP/пароля в час (встроенный rate-limit
     // @convex-dev/auth, таблица authRateLimits). 10 по умолчанию — ужесточаем
@@ -39,20 +38,20 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         }
       }
       const { emailVerified, phoneVerified, ...profileRest } = profile;
-      // Линковка по подтверждённой почте (Google OAuth ↔ email-OTP):
-      // дефолтный createOrUpdateUser @convex-dev/auth делает это сам, но наш
-      // кастомный колбэк его обходит — без этого шага вход через Google, а
-      // затем через email с тем же адресом плодил бы два отдельных аккаунта.
-      // Привязываемся к существующему пользователю только если почта уже
-      // подтверждена (Google подтверждает при выдаче, OTP — после ввода кода);
-      // на шаге «отправить код» (type: "email") почта ещё не верифицирована,
-      // поэтому линковки не происходит.
+      // Код подтверждён (email-OTP) — аккаунт перестаёт быть анонимным,
+      // email и время верификации сохраняются. (На шаге «отправить код»,
+      // type: "email", почта ещё не верифицирована — признак не ставим.)
+      const isVerifiedSignIn = type === "verification";
+      // Линковка по подтверждённой почте (email-OTP): при входе с другого
+      // устройства данные (профиль, логи) не теряются — аккаунт привязывается
+      // к существующему пользователю с этим адресом. Только после ввода кода;
+      // на шаге «отправить код» линковки не происходит, чтобы не «приклеить»
+      // чужой аккаунт к непроверенному адресу.
       if (userId === null) {
         const email =
           typeof profileRest.email === "string" ? profileRest.email : null;
         const verified =
-          emailVerified === true ||
-          (type === "oauth" && email !== null);
+          emailVerified === true || (isVerifiedSignIn && email !== null);
         if (email !== null && verified) {
           // ctx колбэка типизирован GenericMutationCtx<AnyDataModel> (без
           // конкретной схемы), поэтому индексный запрос идёт через локальный
@@ -86,10 +85,6 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
           }
         }
       }
-      // Google OAuth: email приходит уже верифицированным провайдером —
-      // аккаунт сразу не-анонимный, email и время верификации сохраняются.
-      // (Для email-OTP это происходит только после подтверждения кода.)
-      const isVerifiedSignIn = type === "verification" || type === "oauth";
       // Поля users-таблицы, известные схеме; profile может содержать и
       // посторонние ключи провайдера — отбрасываем их, чтобы не сломать
       // валидацию при вставке.
@@ -114,24 +109,22 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         ...(typeof profileRest.isAnonymous === "boolean"
           ? { isAnonymous: profileRest.isAnonymous }
           : null),
-        // Email записываем только после подтверждения кода (email-OTP) или
-        // сразу для OAuth — на этапе «отправить код» (type: "email") аккаунт
-        // ещё не привязан, иначе форма привязки пропала бы раньше времени.
+        // Email записываем только после подтверждения кода (email-OTP) — на
+        // этапе «отправить код» (type: "email") аккаунт ещё не привязан,
+        // иначе форма привязки пропала бы раньше времени.
         ...(isVerifiedSignIn && typeof profileRest.email === "string"
           ? { email: profileRest.email }
           : null),
-        // Время верификации: явный флаг провайдера, либо Google OAuth с
-        // реальным email в профиле (Google подтверждает адрес при выдаче).
+        // Время верификации: явный флаг провайдера после ввода кода.
         ...(emailVerified === true ||
-        (type === "oauth" && typeof profileRest.email === "string")
+        (isVerifiedSignIn && typeof profileRest.email === "string")
           ? { emailVerificationTime: Date.now() }
           : null),
         ...(phoneVerified === true
           ? { phoneVerificationTime: Date.now() }
           : null),
-        // Код подтверждён / OAuth-вход — аккаунт больше не анонимный (уходит
-        // из гостевого флоу: оверлей «привяжите почту» и автовыход при 0
-        // записей).
+        // Код подтверждён — аккаунт больше не анонимный (уходит из гостевого
+        // флоу: оверлей «привяжите почту» и автовыход при 0 записей).
         ...(isVerifiedSignIn && typeof profileRest.email === "string"
           ? { isAnonymous: false }
           : null),

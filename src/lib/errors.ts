@@ -70,6 +70,13 @@ export function formatConvexError(err: unknown, fallback?: string): string {
  * например серверный rate-limit «Код уже отправлен…»).
  */
 export function readableError(error: unknown): string {
+  // ConvexError: сервер положил причину в data ({ message } или строка) —
+  // показываем её до всякого разбора обёртки (emailOtp.ts кидает именно так,
+  // чтобы текст дошёл до формы входа, а не «Server Error Called by client»).
+  if (isRecord(error) && "data" in error) {
+    const fromData = messageFromData(error.data);
+    if (fromData) return fromData;
+  }
   if (error instanceof Error) {
     // Группа — всё до конца строки после «Uncaught Error: ». Если текста на
     // строке нет (пустая группа, дальше стек), trim даёт пустоту → исходник.

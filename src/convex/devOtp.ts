@@ -2,18 +2,24 @@ import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 /**
- * Dev-only перехват OTP-кодов для локальной разработки без внешнего SMTP.
+ * Перехват OTP-кодов для работы входа по email БЕЗ внешнего SMTP.
  *
- * Заполняется из sendVerificationRequest в auth/emailOtp.ts. Работает только
- * когда включён VLY_EMAIL_DEV_CAPTURE=1 И сайт — localhost (защита от
- * случайной утечки кодов, если флаг уедет на облачный деплой). UI читает коды
- * через getByEmail — она защищена той же парой условий.
+ * Заполняется из sendVerificationRequest в auth/emailOtp.ts. Включается на
+ * dev/превью-развёртках (localhost, 127.0.0.1, *.convex.site — превью Freebuff)
+ * или явным флагом VLY_EMAIL_DEV_CAPTURE=1. На боевом деплое (свой домен,
+ * флаг не задан) перехват отключён: коды не сохраняются и не отдаются
+ * клиенту — работает только настоящая почта. VLY_EMAIL_DEV_CAPTURE=0 —
+ * принудительное выключение. UI читает коды через getByEmail — она защищена
+ * тем же условием.
  */
-function devCaptureEnabled(): boolean {
+export function devCaptureEnabled(): boolean {
+  if (process.env.VLY_EMAIL_DEV_CAPTURE === "0") return false;
   const siteUrl = process.env.CONVEX_SITE_URL ?? "";
   return (
-    process.env.VLY_EMAIL_DEV_CAPTURE === "1" &&
-    (siteUrl.includes("127.0.0.1") || siteUrl.includes("localhost"))
+    process.env.VLY_EMAIL_DEV_CAPTURE === "1" ||
+    siteUrl.includes("127.0.0.1") ||
+    siteUrl.includes("localhost") ||
+    siteUrl.includes("convex.site")
   );
 }
 

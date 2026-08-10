@@ -108,29 +108,6 @@ describe("ProgressRing", () => {
     expect(dot.getAttribute("opacity")).toBe("1");
   });
 
-  it("при переборе ореол хвоста пульсирует (opacity-массив) и капля в overColor", async () => {
-    const { container } = render(
-      <ProgressRing value={150} max={100} size={96} stroke={8} overColor="#0f0" />,
-    );
-    const halos = container.querySelectorAll("[data-arc-halo]");
-    // Полный круг + хвост перебора → два ореола; хвост — второй.
-    expect(halos.length).toBe(2);
-    const tailHalo = halos[1];
-
-    // Капля на кончике перебора красится цветом перелива (overColor),
-    // когда tipColor не задан.
-    const dot = tipDot(container);
-    expect(dot.getAttribute("fill")).toBe("#0f0");
-
-    // Пульсация: ждём старта анимации хвоста (полный круг рисуется 1.4 c),
-    // затем opacity меняется между замерами — ореол «дышит», а не стоит.
-    await advanceFrames(1900);
-    const first = parseFloat(tailHalo.getAttribute("opacity") ?? "0");
-    await advanceFrames(300);
-    const second = parseFloat(tailHalo.getAttribute("opacity") ?? "0");
-    expect(first).not.toBeCloseTo(second, 2);
-  });
-
   it("при 0% капля не рендерится вовсе", async () => {
     const { container } = render(
       <ProgressRing value={0} max={100} size={96} stroke={8} />,
@@ -152,22 +129,6 @@ describe("ProgressRing", () => {
     const c = 2 * Math.PI * 44; // ≈ 276.46
     const offset = parseFloat(arc!.getAttribute("stroke-dashoffset") ?? "");
     expect(offset).toBeCloseTo(c, 0);
-  });
-
-  /**
-   * Контроль капли к progress-ring.reduced-motion.test.tsx: БЕЗ системного
-   * prefers-reduced-motion капля стартует уменьшенной (0.7× радиуса) и
-   * «вырастает» на пружине — scale-анимация появления. При reduced-motion
-   * радиус сразу полный (3.81), а здесь — 2.67.
-   */
-  it("контроль: без reduced-motion капля стартует с 0.7× радиуса (scale)", () => {
-    const { container } = render(
-      <ProgressRing value={50} max={100} size={96} stroke={8} />,
-    );
-    const bead = container.querySelector("[data-bead]") as SVGCircleElement | null;
-    expect(bead).not.toBeNull();
-    // beadRadius = max(2.5, 8/2.1) ≈ 3.81; 0.7 × 3.81 ≈ 2.67.
-    expect(parseFloat(bead!.getAttribute("r") ?? "0")).toBeCloseTo(2.67, 2);
   });
 
   it("при max = 0 показывает 0%", () => {

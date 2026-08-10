@@ -80,6 +80,10 @@ export function ProgressRing({
   );
 
   const r = (size - stroke) / 2;
+  // Запас вокруг кольца: ореол дуги и капля выходят за окружность; без него
+  // SVG обрезает свечение по краю viewport. Холст больше контейнера и
+  // центрируется flex-обёрткой — кольцо сохраняет размер и центр.
+  const bleed = Math.ceil(stroke * 0.3) + 6;
 
   return (
     <div
@@ -93,10 +97,10 @@ export function ProgressRing({
       }
     >
       <svg
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
-        className="-rotate-90"
+        width={size + bleed * 2}
+        height={size + bleed * 2}
+        viewBox={`${-bleed} ${-bleed} ${size + bleed * 2} ${size + bleed * 2}`}
+        className="-rotate-90 overflow-visible"
         aria-hidden="true"
       >
         <Ring

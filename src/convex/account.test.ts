@@ -116,7 +116,7 @@ function seedFull(
     _id: id("acc", 1),
     _creationTime: 0,
     userId,
-    provider: "google",
+    provider: "email-otp",
   } as ConvexDoc);
 }
 

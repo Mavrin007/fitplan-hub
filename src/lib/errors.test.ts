@@ -91,6 +91,25 @@ describe("readableError", () => {
     );
   });
 
+  it("ConvexError с data { message } — берёт message из data", () => {
+    const err = new ConvexError({
+      message: "Отправка кода на email не настроена на сервере.",
+    });
+    expect(readableError(err)).toBe(
+      "Отправка кода на email не настроена на сервере.",
+    );
+  });
+
+  it("ConvexError со строковой data — берёт строку", () => {
+    const err = new ConvexError("Код уже отправлен. Повторите через 45 сек.");
+    expect(readableError(err)).toBe("Код уже отправлен. Повторите через 45 сек.");
+  });
+
+  it("ConvexError с data без message, но с detail — берёт detail", () => {
+    const err = new ConvexError({ detail: "Подробность" });
+    expect(readableError(err)).toBe("Подробность");
+  });
+
   it("не-Error (строки, числа, null, undefined, объект) — String()", () => {
     expect(readableError("Просто текст")).toBe("Просто текст");
     expect(readableError(42)).toBe("42");

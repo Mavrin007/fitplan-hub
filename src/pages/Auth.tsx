@@ -10,30 +10,6 @@ import { api } from "@/convex/_generated/api";
 import { readableError } from "@/lib/errors";
 import { FitnessHero } from "@/components/illustrations";
 import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
-
-/** Официальная 4-цветная эмблема Google (встроенный SVG — без внешних иконок). */
-function GoogleIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 48 48" className={className} aria-hidden="true">
-      <path
-        fill="#FFC107"
-        d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
-      />
-      <path
-        fill="#FF3D00"
-        d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
-      />
-      <path
-        fill="#4CAF50"
-        d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
-      />
-      <path
-        fill="#1976D2"
-        d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
-      />
-    </svg>
-  );
-}
 import { Suspense, useEffect, useState } from "react";
 import { useConvex, useQuery } from "convex/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -140,14 +116,12 @@ function Auth({
   // Ставится на otpMaxAgeSec в момент отправки и тикает вниз раз в секунду.
   const [otpRemainingSec, setOtpRemainingSec] = useState(0);
 
-  // Dev-only: локальный бэкенд перехватывает OTP-коды (VLY_EMAIL_DEV_CAPTURE)
-  // и мы показываем их прямо в форме вместо письма. Хук вызывается всегда
-  // (null args = Convex skip-query вне OTP-шага или при выключенном флаге).
+  // На dev/превью-развёртке бэкенд перехватывает OTP-коды (devOtp.ts) и мы
+  // показываем их прямо в форме вместо письма. Хук вызывается всегда; на
+  // боевом деплое серверный getByEmail вернёт null и блок скроется.
   const devOtpCode = useQuery(
     api.devOtp.getByEmail,
-    import.meta.env.VITE_EMAIL_DEV_CAPTURE === "1" && step !== "signIn"
-      ? { email: step.email }
-      : "skip",
+    step !== "signIn" ? { email: step.email } : "skip",
   );
 
   useEffect(() => {
@@ -302,27 +276,6 @@ function Auth({
     }
   };
 
-  // OAuth-флоу: signIn("google") возвращает redirect-URL (на /api/auth/signin/google),
-  // и клиент @convex-dev/auth/react сам уводит браузер туда, а после возврата
-  // с ?code= завершает вход автоматически. Здесь ждём только сам ответ
-  // сервера (15s), чтобы показать ошибку, если бэкенд недоступен.
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      // redirectTo уходит в OAuth-флоу (cookie → callback → ?code= на фронт),
-      // чтобы после входа пользователь попал на запрошенную страницу, а не
-      // на корень сайта.
-      await withAuthTimeout(signIn("google", { redirectTo: redirect }));
-      // Не navigate: браузер уже уходит на страницу Google; после возврата
-      // ?code= — вход завершает клиент auth, и useEffect ниже редиректит.
-    } catch (error) {
-      console.error("Google sign-in error:", error);
-      setError(`Не удалось войти через Google: ${readableError(error)}`);
-      setIsLoading(false);
-    }
-  };
-
   const isOtp = step !== "signIn";
 
   return (
@@ -417,17 +370,6 @@ function Auth({
                       </span>
                       <div className="h-px flex-1 bg-border" />
                     </div>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 w-full"
-                      onClick={handleGoogleLogin}
-                      disabled={isLoading}
-                    >
-                      <GoogleIcon className="size-4" />
-                      Войти через Google
-                    </Button>
 
                     <Button
                       type="button"

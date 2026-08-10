@@ -1,9 +1,10 @@
 /**
  * Юнит-тесты `devOtp` (src/convex/devOtp.ts): dev-перехват кодов.
  *
- * Проверяем серверный гейт (VLY_EMAIL_DEV_CAPTURE=1 + localhost в
- * CONVEX_SITE_URL), вставку и чистку устаревших кодов, а также чтение
- * последнего кода через getByEmail.
+ * Проверяем серверный гейт (флаг VLY_EMAIL_DEV_CAPTURE=1 — явный opt-in на
+ * любом домене; без флага — только dev-домены: localhost/127.0.0.1 и превью
+ * *.convex.site; на боевом .convex.cloud перехват выключен), вставку и чистку
+ * устаревших кодов, а также чтение последнего кода через getByEmail.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getByEmail, insert } from "./devOtp";
@@ -56,11 +57,29 @@ describe("devOtp", () => {
     await expect(runGet({ db }, { email: "a@b.c" })).resolves.toBeNull();
   });
 
-  it("на не-localhost сайте перехват выключен (защита от утечки кодов)", async () => {
+  it("без флага на облачном домене (.convex.cloud) перехват выключен (защита от утечки)", async () => {
+    delete process.env.VLY_EMAIL_DEV_CAPTURE;
     process.env.CONVEX_SITE_URL = "https://my-project.convex.cloud";
     const { db, store } = makeConvexDb();
     await runInsert({ db }, { email: "a@b.c", code: "123456", createdAt: 1000 });
     expect(store.devOtpCodes).toHaveLength(0);
+    await expect(runGet({ db }, { email: "a@b.c" })).resolves.toBeNull();
+  });
+
+  it("превью-деплой (.convex.site) включает перехват без флага — вход по коду в форме", async () => {
+    delete process.env.VLY_EMAIL_DEV_CAPTURE;
+    process.env.CONVEX_SITE_URL = "https://my-project.convex.site";
+    const { db, store } = makeConvexDb();
+    await runInsert({ db }, { email: "a@b.c", code: "123456", createdAt: 1000 });
+    expect(store.devOtpCodes).toHaveLength(1);
+    await expect(runGet({ db }, { email: "a@b.c" })).resolves.toBe("123456");
+  });
+
+  it("флаг VLY_EMAIL_DEV_CAPTURE=1 включает перехват на любом домене (явный opt-in)", async () => {
+    process.env.CONVEX_SITE_URL = "https://my-project.convex.cloud";
+    const { db, store } = makeConvexDb();
+    await runInsert({ db }, { email: "a@b.c", code: "123456", createdAt: 1000 });
+    expect(store.devOtpCodes).toHaveLength(1);
   });
 
   it("localhost в CONVEX_SITE_URL тоже включает перехват", async () => {

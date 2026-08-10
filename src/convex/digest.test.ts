@@ -2,15 +2,15 @@
  * Тесты недельной сводки (src/convex/digest.ts) через фейковый ctx.db
  * (src/test/convex-db-mock.ts): runWeeklyDigest — отбор получателей,
  * env-гейты, устойчивость к сбою одного адреса; getMyWeeklyDigest —
- * авторизация. vly.email.send замокан, как в emailOtp.test.ts.
+ * авторизация. sendResendEmail замокан, как в emailOtp.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted: фабрика vi.mock поднимается над объявлениями (см. emailOtp.test).
 const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
 
-vi.mock("../lib/vly-integrations", () => ({
-  vly: { email: { send: sendMock } },
+vi.mock("../lib/resend", () => ({
+  sendResendEmail: sendMock,
 }));
 
 vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
@@ -109,10 +109,10 @@ function seedDataForBob(): Record<string, ConvexDoc[]> {
 }
 
 beforeEach(() => {
-  vi.stubEnv("VLY_INTEGRATION_KEY", "test-key");
+  vi.stubEnv("RESEND_API_KEY", "test-key");
   vi.stubEnv("DIGEST_DISABLED", "");
   sendMock.mockReset();
-  sendMock.mockResolvedValue({ success: true, data: { status: "queued" } });
+  sendMock.mockResolvedValue({ success: true, id: "mocked-id" });
 });
 
 afterEach(() => {
@@ -162,15 +162,15 @@ describe("runWeeklyDigest", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("без VLY_INTEGRATION_KEY прогон пропускается, отправки нет", async () => {
-    vi.stubEnv("VLY_INTEGRATION_KEY", "");
+  it("без RESEND_API_KEY прогон пропускается, отправки нет", async () => {
+    vi.stubEnv("RESEND_API_KEY", "");
     const { db } = makeConvexDb({
       users: seedWeek(),
       profiles: [seedProfile("users:1")],
       ...seedDataForAlice(),
     });
     const res = await runDigest({ db }, {});
-    expect(res.skipped).toBe("no-vly-key");
+    expect(res.skipped).toBe("no-email-key");
     expect(sendMock).not.toHaveBeenCalled();
   });
 

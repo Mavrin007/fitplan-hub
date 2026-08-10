@@ -101,6 +101,12 @@ async function runLighthouse(chrome, url) {
     formFactor: "desktop",
     screenEmulation: { mobile: false, width: 1350, height: 940, deviceScaleFactor: 1 },
     throttlingMethod: "provided",
+    chromeFlags: [
+      "--headless",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+    ],
   });
   if (!result || !result.lhr) {
     throw new Error("Lighthouse не вернул отчёт (lhr отсутствует)");
@@ -135,22 +141,8 @@ async function main() {
   }
 
   const targetUrl = urlArg ?? URL;
-  // Флаги обязаны идти launcher'у: lighthouse() их игнорирует, когда передан
-  // готовый `port` (поэтому chromeFlags в опциях lighthouse не дублируем).
-  // Набор проверен на ubuntu-раннерах (Chrome 132+):
-  //  - --disable-dev-shm-usage: /dev/shm всего 64 МБ — без него рендерер падает;
-  //  - --enable-unsafe-swiftshader: в новом headless (Chrome 132+) софтверный
-  //    GL требуется разрешить явно, иначе страница не рисует НИ ОДНОГО кадра
-  //    и Lighthouse падает с NO_FCP «The page did not paint any content»;
-  //  - --disable-gpu НЕ добавляем: с новым headless он как раз и провоцирует
-  //    пустой кадр (NO_FCP), хотя локально на Windows всё рисуется.
   const chrome = await launch({
-    chromeFlags: [
-      "--headless",
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--enable-unsafe-swiftshader",
-    ],
+    chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
   });
 
   try {
@@ -161,10 +153,11 @@ async function main() {
     for (let i = 0; i < 2; i++) {
       runs.push(await runLighthouse(chrome, targetUrl));
     }
-    // NaN-защита при сортировке: error-аудит без метрики не попадёт в «лучший».
-    const lcpValue = (lhr) =>
-      lhr?.audits?.["largest-contentful-paint"]?.numericValue ?? Infinity;
-    const best = [...runs].sort((a, b) => lcpValue(a) - lcpValue(b))[0];
+    const best = [...runs].sort(
+      (a, b) =>
+        a.audits["largest-contentful-paint"].numericValue -
+        b.audits["largest-contentful-paint"].numericValue,
+    )[0];
 
     // 4. Отчёт пишем ДО проверки порогов — если гейт упал, артефакт всё
     //    равно существует и регрессию можно расследовать по HTML/JSON.
@@ -180,32 +173,11 @@ async function main() {
       console.warn("[perf] не удалось сохранить отчёт:", reportErr);
     }
 
-    // 5. Сверяем целевые метрики. Прогон может вернуть error-аудит (краш
-    //    рендерера на раннере, сетевой сбой) — numericValue тогда отсутствует.
-    //    Вместо TypeError печатаем диагностику и роняем гейт осознанно (throw,
-    //    а не process.exit — чтобы finally погасил Chrome и preview-сервер).
+    // 5. Сверяем целевые метрики.
     let failed = false;
     console.log(
       `=== Web Vitals (лучший из 2 прогонов, desktop/provided, ${targetUrl}) ===`,
     );
-    const missing = Object.keys(TARGETS).filter(
-      (key) => !Number.isFinite(best.audits?.[key]?.numericValue),
-    );
-    if (missing.length > 0) {
-      console.error(
-        `[perf] метрики не собраны (${missing.join(", ")}) — Lighthouse вернул error-аудит.`,
-      );
-      if (best.runtimeError) {
-        console.error(`[perf] runtimeError: ${best.runtimeError.message}`);
-      }
-      for (const key of missing) {
-        const audit = best.audits?.[key];
-        console.error(
-          `[perf] audit ${key}: ${audit?.errorMessage ?? "нет errorMessage"}`,
-        );
-      }
-      throw new Error("Lighthouse не собрал Web Vitals — см. диагностику выше");
-    }
     for (const [key, { max, label }] of Object.entries(TARGETS)) {
       const value = best.audits[key].numericValue;
       const ok = Number.isFinite(value) && value <= max;
