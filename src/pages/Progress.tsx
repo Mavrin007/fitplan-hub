@@ -1,7 +1,8 @@
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { motion } from "framer-motion";
 import { ChartCard, LegendChip } from "@/components/chart-card";
 import { ProgressRing } from "@/components/progress-ring";
 import { PageAurora } from "@/components/page-aurora";
@@ -10,7 +11,7 @@ import { ChartScene } from "@/components/illustrations";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import { CHART_HEIGHT, SVGAreaChart, SVGBarChart } from "@/lib/charts";
-import { computeTargets } from "@/lib/nutrition";
+import { computeTargets, waterGoal } from "@/lib/nutrition";
 import { lastNDays, shortDate, todayKey } from "@/lib/dates";
 import { describeProjection, projectGoal } from "@/lib/projection";
 import {
@@ -20,6 +21,7 @@ import {
   exportWater,
   exportFoods,
 } from "@/lib/export";
+import { buildNextWeekPlan, buildWeeklyInsight } from "@/lib/digest";
 import {
   Scale,
   Flame,
@@ -31,9 +33,16 @@ import {
   Download,
   GlassWater,
   Apple,
+  CalendarDays,
+  Sparkles,
+  ArrowRight,
+  type LucideIcon,
 } from "lucide-react";
 import { UNITS } from "@/lib/i18n";
+import { WATER_RING } from "@/components/rings/colors";
 import { cn } from "@/lib/utils";
+import { useTrack } from "@/hooks/use-track";
+import { Link } from "react-router";
 
 const PERIODS = [
   { value: 7, label: "7 дней" },
@@ -65,6 +74,48 @@ function PeriodToggle({
   );
 }
 
+/** Плитка «Итогов недели»: иконка, крупное значение, подсказка и прогресс-бар. */
+function WeekTile({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  pct,
+  color,
+  delay = 0,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  hint: string;
+  /** 0–100; null — без бара (например, дельта веса). */
+  pct: number | null;
+  color: string;
+  delay?: number;
+}) {
+  return (
+    <div className="rounded-xl border bg-surface-container-low/60 p-4">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Icon className="size-3.5 shrink-0" style={{ color }} />
+        <span className="text-[10px] uppercase tracking-[0.14em]">{label}</span>
+      </div>
+      <p className="num mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</p>
+      {pct !== null && (
+        <div className="mt-3 h-1.5 min-w-0 overflow-hidden rounded-full bg-muted">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ backgroundColor: color }}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+            transition={{ duration: 0.7, ease: "easeOut", delay }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyChart({ icon, text }: { icon: ReactNode; text: string }) {
   return (
     <div className="flex h-[220px] flex-col items-center justify-center gap-2.5 text-muted-foreground">
@@ -78,6 +129,12 @@ function EmptyChart({ icon, text }: { icon: ReactNode; text: string }) {
 }
 
 export default function Progress() {
+  const track = useTrack();
+  // Просмотр недельного обзора — событие retention-воронки (один раз за сессию).
+  useEffect(() => {
+    track("weekly_review_opened");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const profile = useQuery(api.profiles.getMyProfile);
   // Графики/тренды: лимиты вместо полной выгрузки (730 записей ≈ 2 года
   // ежедневных замеров — для чартов с запасом; экспорт «Скачать свои данные»
@@ -86,6 +143,9 @@ export default function Progress() {
   const workoutLogs = useQuery(api.workouts.listLogs, { limit: 500 });
   const waterLogs = useQuery(api.water.listMyWater, { limit: 730 });
   const foods = useQuery(api.foods.listMyFoods, {});
+  // Итоги за последние 7 дней — та же сводка, что уходит в письмо по
+  // понедельникам (src/convex/digest.ts): вес, питание, тренировки, вода.
+  const weeklyDigest = useQuery(api.digest.getMyWeeklyDigest);
 
   const [period, setPeriod] = useState<Period>(30);
   const days = useMemo(() => lastNDays(period), [period]);
@@ -107,6 +167,100 @@ export default function Progress() {
 
   const rangeStart = days[0];
   const rangeEnd = days[days.length - 1];
+
+  // Цели для оценки воды/тренировок берём из профиля, как на главном экране.
+  const waterTargetMl = profile ? waterGoal(profile.weightKg) : 2000;
+  const trainingTarget = profile?.preferredTrainingDays ?? 3;
+
+  const weeklyInsight = useMemo(
+    () =>
+      weeklyDigest
+        ? buildWeeklyInsight(weeklyDigest, { waterTargetMl, trainingTarget })
+        : "",
+    [weeklyDigest, waterTargetMl, trainingTarget],
+  );
+
+  // «На следующей неделе» — один конкретный шаг вперёд из сводки недели.
+  const nextWeekPlan = useMemo(
+    () =>
+      weeklyDigest
+        ? buildNextWeekPlan(weeklyDigest, {
+            waterTargetMl,
+            trainingTarget,
+            proteinTargetG: targets?.protein ?? null,
+          })
+        : "",
+    [weeklyDigest, waterTargetMl, trainingTarget, targets],
+  );
+
+  // Плитки «Итогов недели»: значения и бары от сводки за окно.
+  const weekTiles = useMemo(() => {
+    const d = weeklyDigest;
+    const pct = (v: number | null, target: number) =>
+      v !== null && target > 0 ? Math.round((v / target) * 100) : 0;
+    return [
+      {
+        key: "weight",
+        icon: Scale,
+        label: "Вес",
+        value:
+          d?.weightDeltaKg !== null && d?.weightDeltaKg !== undefined
+            ? `${d.weightDeltaKg > 0 ? "+" : ""}${d.weightDeltaKg.toFixed(1)} кг`
+            : "—",
+        hint:
+          d?.weightDeltaKg !== null && d?.weightDeltaKg !== undefined
+            ? "изменение за неделю"
+            : "нужно 2+ замера",
+        pct: null as number | null,
+        color: "var(--brand)",
+      },
+      {
+        key: "workouts",
+        icon: Activity,
+        label: "Тренировки",
+        value: String(d?.workoutCount ?? 0),
+        hint: `из ${trainingTarget} за неделю`,
+        pct: pct(d?.workoutCount ?? 0, trainingTarget),
+        color: "var(--accent-activity)",
+      },
+      {
+        key: "nutrition",
+        icon: UtensilsCrossed,
+        label: "Питание",
+        value: d?.caloriePct !== null && d?.caloriePct !== undefined ? `${d.caloriePct}%` : "—",
+        hint:
+          d?.caloriePct !== null && d?.caloriePct !== undefined
+            ? "среднее от цели по калориям"
+            : "запишите приёмы пищи",
+        pct: d?.caloriePct ?? null,
+        color: "var(--macro-protein)",
+      },
+      {
+        key: "water",
+        icon: GlassWater,
+        label: "Вода",
+        value:
+          d?.avgWaterMl !== null && d?.avgWaterMl !== undefined
+            ? `${(d.avgWaterMl / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} л`
+            : "—",
+        hint: "в среднем в день",
+        pct: pct(d?.avgWaterMl ?? null, waterTargetMl),
+        color: WATER_RING.base,
+      },
+      {
+        key: "consistency",
+        icon: Flame,
+        label: "Активность",
+        value: `${d?.trackedDays ?? 0}/7`,
+        hint: "дней с записями",
+        pct: pct(d?.trackedDays ?? 0, 7),
+        color: "#f59e0b",
+      },
+    ] as const;
+  }, [weeklyDigest, trainingTarget, waterTargetMl]);
+
+  const openAssistant = () =>
+    window.dispatchEvent(new CustomEvent("kilo:open-assistant"));
 
   // Количество подписей на оси X: чем длиннее период, тем реже.
   const labelInterval = Math.max(0, Math.floor(period / 8) - 1);
@@ -216,7 +370,8 @@ export default function Progress() {
     allMeals === undefined ||
     workoutLogs === undefined ||
     waterLogs === undefined ||
-    foods === undefined;
+    foods === undefined ||
+    weeklyDigest === undefined;
 
   if (loading) {
     return <PageLoading />;
@@ -245,6 +400,94 @@ export default function Progress() {
           ежедневные шаги превращаются в заметные тренды за недели.
         </p>
       </header>
+
+      {/* ── Итоги недели: сводка, которая уходит в письмо по понедельникам ── */}
+      <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
+              <CalendarDays className="size-3.5" />
+              Ваша неделя
+            </p>
+            <h2 className="m3-title-large mt-1">Итоги за 7 дней</h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            та же сводка приходит на почту по понедельникам
+          </p>
+        </div>
+
+        {weeklyDigest && weeklyDigest.hasData ? (
+          <>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {weekTiles.map((t, i) => (
+                <WeekTile
+                  key={t.key}
+                  icon={t.icon}
+                  label={t.label}
+                  value={t.value}
+                  hint={t.hint}
+                  pct={t.pct}
+                  color={t.color}
+                  delay={0.05 * i}
+                />
+              ))}
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 rounded-xl border border-brand/20 bg-gradient-to-br from-brand/10 to-transparent p-4 sm:flex-row sm:items-center">
+              <Sparkles className="size-5 shrink-0 text-brand" />
+              <p className="min-w-0 flex-1 text-sm leading-relaxed">
+                <span className="font-medium text-foreground">
+                  AI-разбор недели.{" "}
+                </span>
+                <span className="text-muted-foreground">{weeklyInsight}</span>
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={openAssistant}
+              >
+                <Sparkles className="size-3.5" />
+                Спросить коуча
+              </Button>
+            </div>
+
+            {/* Следующий шаг: неделя не только объясняет прошлое, но и
+                формирует, что делать дальше. */}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed p-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <ArrowRight className="mt-0.5 size-4 shrink-0 text-brand" />
+                <p className="min-w-0 text-sm leading-relaxed">
+                  <span className="font-medium text-foreground">
+                    На следующей неделе:{" "}
+                  </span>
+                  <span className="text-muted-foreground">{nextWeekPlan}</span>
+                </p>
+              </div>
+              {/* Замкнутый недельный цикл: обзор → конкретный шаг → Today,
+                  где шаг уже виден в чек-листе и у коуча. */}
+              <Button asChild size="sm">
+                <Link
+                  to="/dashboard"
+                  onClick={() => track("next_week_plan_viewed")}
+                >
+                  <ArrowRight className="size-3.5" />
+                  Начать новую неделю
+                </Link>
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Неделя начинается с первой записи — добавьте воду, приём пищи или
+              тренировку, и здесь появятся итоги: вес, питание, активность и
+              последовательность.
+            </p>
+          </div>
+        )}
+      </section>
 
       {/* Карточка-инсайт: прогноз достижения цели (и состояние «цель
           достигнута», когда прогноз уже не строится — projectGoal честно

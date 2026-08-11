@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -10,6 +11,12 @@ import {
   type Exercise,
   type WorkoutDay,
 } from "@/lib/workoutLibrary";
+import {
+  buildWorkoutSummary,
+  loadEquipmentFor,
+  recommendLoad,
+  type WorkoutSummary,
+} from "@/lib/workoutIntelligence";
 import { WEEKDAYS } from "@/lib/i18n";
 import {
   EFFORT_COLORS,
@@ -27,7 +34,9 @@ import {
   Play,
   RotateCcw,
   SkipForward,
+  Sparkles,
   Timer,
+  Trophy,
   X,
 } from "lucide-react";
 import { cn, parseLocalNumber } from "@/lib/utils";
@@ -36,9 +45,17 @@ import { cn, parseLocalNumber } from "@/lib/utils";
 interface LogExercise {
   name: string;
   weightKg: number;
+  /** Повторы из лога — чтобы показывать «прошлый раз: 70 × 10». */
+  reps?: number;
+  /** RPE подхода (1–10), если заполнен. */
+  rpe?: number;
+  /** Подходы (для объёма в сводке завершения). */
+  sets?: number;
 }
 interface WorkoutLogLite {
   date: string;
+  /** Усилие тренировки (фолбэк для рекомендации, когда RPE нет). */
+  effort?: Effort;
   exercises: LogExercise[];
 }
 
@@ -47,6 +64,7 @@ interface SavedExercise {
   sets: number;
   reps: number;
   weightKg: number;
+  rpe?: number;
 }
 
 interface WorkoutModeProps {
@@ -95,15 +113,32 @@ export function WorkoutMode({
   } | null>(null);
   // Подготовленные к сохранению упражнения — ожидают оценку усилия.
   const [pending, setPending] = useState<SavedExercise[] | null>(null);
+  // RPE (1–10) по упражнениям — заполняется после первых подходов.
+  const [rpes, setRpes] = useState<Record<string, number | undefined>>({});
+  // Сводка завершённой тренировки — показывается после сохранения.
+  const [summary, setSummary] = useState<WorkoutSummary | null>(null);
 
-  // Вес «с прошлого раза»: самый свежий лог, где встречалось это упражнение.
-  // Вычисляется ДО weights, чтобы ленивый инициализатор useState мог его прочитать.
-  const lastWeights = useMemo(() => {
-    const map: Record<string, number> = {};
+  // «С прошлого раза»: самый свежий лог, где встречалось это упражнение — вес и
+  // повторы. Вычисляется ДО weights, чтобы ленивый инициализатор useState мог
+  // его прочитать.
+  const lastEntries = useMemo(() => {
+    const map: Record<
+      string,
+      { weightKg: number; reps?: number; rpe?: number; effort?: Effort }
+    > = {};
     for (const log of [...logs].sort((a, b) => b.date.localeCompare(a.date))) {
       for (const ex of log.exercises) {
-        if (map[ex.name] === undefined && ex.weightKg > 0) {
-          map[ex.name] = ex.weightKg;
+        // Упражнения с собственным весом логируются с весом 0 — для них
+        // «прошлый раз» важен по повторам (вес тела не меняется).
+        const bodyweight =
+          ex.weightKg === 0 && loadEquipmentFor(ex.name) === "bodyweight";
+        if (map[ex.name] === undefined && (ex.weightKg > 0 || bodyweight)) {
+          map[ex.name] = {
+            weightKg: ex.weightKg,
+            reps: ex.reps,
+            rpe: ex.rpe,
+            effort: log.effort,
+          };
         }
       }
     }
@@ -115,16 +150,48 @@ export function WorkoutMode({
   const [weights, setWeights] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const ex of day.exercises) {
-      const last = lastWeights[ex.name];
+      const last = lastEntries[ex.name];
       initial[ex.name] =
-        last !== undefined
-          ? String(last)
+        last !== undefined && last.weightKg > 0
+          ? String(last.weightKg)
           : ex.weightKg != null
             ? String(ex.weightKg)
             : "";
     }
     return initial;
   });
+
+  // Ссылки на секции упражнений — для автопрокрутки к следующему подходу.
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  // Какие упражнения уже были закрыты на прошлом рендере — чтобы прокручивать
+  // ровно в момент «закрытия», а не при каждом изменении done.
+  const prevComplete = useRef<Set<string>>(new Set());
+
+  // Автопрокрутка: упражнение закрыто → плавно ведём к следующему недоделанному.
+  // Пользователь не думает, куда идти дальше — экран сам подводит.
+  useEffect(() => {
+    for (const ex of day.exercises) {
+      const complete = (done[ex.name] ?? 0) >= ex.sets;
+      if (complete && !prevComplete.current.has(ex.name)) {
+        const idx = day.exercises.indexOf(ex);
+        const next =
+          day.exercises
+            .slice(idx + 1)
+            .find((e) => (done[e.name] ?? 0) < e.sets) ??
+          day.exercises.find((e) => (done[e.name] ?? 0) < e.sets);
+        sectionRefs.current[next?.name ?? ""]?.scrollIntoView?.({
+          behavior: "smooth",
+          block: "start",
+        });
+        break;
+      }
+    }
+    prevComplete.current = new Set(
+      day.exercises
+        .filter((e) => (done[e.name] ?? 0) >= e.sets)
+        .map((e) => e.name),
+    );
+  }, [done, day.exercises]);
 
   // Отсчёт таймера отдыха. Зависим только от флага running (а не от всего
   // объекта rest), чтобы интервал не пересоздавался на каждый тик.
@@ -170,22 +237,46 @@ export function WorkoutMode({
   const handleFinish = () => {
     const exercises = day.exercises
       .filter((ex) => (done[ex.name] ?? 0) > 0)
-      .map((ex) => ({
-        name: ex.name,
-        sets: Math.min(done[ex.name] ?? 0, ex.sets),
-        reps: parseInt(ex.reps.match(/^(\d+)/)?.[1] ?? "10", 10),
-        weightKg: parseLocalNumber(weights[ex.name] ?? "") ?? 0,
-      }));
+      .map((ex) => {
+        const rpe = rpes[ex.name];
+        return {
+          name: ex.name,
+          sets: Math.min(done[ex.name] ?? 0, ex.sets),
+          reps: parseInt(ex.reps.match(/^(\d+)/)?.[1] ?? "10", 10),
+          weightKg: parseLocalNumber(weights[ex.name] ?? "") ?? 0,
+          ...(rpe !== undefined ? { rpe } : {}),
+        };
+      });
     if (exercises.length === 0) return;
     setPending(exercises);
   };
 
+  /** Сохранили + сразу показываем сводку (сравнение с прошлой тренировкой). */
   const submitEffort = async (effort: Effort) => {
     if (!pending) return;
     await onSave(pending, effort);
+    setSummary(
+      buildWorkoutSummary({
+        exercises: pending,
+        prevLogs: logs.map((l) => ({
+          date: l.date,
+          exercises: l.exercises.map((e) => ({
+            name: e.name,
+            sets: e.sets ?? 1,
+            reps: e.reps ?? 0,
+            weightKg: e.weightKg,
+          })),
+        })),
+        planMinutes: day.approxMinutes,
+      }),
+    );
+    setPending(null);
   };
 
-  return (
+  // Портал в document.body: полноэкранный оверлей не должен попадать в
+  // stacking context страницы (`isolate` на обёртке) — иначе sticky-шапки
+  // приложения (z-10/z-20) перехватывают клики над шапкой режима тренировки.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Header */}
       <header className="border-b px-4 py-3 sm:px-6">
@@ -232,6 +323,9 @@ export function WorkoutMode({
                 Отдых
               </span>
               <span
+                role="timer"
+                aria-live="polite"
+                aria-label="Таймер отдыха"
                 className={cn(
                   "font-mono text-2xl font-semibold tabular-nums num",
                   rest.left <= 10 && "text-orange-500",
@@ -244,36 +338,38 @@ export function WorkoutMode({
             <div className="flex items-center gap-1.5">
               {rest.running ? (
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   onClick={() => setRest((r) => (r ? { ...r, running: false } : r))}
                 >
-                  <Pause className="size-3.5" /> Пауза
+                  <Pause className="size-4" /> Пауза
                 </Button>
               ) : (
                 <Button
-                  size="sm"
+                  size="default"
                   variant="outline"
                   onClick={() => setRest((r) => (r ? { ...r, running: true } : r))}
                 >
-                  <Play className="size-3.5" /> Продолжить
+                  <Play className="size-4" /> Продолжить
                 </Button>
               )}
               <Button
-                size="sm"
+                size="icon"
+                className="size-10"
                 variant="ghost"
                 onClick={() => setRest((r) => (r ? { ...r, left: r.total, running: true } : r))}
                 aria-label="Сбросить таймер"
               >
-                <RotateCcw className="size-3.5" />
+                <RotateCcw className="size-4" />
               </Button>
               <Button
-                size="sm"
+                size="icon"
+                className="size-10"
                 variant="ghost"
                 onClick={() => setRest(null)}
                 aria-label="Пропустить отдых"
               >
-                <SkipForward className="size-3.5" />
+                <SkipForward className="size-4" />
               </Button>
             </div>
           </div>
@@ -296,16 +392,29 @@ export function WorkoutMode({
           {day.exercises.map((ex) => {
             const doneCount = Math.min(done[ex.name] ?? 0, ex.sets);
             const complete = doneCount >= ex.sets;
-            const last = lastWeights[ex.name];
+            const last = lastEntries[ex.name];
             const tip = EXERCISE_TIPS[ex.name];
             const barbell = isBarbellExercise(ex.name);
             const warmups = warmUpSets(
               parseLocalNumber(weights[ex.name] ?? "") ?? undefined,
               barbell ? BARBELL_BAR_WEIGHT_KG : 2.5,
             );
+            // «Рекомендация KILO»: вес × повторы на сегодня по прошлой
+            // тренировке (RPE/усилие). При недостатке данных — не выдаётся.
+            const rec = recommendLoad({
+              name: ex.name,
+              planWeightKg: ex.weightKg,
+              planReps: ex.reps,
+              last,
+              effort: last?.effort,
+            });
+            const rpe = rpes[ex.name];
             return (
               <section
                 key={ex.name}
+                ref={(node) => {
+                  sectionRefs.current[ex.name] = node;
+                }}
                 className={cn(
                   "rounded-lg border p-4 transition-colors",
                   complete && "border-emerald-500/40 bg-emerald-500/5",
@@ -360,7 +469,7 @@ export function WorkoutMode({
                           onClick={() => toggleSet(ex, setIdx)}
                           aria-label={`Подход ${setIdx} — ${active ? "отметить как невыполненный" : "отметить выполненным"}`}
                           className={cn(
-                            "flex size-9 items-center justify-center rounded-full border text-xs font-semibold transition-all",
+                            "flex size-11 items-center justify-center rounded-full border text-xs font-semibold transition-all",
                             active
                               ? "border-foreground bg-foreground text-background"
                               : "border-border text-muted-foreground hover:border-foreground/40",
@@ -387,7 +496,7 @@ export function WorkoutMode({
                             [ex.name]: e.target.value.replace(/[^\d.,]/g, ""),
                           }))
                         }
-                        className="pr-8 text-right"
+                        className="h-10 pr-8 text-right"
                         aria-label={`Вес для ${ex.name}`}
                       />
                       <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
@@ -400,11 +509,101 @@ export function WorkoutMode({
                       </p>
                     ) : last !== undefined ? (
                       <p className="mt-1 text-right text-[10px] text-muted-foreground">
-                        прошлый раз: <span className="num">{last} кг</span>
+                        {last.reps ? (
+                          <>
+                            прошлый раз:{" "}
+                            <span className="num">
+                              {last.weightKg} × {last.reps}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            прошлый раз:{" "}
+                            <span className="num">{last.weightKg} кг</span>
+                          </>
+                        )}
                       </p>
                     ) : null}
                   </div>
                 </div>
+
+                {/* Рекомендация KILO — рекомендуемая нагрузка по прошлому разу */}
+                {rec.kind !== "new" && rec.weightKg !== undefined && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-brand/25 bg-brand/5 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-[11px] font-semibold text-brand">
+                        <Sparkles className="size-3.5" />
+                        Рекомендация KILO
+                        {rec.stepLabel ? ` · ${rec.stepLabel}` : ""}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold num">
+                        {rec.weightKg} кг
+                        {rec.repsMin !== null && rec.repsMax !== null
+                          ? rec.repsMin === rec.repsMax
+                            ? ` × ${rec.repsMin}`
+                            : ` × ${rec.repsMin}–${rec.repsMax}`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                        {rec.reasoning}
+                      </p>
+                    </div>
+                    {parseLocalNumber(weights[ex.name] ?? "") !== rec.weightKg && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setWeights((w) => ({
+                            ...w,
+                            [ex.name]: String(rec.weightKg),
+                          }))
+                        }
+                      >
+                        Применить {rec.weightKg} кг
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* RPE подхода (необязательно) — появляется после первых подходов */}
+                {doneCount > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-2.5">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      RPE:
+                    </span>
+                    {[7, 8, 9, 10].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() =>
+                          setRpes((m) => ({
+                            ...m,
+                            [ex.name]: m[ex.name] === r ? undefined : r,
+                          }))
+                        }
+                        aria-pressed={rpe === r}
+                        aria-label={`RPE ${r}`}
+                        className={cn(
+                          "flex size-10 items-center justify-center rounded-full border text-xs font-semibold num transition-colors",
+                          rpe === r
+                            ? "border-transparent bg-foreground text-background"
+                            : "border-border text-muted-foreground hover:border-foreground/40",
+                        )}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                    <span className="ml-1 text-[10px] text-muted-foreground">
+                      {rpe
+                        ? rpe <= 7
+                          ? "можно прибавить"
+                          : rpe === 8
+                            ? "рабочая нагрузка"
+                            : "тяжело — вес не поднимаем"
+                        : "необязательно"}
+                    </span>
+                  </div>
+                )}
 
                 {/* Техника выполнения */}
                 {tip && (
@@ -440,7 +639,7 @@ export function WorkoutMode({
       </main>
 
       {/* Footer */}
-      <footer className="border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6">
+      <footer className="border-t bg-background/95 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             <Flame className="mr-1 inline size-3.5" />
@@ -497,6 +696,76 @@ export function WorkoutMode({
           </div>
         </div>
       )}
-    </div>
+
+      {/* Сводка завершённой тренировки: факты + сравнение с прошлым разом */}
+      {summary && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-lg border bg-background p-6 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <Check className="size-5" strokeWidth={3} />
+              </div>
+              <div className="min-w-0">
+                <p className="m3-title-medium">Тренировка завершена</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {summary.exerciseCount} упражн.
+                  {summary.exerciseCount === 1 ? "е" : summary.exerciseCount < 5 ? "ия" : "ий"} ·{" "}
+                  {summary.setCount} подходов
+                  {summary.minutes ? ` · ≈ ${summary.minutes} мин` : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-secondary/40 px-4 py-3">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Объём
+                </p>
+                <p className="num mt-1 text-lg font-semibold">
+                  {Math.round(summary.tonnage).toLocaleString("ru-RU")} кг
+                </p>
+              </div>
+              <div className="rounded-lg bg-secondary/40 px-4 py-3">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Повторы
+                </p>
+                <p className="num mt-1 text-lg font-semibold">{summary.totalReps}</p>
+              </div>
+            </div>
+
+            {summary.tonnageDeltaPct !== null &&
+              summary.tonnageDeltaPct !== 0 && (
+                <p
+                  className={cn(
+                    "mt-3 flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium",
+                    summary.tonnageDeltaPct > 0
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                  )}
+                >
+                  <Flame className="size-3.5" />
+                  Объём{" "}
+                  {summary.tonnageDeltaPct > 0
+                    ? `+${Math.round(summary.tonnageDeltaPct)}%`
+                    : `${Math.round(summary.tonnageDeltaPct)}%`}{" "}
+                  к прошлой тренировке
+                </p>
+              )}
+
+            {summary.prs.length > 0 && (
+              <p className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                <Trophy className="size-3.5" />
+                Лучший результат: {summary.prs.join(", ")}
+              </p>
+            )}
+
+            <Button className="mt-4 w-full" onClick={onClose}>
+              Готово
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body,
   );
 }

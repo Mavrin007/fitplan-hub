@@ -10,11 +10,13 @@
 
 import type * as account from "../account.js";
 import type * as activity from "../activity.js";
+import type * as analytics from "../analytics.js";
 import type * as assistant from "../assistant.js";
 import type * as assistantLimits from "../assistantLimits.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as crons from "../crons.js";
+import type * as day1Email from "../day1Email.js";
 import type * as devOtp from "../devOtp.js";
 import type * as digest from "../digest.js";
 import type * as foods from "../foods.js";
@@ -23,6 +25,7 @@ import type * as http from "../http.js";
 import type * as mealLog from "../mealLog.js";
 import type * as otpRateLimit from "../otpRateLimit.js";
 import type * as photo from "../photo.js";
+import type * as premium from "../premium.js";
 import type * as profiles from "../profiles.js";
 import type * as rateLimit from "../rateLimit.js";
 import type * as roles from "../roles.js";
@@ -41,11 +44,13 @@ import type {
 declare const fullApi: ApiFromModules<{
   account: typeof account;
   activity: typeof activity;
+  analytics: typeof analytics;
   assistant: typeof assistant;
   assistantLimits: typeof assistantLimits;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
   crons: typeof crons;
+  day1Email: typeof day1Email;
   devOtp: typeof devOtp;
   digest: typeof digest;
   foods: typeof foods;
@@ -54,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   mealLog: typeof mealLog;
   otpRateLimit: typeof otpRateLimit;
   photo: typeof photo;
+  premium: typeof premium;
   profiles: typeof profiles;
   rateLimit: typeof rateLimit;
   roles: typeof roles;

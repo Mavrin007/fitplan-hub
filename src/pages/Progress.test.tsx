@@ -83,6 +83,23 @@ function seedEmptyWaterAndFoods() {
   setQuery(api.foods.listMyFoods, {}, []);
 }
 
+/** Итоги недели: пустая сводка (секция показывает empty-state). */
+function seedWeeklyDigest() {
+  setQuery(api.digest.getMyWeeklyDigest, undefined, {
+    hasData: false,
+    trackedDays: 0,
+    weightStartKg: null,
+    weightEndKg: null,
+    weightDeltaKg: null,
+    avgCalories: null,
+    avgProteinG: null,
+    caloriePct: null,
+    workoutCount: 0,
+    tonnageKg: 0,
+    avgWaterMl: null,
+  });
+}
+
 /** Профиль + пустые данные: все графики показывают EmptyChart. */
 function setupEmpty() {
   setQuery(api.profiles.getMyProfile, undefined, profile);
@@ -90,6 +107,7 @@ function setupEmpty() {
   setQuery(api.workouts.listLogs, { limit: 500 }, []);
   seedEmptyWaterAndFoods();
   seedMealRanges([]);
+  seedWeeklyDigest();
 }
 
 describe("Progress", () => {
@@ -108,6 +126,7 @@ describe("Progress", () => {
     setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     seedMealRanges([]);
+    seedWeeklyDigest();
     renderWithRouter(<Progress />);
 
     expect(
@@ -163,6 +182,7 @@ describe("Progress", () => {
       mealEntry("m2", todayKey(), 700),
     ];
     seedMealRanges(meals);
+    seedWeeklyDigest();
     renderWithRouter(<Progress />);
 
     // Заголовки графиков.
@@ -217,6 +237,7 @@ describe("Progress", () => {
     setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     seedMealRanges([]);
+    seedWeeklyDigest();
     renderWithRouter(<Progress />);
 
     expect(screen.getByText("+1.5 кг")).toBeInTheDocument();
@@ -234,6 +255,7 @@ describe("Progress", () => {
     setQuery(api.workouts.listLogs, { limit: 500 }, []);
     seedEmptyWaterAndFoods();
     seedMealRanges([]);
+    seedWeeklyDigest();
     renderWithRouter(<Progress />);
 
     // Кольцо сигналит превышение (цель достигнута и пройдена дальше).
@@ -244,5 +266,49 @@ describe("Progress", () => {
     const over = screen.getByText("+14%");
     expect(over.style.color).toBe("var(--macro-over)");
     expect(screen.getByText("цель достигнута")).toBeInTheDocument();
+  });
+
+  it("итоги недели: с данными рисует плитки и AI-разбор", () => {
+    setupEmpty();
+    setQuery(api.digest.getMyWeeklyDigest, undefined, {
+      hasData: true,
+      trackedDays: 5,
+      weightStartKg: 80.0,
+      weightEndKg: 79.3,
+      weightDeltaKg: -0.7,
+      avgCalories: 2000,
+      avgProteinG: 120,
+      caloriePct: 91,
+      workoutCount: 3,
+      tonnageKg: 4000,
+      avgWaterMl: 2100,
+    });
+    renderWithRouter(<Progress />);
+
+    expect(screen.getByText("Итоги за 7 дней")).toBeInTheDocument();
+    // Плитки: дельта веса, тренировки с целью, активность.
+    expect(screen.getByText("-0.7 кг")).toBeInTheDocument();
+    expect(screen.getByText("из 3 за неделю")).toBeInTheDocument();
+    expect(screen.getByText("91%")).toBeInTheDocument();
+    expect(screen.getByText("5/7")).toBeInTheDocument();
+    // AI-разбор: похудение −0,7 кг → совет про белок.
+    expect(screen.getByText(/темп хороший/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Спросить коуча" }),
+    ).toBeInTheDocument();
+    // «На следующей неделе»: тренировки закрыты (3 из 3), белок 120 из 152 г
+    // → следующий шаг — прибавить белок.
+    expect(screen.getByText(/На следующей неделе/)).toBeInTheDocument();
+    expect(screen.getByText(/Увеличьте белок до 152 г/)).toBeInTheDocument();
+  });
+
+  it("итоги недели: без данных показывает подсказку начать", () => {
+    setupEmpty();
+    renderWithRouter(<Progress />);
+
+    expect(screen.getByText("Итоги за 7 дней")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Неделя начинается с первой записи/),
+    ).toBeInTheDocument();
   });
 });

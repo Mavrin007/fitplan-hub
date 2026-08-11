@@ -7,6 +7,17 @@ vi.mock("convex/react", () => import("@/test/convex-react-mock"));
 vi.mock("@/convex/_generated/api", () => import("@/test/convex-react-mock"));
 vi.mock("sonner", () => import("@/test/sonner-mock"));
 
+// useAuth() требует useConvexAuth/useAuthActions — их нет в дереве теста.
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({
+    isLoading: false,
+    isAuthenticated: true,
+    user: null,
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+  }),
+}));
+
 import { api, setQuery } from "@/test/convex-react-mock";
 import { profile, waterEntry } from "@/test/fixtures";
 import { lastNDays, todayKey } from "@/lib/dates";

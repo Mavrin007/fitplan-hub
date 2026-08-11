@@ -46,6 +46,8 @@ function setupMeals({ today = [], foods = [] }: { today?: MealEntry[]; foods?: F
   setQuery(api.profiles.getMyProfile, undefined, profile);
   setQuery(api.mealLog.getByDate, { date: todayKey() }, today);
   setQuery(api.foods.listMyFoods, {}, foods);
+  // По умолчанию тесты фото-анализа идут под Premium (гейт пропускает фото).
+  setQuery(api.premium.getMyAccess, undefined, { isPremium: true });
 }
 
 describe("Meals", () => {
@@ -494,6 +496,26 @@ describe("Meals", () => {
     ).toBeInTheDocument();
     expect(
       convexMock.mutationCalls.filter((c) => c.path === "mealLog.addEntries"),
+    ).toHaveLength(0);
+  });
+
+  it("без Premium фото-анализ открывает paywall-заглушку вместо загрузки", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    // Перекрываем premium-доступ: фото — премиум-фича.
+    setQuery(api.premium.getMyAccess, undefined, { isPremium: false });
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    const file = new File(["x"], "plate.png", { type: "image/png" });
+    await user.upload(within(dialog).getByLabelText(/Выбрать фото тарелки/), file);
+
+    // Вместо превью — paywall с честной заглушкой.
+    expect(await screen.findByText("KILO Premium")).toBeInTheDocument();
+    expect(screen.queryByAltText("Фото тарелки")).not.toBeInTheDocument();
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "photo.analyzeMealPhoto"),
     ).toHaveLength(0);
   });
 

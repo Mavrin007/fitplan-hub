@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { WorkoutMode } from "@/components/WorkoutMode";
+import { useTrack } from "@/hooks/use-track";
 import { EmptyState } from "@/components/empty-state";
 import { FitnessHero } from "@/components/illustrations";
 import { ChartCard, LegendChip } from "@/components/chart-card";
@@ -194,6 +195,7 @@ export default function Workouts() {
   const savePlan = useMutation(api.workouts.savePlan);
   const logWorkout = useMutation(api.workouts.logWorkout);
   const deleteLog = useMutation(api.workouts.deleteLog);
+  const track = useTrack();
 
   const [generating, setGenerating] = useState(false);
   const [trainingDay, setTrainingDay] = useState<WorkoutDay | null>(null);
@@ -375,7 +377,12 @@ export default function Workouts() {
         effort,
       });
       toast.success("Тренировка записана");
-      setTrainingDay(null);
+      // Не закрываем режим здесь: WorkoutMode после сохранения показывает
+      // сводку («Тренировка завершена») и сам зовёт onClose по «Готово».
+      void track("workout_completed", {
+        exercises: exercises.length,
+        sets: exercises.reduce((s, e) => s + e.sets, 0),
+      });
     } catch (err) {
       console.error("[Workouts] Ошибка сохранения тренировки:", err);
       toast.error("Не удалось записать тренировку");
@@ -703,7 +710,10 @@ export default function Workouts() {
                     {/* Главное действие — filled M3 кнопка */}
                     <Button
                       className="mt-3 w-full"
-                      onClick={() => setTrainingDay(day)}
+                      onClick={() => {
+                        track("workout_started", { focus: day.focus });
+                        setTrainingDay(day);
+                      }}
                     >
                       <Play className="size-4" />
                       Начать тренировку
@@ -884,9 +894,12 @@ export default function Workouts() {
           weekLabel={currentWeek?.label}
           logs={(logs ?? []).map((l) => ({
             date: l.date,
+            effort: l.effort ?? undefined,
             exercises: l.exercises.map((e) => ({
               name: e.name,
               weightKg: e.weightKg,
+              reps: e.reps,
+              rpe: e.rpe,
             })),
           }))}
           saving={savingLog}

@@ -96,6 +96,7 @@ const DEFAULT_TABLES = [
   "authAccounts", // привязанные провайдеры
   "authRefreshTokens",
   "authVerifiers",
+  "events", // product analytics (analytics.ts / day1Email.ts)
 ];
 
 export function makeConvexDb(

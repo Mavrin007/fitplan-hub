@@ -69,7 +69,16 @@ const runSavePlan = (
 const runLogWorkout = (
   logWorkout as unknown as {
     _handler: (
-      ctx: { db: ConvexDbMock },
+      ctx: {
+        db: ConvexDbMock;
+        scheduler?: {
+          runAfter: (
+            delayMs: number,
+            fn: unknown,
+            args: unknown,
+          ) => Promise<void>;
+        };
+      },
       args: {
         date: string;
         workoutName: string;
@@ -346,6 +355,55 @@ describe("logWorkout", () => {
       effort: "normal",
     });
     expect(doc.createdAt).toBeTypeOf("number");
+  });
+
+  it("первая тренировка с привязанной почтой планирует Day-1 письмо", async () => {
+    const { db, store } = makeConvexDb({
+      users: [
+        { _id: "user-1", _creationTime: 0, email: "u@example.com", isAnonymous: false },
+      ],
+    });
+    const scheduler = {
+      runAfter: vi.fn().mockResolvedValue(undefined),
+    };
+    await runLogWorkout({ db, scheduler }, VALID_LOG);
+    expect(store.workoutLogs).toHaveLength(1);
+    expect(scheduler.runAfter).toHaveBeenCalledTimes(1);
+    expect(scheduler.runAfter.mock.calls[0][0]).toBe(0);
+    expect(scheduler.runAfter.mock.calls[0][2]).toEqual({ userId: "user-1" });
+  });
+
+  it("повторная тренировка письмо не планирует", async () => {
+    const { db } = makeConvexDb({
+      users: [
+        { _id: "user-1", _creationTime: 0, email: "u@example.com", isAnonymous: false },
+      ],
+      workoutLogs: [
+        {
+          _id: "log-1",
+          _creationTime: 0,
+          userId: "user-1",
+          date: "2026-08-03",
+          workoutName: "Первая",
+          exercises: [],
+          createdAt: 1,
+        },
+      ],
+    });
+    const scheduler = {
+      runAfter: vi.fn().mockResolvedValue(undefined),
+    };
+    await runLogWorkout({ db, scheduler }, VALID_LOG);
+    expect(scheduler.runAfter).not.toHaveBeenCalled();
+  });
+
+  it("гость без почты письмо не планирует", async () => {
+    const { db } = makeConvexDb({
+      users: [{ _id: "user-1", _creationTime: 0, isAnonymous: true }],
+    });
+    const scheduler = { runAfter: vi.fn().mockResolvedValue(undefined) };
+    await runLogWorkout({ db, scheduler }, VALID_LOG);
+    expect(scheduler.runAfter).not.toHaveBeenCalled();
   });
 });
 

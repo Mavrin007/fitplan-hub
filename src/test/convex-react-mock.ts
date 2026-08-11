@@ -68,6 +68,7 @@ export const api = {
     listMyWater: ref("water.listMyWater"),
   },
   activity: { getActivityDays: ref("activity.getActivityDays") },
+  digest: { getMyWeeklyDigest: ref("digest.getMyWeeklyDigest") },
   guestStats: {
     hasMyData: ref("guestStats.hasMyData"),
     countMyData: ref("guestStats.countMyData"),
@@ -87,6 +88,8 @@ export const api = {
     checkConnection: ref("assistant.checkConnection"),
   },
   assistantLimits: { getMyLimit: ref("assistantLimits.getMyLimit") },
+  analytics: { track: ref("analytics.track") },
+  premium: { getMyAccess: ref("premium.getMyAccess") },
   photo: { analyzeMealPhoto: ref("photo.analyzeMealPhoto") },
   rateLimit: { consumeRateLimitAction: ref("rateLimit.consumeRateLimitAction") },
 };

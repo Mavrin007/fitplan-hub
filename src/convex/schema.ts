@@ -104,6 +104,10 @@ export const loggedExerciseValidator = v.object({
   sets: v.number(),
   reps: v.number(),
   weightKg: v.number(),
+  // Субъективная оценка подхода (1–10) — мягкая миграция: старые логи без
+  // поля читаются нормально (schemaValidation: false), а «Рекомендация KILO»
+  // использует RPE, когда он есть, иначе — усилие тренировки.
+  rpe: v.optional(v.number()),
 });
 
 // Поля таблиц вынесены в отдельные валидаторы: единый источник правды для
@@ -286,6 +290,22 @@ const schema = defineSchema(
       totalTokens: v.optional(v.number()), // накопленный расход токенов за день (мягкая миграция: ?? 0)
       lastMessageAt: v.number(), // время последнего сообщения (для интервала)
     }).index("by_user_day", ["userId", "day"]),
+
+    // Product analytics events (минимальная event-модель без внешней
+    // платформы): одно событие = одна строка. Имена — из allowlist в
+    // analytics.ts (track), метаданные — только простые значения без
+    // персональных данных (email/JWT не пишем). Retention-метрики считаются
+    // из этой таблицы чистыми функциями в lib/retention.ts.
+    events: defineTable({
+      userId: v.id("users"),
+      name: v.string(),
+      ts: v.number(),
+      meta: v.optional(
+        v.record(v.string(), v.union(v.string(), v.number(), v.boolean())),
+      ),
+    })
+      .index("by_user_ts", ["userId", "ts"])
+      .index("by_ts", ["ts"]),
 
     // Completed workout sessions.
     workoutLogs: defineTable({

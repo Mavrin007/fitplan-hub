@@ -2,6 +2,10 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery, useAction } from "convex/react";
 import { useMemo, useState } from "react";
+import { useTrack } from "@/hooks/use-track";
+import { usePremium } from "@/hooks/use-premium";
+import { PremiumDialog } from "@/components/premium-dialog";
+import type { PremiumFeature } from "@/lib/premium";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -122,6 +126,19 @@ export default function Meals() {
   const addFood = useMutation(api.foods.addFood);
   const deleteFood = useMutation(api.foods.deleteFood);
   const analyzePhoto = useAction(api.photo.analyzeMealPhoto);
+  const track = useTrack();
+  const premium = usePremium();
+  // Paywall-заглушка: открывается на premium-фиче (сейчас — фото-анализ).
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallFeature, setPaywallFeature] = useState<PremiumFeature | undefined>();
+
+  /** Открыть paywall для premium-фичи + зафиксировать событие. */
+  const openPaywall = (feature: PremiumFeature) => {
+    setPaywallFeature(feature);
+    setPaywallOpen(true);
+    track("premium_feature_clicked", { feature });
+    track("paywall_viewed", { feature });
+  };
 
   // Add/edit entry dialog state
   const [dialogMeal, setDialogMeal] = useState<MealType | null>(null);
@@ -238,6 +255,12 @@ export default function Meals() {
   const handlePhotoFile = (file: File | undefined) => {
     setPhotoError(null);
     if (!file) return;
+    // Фото-анализ — Premium-фича: показываем paywall-заглушку (оплата ещё
+    // не подключена), а не «тихо ломаем» сценарий.
+    if (!premium.canUse("photo_food_analysis")) {
+      openPaywall("photo_food_analysis");
+      return;
+    }
     if (!file.type.startsWith("image/")) {
       setPhotoError("Выберите файл изображения (JPEG/PNG/WebP).");
       return;
@@ -257,6 +280,7 @@ export default function Meals() {
    *  ошибка дневника не маскировалась под «не распознал фото». */
   const handleAnalyzePhoto = async () => {
     if (!dialogMeal || !photoDataUrl) return;
+    track("photo_analysis_started");
     setAnalyzingPhoto(true);
     setPhotoError(null);
     let items: Awaited<ReturnType<typeof analyzePhoto>>["items"] = [];
@@ -295,6 +319,8 @@ export default function Meals() {
         })),
       });
       toast.success(`Распознано: ${items.length} ${pluralRecords(items.length)} — добавлено в дневник`);
+      track("photo_analysis_completed", { items: items.length });
+      track("meal_added", { count: items.length, source: "photo" });
       closeDialog();
     } catch (err) {
       console.error("[Meals] Ошибка сохранения распознанного фото:", err);
@@ -366,6 +392,7 @@ export default function Meals() {
       toast.success(
         `Скопировано записей: ${entries.length} из ${shortDate(copyFromDate)}`,
       );
+      track("meal_added", { count: entries.length, source: "copy_day" });
     } catch (err) {
       console.error(
         "[Meals] Ошибка копирования записей из " + copyFromDate + " в сегодня:",
@@ -406,6 +433,10 @@ export default function Meals() {
         fat: Math.round(food.fat * ratio * 10) / 10,
       });
       toast.success(`${food.name} — добавлено`);
+      track("meal_added", {
+        calories: Math.round(food.calories * ratio),
+        mealType: dialogMeal,
+      });
       closeDialog();
     } catch (err) {
       console.error("[Meals] Ошибка добавления продукта из библиотеки:", err);
@@ -439,6 +470,7 @@ export default function Meals() {
         fat: f,
       });
       toast.success(`${customName.trim()} — добавлено`);
+      track("meal_added", { calories: cals, mealType: dialogMeal, source: "custom" });
       closeDialog();
     } catch (err) {
       console.error("[Meals] Ошибка добавления своего продукта:", err);
@@ -499,6 +531,7 @@ export default function Meals() {
         ),
       });
       toast.success("План на день добавлен в дневник");
+      track("meal_added", { count: plan.meals.length, source: "plan" });
       setShowPlan(false);
     } catch (err) {
       console.error("[Meals] Ошибка добавления плана на день в дневник:", err);
@@ -1346,6 +1379,10 @@ export default function Meals() {
                 {photoError && (
                   <p className="text-[11px] text-destructive">{photoError}</p>
                 )}
+                <p className="text-[10px] leading-relaxed text-muted-foreground/80">
+                  Фото используется только для распознавания блюда и расчёта КБЖУ —
+                  оно не сохраняется.
+                </p>
               </div>
             )}
 
@@ -1536,6 +1573,13 @@ export default function Meals() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Paywall-заглушка для Premium-фич (сейчас — фото-анализ еды). */}
+      <PremiumDialog
+        open={paywallOpen}
+        onOpenChange={setPaywallOpen}
+        feature={paywallFeature}
+      />
     </div>
   );
 }

@@ -41,7 +41,17 @@ async function markSets(
 
 function renderMode(
   overrides: {
-    logs?: { date: string; exercises: { name: string; weightKg: number }[] }[];
+    logs?: {
+      date: string;
+      effort?: "easy" | "normal" | "hard";
+      exercises: {
+        name: string;
+        weightKg: number;
+        reps?: number;
+        rpe?: number;
+        sets?: number;
+      }[];
+    }[];
     saving?: boolean;
   } = {},
 ) {
@@ -96,6 +106,35 @@ describe("WorkoutMode", () => {
         content !== "",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("«прошлый раз» показывает вес × повторы, если они есть в логе", () => {
+    renderMode({
+      logs: [
+        {
+          date: "2026-07-20",
+          exercises: [{ name: "Жим гантелей", weightKg: 22.5, reps: 10 }],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByText((content, el) =>
+        el?.textContent === "прошлый раз: 22.5 × 10" &&
+        content !== "",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("отметка подхода запускает таймер отдыха с role=timer", async () => {
+    const user = userEvent.setup();
+    renderMode();
+
+    await markSets(user, "Жим гантелей", 1);
+    // Доступность: таймер объявлен как timer и озвучивается скринридером.
+    const timer = screen.getByRole("timer", { name: "Таймер отдыха" });
+    expect(timer).toHaveTextContent("1:30");
+    expect(timer).toHaveAttribute("aria-live", "polite");
   });
 
   it("отметка подходов ведёт прогресс и запускает таймер отдыха", async () => {
@@ -186,6 +225,65 @@ describe("WorkoutMode", () => {
     const { onClose } = renderMode();
 
     await user.click(screen.getByRole("button", { name: "Закрыть режим тренировки" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("показывает рекомендацию KILO по прошлому логу (RPE ≤ 7 → +2.5 кг)", async () => {
+    const user = userEvent.setup();
+    renderMode({
+      logs: [
+        {
+          date: "2026-07-20",
+          effort: "easy",
+          exercises: [
+            { name: "Жим гантелей", weightKg: 20, reps: 10, rpe: 7 },
+          ],
+        },
+      ],
+    });
+
+    // План: 3 × 8-12 → рекомендация 22.5 кг × 8–12 с обоснованием.
+    const rec = within(exerciseSection("Жим гантелей"));
+    // Узел содержит и суффикс (« · добавь 2.5 кг») — матчим по регэкспу.
+    expect(rec.getByText(/Рекомендация KILO/)).toBeInTheDocument();
+    // Рекомендуемая нагрузка: 22.5 кг × 8–12 (текст собран в одном узле).
+    expect(
+      rec.getByText((content, el) =>
+        el?.textContent === "22.5 кг × 8–12" && content !== "",
+      ),
+    ).toBeInTheDocument();
+    expect(rec.getByText(/RPE 7/)).toBeInTheDocument();
+
+    // «Применить» подставляет вес в поле ввода.
+    await user.click(rec.getByRole("button", { name: /Применить 22\.5 кг/ }));
+    expect(screen.getByLabelText("Вес для Жим гантелей")).toHaveValue("22.5");
+  });
+
+  it("без данных прошлой тренировки рекомендация не показывается", () => {
+    renderMode();
+    expect(screen.queryByText("Рекомендация KILO")).not.toBeInTheDocument();
+  });
+
+  it("после сохранения показывает сводку, «Готово» закрывает режим", async () => {
+    const user = userEvent.setup();
+    const { onSave, onClose } = renderMode();
+
+    await markSets(user, "Жим гантелей", 3);
+    await markSets(user, "Подтягивания", 3);
+    await user.click(screen.getByRole("button", { name: /Завершить тренировку/ }));
+    await user.click(screen.getByRole("button", { name: /Норм/ }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Тренировка завершена")).toBeInTheDocument(),
+    );
+    expect(onSave).toHaveBeenCalledTimes(1);
+    // Объём: 20 кг × 8 × 3 = 480 кг (скоуп на карточку «Объём»).
+    const volumeBox = screen.getByText("Объём").parentElement as HTMLElement;
+    expect(within(volumeBox).getByText(/^480/)).toBeInTheDocument();
+    // Без истории сравнений нет.
+    expect(screen.queryByText(/к прошлой тренировке/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

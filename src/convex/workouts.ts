@@ -1,4 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import {
@@ -131,11 +132,39 @@ export const logWorkout = mutation({
     }
     await consumeRateLimit(ctx, `${userId}:workoutLog`, RATE_LIMITS.workoutLog);
 
-    return await ctx.db.insert("workoutLogs", {
+    // Первая тренировка пользователя? Планируем Day-1 письмо (fire-and-forget):
+    // сбой отправки/планирования не должен ломать сохранение тренировки.
+    const firstWorkout = await ctx.db
+      .query("workoutLogs")
+      .withIndex("by_user_date", (q) => q.eq("userId", userId))
+      .first();
+
+    const logId = await ctx.db.insert("workoutLogs", {
       ...args,
       userId,
       createdAt: Date.now(),
     });
+
+    if (firstWorkout === undefined) {
+      const me = await ctx.db.get(userId);
+      if (
+        me &&
+        typeof me.email === "string" &&
+        me.email.length > 0 &&
+        !me.isAnonymous
+      ) {
+        try {
+          await ctx.scheduler.runAfter(0, internal.day1Email.sendDay1, {
+            userId,
+          });
+        } catch (err) {
+          // Письмо не критично — тренировка уже сохранена.
+          console.error("[day1] не удалось запланировать письмо:", err);
+        }
+      }
+    }
+
+    return logId;
   },
 });
 

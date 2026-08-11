@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
+import { useTrack } from "@/hooks/use-track";
 import { AssistantScene } from "@/components/illustrations";
 
 interface ChatMessage {
@@ -33,9 +34,11 @@ const STORAGE_KEY = "kilo-assistant-history";
 const OPEN_EVENT = "kilo:open-assistant";
 
 const QUICK_ACTIONS = [
-  "Сколько мне нужно калорий и макросов в день?",
-  "Составь меню на сегодня по моим целям",
-  "Какую тренировку мне сделать сегодня?",
+  "Что мне съесть сегодня?",
+  "Какую тренировку сделать сегодня?",
+  "Как улучшить мой результат?",
+  "Почему вес стоит?",
+  "Что делать сегодня?",
 ];
 
 /** Страховка: убирает из ответа любые остатки служебных JSON-блоков
@@ -64,6 +67,7 @@ export function AssistantChat() {
   const runChat = useAction(api.assistant.chat);
   const checkConnection = useAction(api.assistant.checkConnection);
   const limit = useQuery(api.assistantLimits.getMyLimit);
+  const track = useTrack();
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const location = useLocation();
 
@@ -75,6 +79,9 @@ export function AssistantChat() {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     storageKey ? loadHistory(storageKey) : [],
   );
+  // Контекстное приветствие от страницы, открывшей чат (например, «Я вижу твой
+  // прогресс за сегодня…» из Overview). Без него — стандартное интро.
+  const [greeting, setGreeting] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -82,11 +89,18 @@ export function AssistantChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Открытие из любой точки приложения (сайдбар, CTA-карточки).
+  // Открытие из любой точки приложения (сайдбар, CTA-карточки). Страница может
+  // передать контекст дня в detail.greeting — тогда интро чата станет личным.
   useEffect(() => {
-    const handler = () => setOpen(true);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ greeting?: string }>).detail;
+      if (detail?.greeting) setGreeting(detail.greeting);
+      setOpen(true);
+      track("ai_opened");
+    };
     window.addEventListener(OPEN_EVENT, handler);
     return () => window.removeEventListener(OPEN_EVENT, handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // При смене пользователя (вход/выход/переключение аккаунта) загружаем
@@ -156,6 +170,7 @@ export function AssistantChat() {
     setMessages(next);
     setInput("");
     setBusy(true);
+    track("ai_message_sent");
     try {
       const res = await runChat({
         messages: next.map((m) => ({ role: m.role, content: m.content })),
@@ -292,10 +307,15 @@ export function AssistantChat() {
                     <AssistantScene className="mx-auto h-20 w-32" />
                     <p className="label-overline mt-2 text-muted-foreground">Кило AI</p>
                     <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      Спросите про калории, макросы, план питания или тренировки.
-                      <br />
-                      Напишите, что съели или как потренировались — я запишу это в
-                      дневник.
+                      {greeting ?? (
+                        <>
+                          Спросите про калории, макросы, план питания или
+                          тренировки.
+                          <br />
+                          Напишите, что съели или как потренировались — я запишу
+                          это в дневник.
+                        </>
+                      )}
                     </p>
                   </div>
                 )}
@@ -404,7 +424,10 @@ export function AssistantChat() {
                 <button
                   key={q}
                   type="button"
-                  onClick={() => void send(q)}
+                  onClick={() => {
+                    track("ai_quick_action_used");
+                    void send(q);
+                  }}
                   className="rounded-md border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 >
                   {q}
@@ -452,7 +475,10 @@ export function AssistantChat() {
           навигацией на мобильных (bottom-20) и у края на десктопе (lg:bottom-5) */}
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) track("ai_opened");
+          setOpen(!open);
+        }}
         className={cn(
           "fixed bottom-20 right-4 z-[80] flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium shadow-lg transition-all hover:scale-[1.03] active:scale-[0.97] sm:right-6 lg:bottom-5",
           open ? "bg-background text-foreground" : "bg-foreground text-background",

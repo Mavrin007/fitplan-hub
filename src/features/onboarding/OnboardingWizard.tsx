@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import { useMutation } from "convex/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTrack } from "@/hooks/use-track";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,6 +163,7 @@ export function OnboardingWizard({
   persistSkip?: boolean;
 }) {
   const upsertProfile = useMutation(api.profiles.upsertProfile);
+  const track = useTrack();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +238,8 @@ export function OnboardingWizard({
         trainingStyle: form.trainingStyle,
       });
       toast.success(initial ? "Профиль обновлён — план пересобран" : "Профиль создан — план готов");
+      // Первое заполнение профиля = завершённый онбординг (часть активации).
+      if (!initial) track("onboarding_completed");
       onComplete();
     } catch (err) {
       console.error(err);
@@ -265,6 +269,13 @@ export function OnboardingWizard({
     if (step < STEPS.length - 1) setStep(step + 1);
     else void handleFinish();
   };
+
+  // Старт онбординга — первый шаг воронки. Из Профиля (initial задан) это
+  // редактирование, а не онбординг — воронку не засоряем.
+  useEffect(() => {
+    if (!initial) track("onboarding_started");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const Step = STEPS[step];
   const StepIcon = Step.icon;

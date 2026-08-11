@@ -54,6 +54,20 @@ export default function Privacy() {
           </section>
 
           <section>
+            <h2 className="text-lg font-semibold">ИИ-анализ и фото блюд</h2>
+            <p className="mt-2 text-sm text-foreground/90">
+              Фото тарелки отправляется в ИИ-модель Gemini Vision (Google) только
+              для распознавания блюда и расчёта КБЖУ. Фото не сохраняется: после
+              анализа оно удаляется, а в дневник попадают лишь распознанные
+              калории и макросы. Текстовые запросы к ассистенту обрабатывает та же
+              ИИ-модель — не отправляйте в чат данные, которые не нужны для
+              ответа (например, документы или пароли). Ответы ИИ носят
+              рекомендательный характер и не заменяют консультацию врача или
+              диетолога.
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-lg font-semibold">Ваши права (GDPR)</h2>
             <div className="mt-3 space-y-3">
               <div className="flex items-start gap-3 rounded-lg border border-border/60 p-3">

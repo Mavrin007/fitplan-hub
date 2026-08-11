@@ -972,6 +972,10 @@ export default function Landing() {
             <Link to="/privacy" className="underline underline-offset-4 transition hover:text-foreground">
               Политика конфиденциальности
             </Link>
+            <span aria-hidden>·</span>
+            <Link to="/terms" className="underline underline-offset-4 transition hover:text-foreground">
+              Условия
+            </Link>
             <span>© {new Date().getFullYear()}</span>
           </p>
         </div>

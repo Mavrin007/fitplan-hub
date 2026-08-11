@@ -4,22 +4,17 @@ import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { animate, motion } from "framer-motion";
 import { WATER_ML_PER_KG, computeTargets, waterGoal } from "@/lib/nutrition";
-import { projectGoal } from "@/lib/projection";
 import {
   todayKey,
   prettyDate,
-  shortDate,
   lastNDays,
   addDays,
   toDateKey,
   pluralDays,
-  pluralRecords,
 } from "@/lib/dates";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { MacroRing } from "@/components/macro-ring";
-import { RingProgress } from "@/components/rings/RingProgress";
+import { ProgressRing } from "@/components/progress-ring";
 import {
   CALORIES_RING,
   TRAINING_RING,
@@ -27,11 +22,13 @@ import {
 } from "@/components/rings/colors";
 import { PageAurora } from "@/components/page-aurora";
 import { PageLoading } from "@/components/page-loading";
-import { ChartScene } from "@/components/illustrations";
 import { EmptyState } from "@/components/empty-state";
+import { useAuth } from "@/hooks/use-auth";
+import { useTrack } from "@/hooks/use-track";
 import {
   Activity,
-  ArrowRight,
+  Check,
+  ChevronRight,
   Droplets,
   Flame,
   Minus,
@@ -39,11 +36,20 @@ import {
   Sparkles,
   Target,
   UtensilsCrossed,
+  type LucideIcon,
 } from "lucide-react";
-import { UNITS } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  buildCoachAdvice,
+  buildCoachGreeting,
+  buildTodayChecklist,
+  computeTodayScore,
+  liters,
+  type ChecklistItem,
+  type TodayInput,
+} from "@/features/dashboard/today";
 
-const LOOKBACK_DAYS = 84; // 12 недель — горизонт календаря активности
+const LOOKBACK_DAYS = 84; // 12 недель — горизонт серии/активности
 
 /** Каскадное появление секций (родитель раздаёт staggerChildren). */
 const fadeUp = {
@@ -60,13 +66,16 @@ function formatPct(value: number, target: number) {
   return Math.min(100, Math.round((value / target) * 100));
 }
 
-/** Цвет ячейки тепловой карты по числу записей за день. */
-function activityLevel(count: number): string {
-  if (count <= 0) return "bg-muted";
-  if (count <= 2) return "bg-brand/25";
-  if (count <= 4) return "bg-brand/45";
-  if (count <= 6) return "bg-brand/70";
-  return "bg-brand";
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Доброй ночи";
+  if (h < 12) return "Доброе утро";
+  if (h < 18) return "Добрый день";
+  return "Добрый вечер";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /**
@@ -103,137 +112,123 @@ function CountUp({
   );
 }
 
-/** Тепловая карта активности за 12 недель (в стиле GitHub). */
-function ActivityCalendar({
-  activityMap,
+/** Малое кольцо-привычка: процент в центре, подпись и уточнение внизу. */
+function RingMini({
+  label,
+  pct,
+  note,
+  color,
+  delay = 0,
 }: {
-  activityMap: Map<string, number>;
+  label: string;
+  pct: number;
+  note?: string;
+  color: string;
+  delay?: number;
 }) {
-  const today = todayKey();
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <ProgressRing value={pct} max={100} size={86} stroke={7} color={color} delay={delay}>
+        <span className="num text-base font-semibold">{pct}%</span>
+      </ProgressRing>
+      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
+      {note && <span className="num text-xs text-muted-foreground">{note}</span>}
+    </div>
+  );
+}
 
-  const weeks = useMemo(() => {
-    const start = addDays(new Date(), -(LOOKBACK_DAYS - 1));
-    const dow = (start.getDay() + 6) % 7; // Понедельник = 0
-    const monday = addDays(start, -dow);
+/** Строка чек-листа: состояние, подпись, уточнение, переход на экран. */
+function ChecklistRow({ item }: { item: ChecklistItem }) {
+  const inner = (
+    <>
+      <span
+        className={cn(
+          "flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
+          item.done
+            ? "border-transparent bg-brand text-brand-foreground"
+            : "border-border text-transparent",
+        )}
+      >
+        <Check className="size-3.5" strokeWidth={3} />
+      </span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-sm",
+          item.done
+            ? "text-muted-foreground line-through decoration-muted-foreground/40"
+            : "font-medium text-foreground",
+        )}
+      >
+        {item.label}
+      </span>
+      {item.detail && (
+        <span className="num shrink-0 text-xs text-muted-foreground">
+          {item.detail}
+        </span>
+      )}
+      {item.href && (
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+      )}
+    </>
+  );
 
-    const cells: { key: string; count: number; isToday: boolean }[] = [];
-    for (let i = 0; i < LOOKBACK_DAYS + dow; i++) {
-      const d = addDays(monday, i);
-      const key = toDateKey(d);
-      cells.push({
-        key,
-        count: activityMap.get(key) ?? 0,
-        isToday: key === today,
-      });
-    }
+  const rowClass =
+    "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-secondary-container/40";
+  const label = `${item.label}, ${item.done ? "выполнено" : "осталось"}`;
 
-    const grouped: (typeof cells)[] = [];
-    for (let i = 0; i < cells.length; i += 7) {
-      grouped.push(cells.slice(i, i + 7));
-    }
-    return grouped;
-  }, [activityMap, today]);
+  if (!item.href) {
+    return (
+      <div className={rowClass} aria-label={label}>
+        {inner}
+      </div>
+    );
+  }
+  return (
+    <Link to={item.href} className={rowClass} aria-label={label}>
+      {inner}
+    </Link>
+  );
+}
 
-  // Подписи месяцев: показываем месяц первой ячейки недели, если он сменился.
-  const monthLabels = useMemo(() => {
-    let prev = "";
-    return weeks.map((week) => {
-      const first = week[0];
-      if (!first) return "";
-      const [y, m] = first.key.split("-").map(Number);
-      const label = new Date(y, m - 1, 1).toLocaleDateString("ru-RU", {
-        month: "short",
-      });
-      const shown = label === prev ? "" : label;
-      prev = label;
-      return shown;
-    });
-  }, [weeks]);
-
+/** Мини-статистика недели: иконка, число, подпись. */
+function WeekStat({
+  icon: Icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  hint: string;
+}) {
   return (
     <div className="min-w-0">
-      {/* Месяцы */}
-      <div className="flex gap-1">
-        <div className="mr-1 w-5 shrink-0" />
-        {monthLabels.map((m, i) => (
-          <div
-            key={i}
-            className="w-2.5 text-center text-[8px] leading-3 text-muted-foreground"
-          >
-            {m}
-          </div>
-        ))}
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Icon className="size-3.5 shrink-0 text-brand" />
+        <span className="text-[10px] uppercase tracking-[0.14em]">{label}</span>
       </div>
-
-      {/* Сетка недель — ячейки «проявляются» каскадом */}
-      <div className="mt-1 flex gap-1">
-        <div className="mr-1 flex w-5 shrink-0 flex-col gap-1">
-          {["Пн", "", "Ср", "", "Пт", ""].map((label, i) => (
-            <div
-              key={i}
-              className="flex h-2.5 items-center text-[8px] leading-none text-muted-foreground"
-            >
-              {label}
-            </div>
-          ))}
-        </div>
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex flex-col gap-1">
-            {week.map((c, i) => (
-              <motion.div
-                key={c.key}
-                title={
-                  c.count > 0
-                    ? `${shortDate(c.key)} — ${c.count} ${pluralRecords(c.count)}`
-                    : `${shortDate(c.key)} — нет записей`
-                }
-                role="img"
-                aria-label={
-                  c.count > 0
-                    ? `${shortDate(c.key)}, ${c.count} ${pluralRecords(c.count)}`
-                    : `${shortDate(c.key)}, нет записей`
-                }
-                initial={{ opacity: 0, scale: 0.4 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{
-                  delay: Math.min(wi * 0.025 + i * 0.01, 0.7),
-                  duration: 0.3,
-                  ease: "easeOut",
-                }}
-                className={cn(
-                  "size-2.5 rounded-[3px] transition-colors",
-                  activityLevel(c.count),
-                  c.isToday && "ring-1 ring-brand/60",
-                )}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {/* Легенда */}
-      <div className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-        <span>Меньше</span>
-        {[0, 1, 3, 5, 7].map((l) => (
-          <div key={l} className={cn("size-2.5 rounded-[3px]", activityLevel(l))} />
-        ))}
-        <span>Больше</span>
-      </div>
+      <p className="num mt-1.5 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</p>
     </div>
   );
 }
 
 export default function Overview() {
+  const { user } = useAuth();
   const profile = useQuery(api.profiles.getMyProfile);
   const todayLog = useQuery(api.mealLog.getByDate, { date: todayKey() });
-  // Тренд/прогнозу нужны последние замеры, недельному счётчику — логи
-  // последних месяцев: лимиты вместо полной выгрузки всей истории.
+  // Тренду нужны последние замеры, недельному счётчику — логи: лимиты
+  // вместо полной выгрузки всей истории.
   const weights = useQuery(api.weightEntries.listMyWeights, { limit: 90 });
   const workoutLogs = useQuery(api.workouts.listLogs, { limit: 200 });
   const water = useQuery(api.water.getByDate, { date: todayKey() });
   const addWater = useMutation(api.water.addWater);
+  const track = useTrack();
 
-  // Дата-диапазон для календаря активности (локальная зона, понедельник→сегодня)
+  // Диапазон для серии активности (локальная зона, понедельник→сегодня).
   const range = useMemo(() => {
     const keys = lastNDays(LOOKBACK_DAYS);
     return { from: keys[0], to: keys[keys.length - 1] };
@@ -243,30 +238,17 @@ export default function Overview() {
   const targets = profile ? computeTargets(profile) : null;
   const targetWeight = profile?.targetWeightKg ?? null;
 
-  // Прогноз достижения целевого веса (для карточки «Динамика веса»).
-  const overviewProjection = useMemo(() => {
-    if (!targetWeight) return null;
-    return projectGoal(
-      (weights ?? []).map((w) => ({ date: w.date, weightKg: w.weightKg })),
-      targetWeight,
-    );
-  }, [weights, targetWeight]);
-
   const calories = (todayLog ?? []).reduce((s, e) => s + e.calories, 0);
   const protein = (todayLog ?? []).reduce((s, e) => s + e.protein, 0);
-  const carbs = (todayLog ?? []).reduce((s, e) => s + e.carbs, 0);
-  const fat = (todayLog ?? []).reduce((s, e) => s + e.fat, 0);
 
   const calPct = targets ? formatPct(calories, targets.calories) : 0;
-  // Перебор калорий: на сколько процентов превысили цель (для кольца).
   const overCalPct =
     targets && calories > targets.calories
       ? ((calories / targets.calories) - 1) * 100
       : 0;
   const isCalOver = overCalPct > 0;
 
-  // Вода: цель ~33 мл на кг веса (общий хелпер из lib/nutrition);
-  // без профиля — дефолт 2 л.
+  // Вода: цель ~33 мл на кг веса; без профиля — дефолт 2 л.
   const waterTarget = profile ? waterGoal(profile.weightKg) : 2000;
   const waterMl = water?.amountMl ?? 0;
   const waterPct = formatPct(waterMl, waterTarget);
@@ -284,18 +266,52 @@ export default function Overview() {
     }
   };
 
-  const activityMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const a of activity ?? []) m.set(a.date, a.count);
-    return m;
-  }, [activity]);
+  // Недельный счётчик тренировок (Пн–вс текущей недели) и «была ли сегодня».
+  const now = new Date();
+  const dayOfWeek = (now.getDay() + 6) % 7; // Monday = 0
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dayOfWeek);
+  const weekStart = toDateKey(monday);
+  const today = todayKey();
+  const workoutsThisWeek = (workoutLogs ?? []).filter(
+    (l) => l.date >= weekStart,
+  ).length;
+  const workoutToday = (workoutLogs ?? []).some((l) => l.date === today);
 
-  /** Текущая серия: подряд активных дней, оканчивающихся сегодня
-   *  (если сегодня ещё пусто — вчера). */
+  const breakfast = (todayLog ?? []).some((e) => e.mealType === "breakfast");
+  const lunch = (todayLog ?? []).some((e) => e.mealType === "lunch");
+  const dinner = (todayLog ?? []).some((e) => e.mealType === "dinner");
+
+  const weightLoggedThisWeek = (weights ?? []).some(
+    (w) => w.date >= weekStart,
+  );
+  const weightTrend = [...(weights ?? [])]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-7);
+  const lastWeight = weightTrend.length
+    ? weightTrend[weightTrend.length - 1].weightKg
+    : null;
+  // Δ веса за ~неделю: последний замер минус замер старше 7 дней (если есть).
+  const weightDelta = useMemo(() => {
+    if (!weights || weights.length === 0) return null;
+    const sorted = [...weights].sort((a, b) => a.date.localeCompare(b.date));
+    const last = sorted[sorted.length - 1];
+    const weekAgo = toDateKey(addDays(new Date(), -7));
+    let prev: (typeof sorted)[number] | null = null;
+    for (let i = sorted.length - 2; i >= 0; i--) {
+      if (sorted[i].date <= weekAgo) {
+        prev = sorted[i];
+        break;
+      }
+    }
+    return prev ? last.weightKg - prev.weightKg : null;
+  }, [weights]);
+
+  // Текущая серия активных дней (из календаря активности).
   const streak = useMemo(() => {
     if (!activity) return 0;
     const active = new Set(activity.map((a) => a.date));
-    const days = lastNDays(400); // от сегодня вглубь
+    const days = lastNDays(400);
     let n = 0;
     let started = false;
     for (let i = days.length - 1; i >= 0; i--) {
@@ -315,83 +331,113 @@ export default function Overview() {
     return n;
   }, [activity]);
 
-  /** Лучшая серия за горизонт календаря (12 недель). */
-  const bestStreak = useMemo(() => {
-    if (!activity) return 0;
-    const active = new Set(activity.map((a) => a.date));
-    const days = lastNDays(LOOKBACK_DAYS);
-    let best = 0;
-    let cur = 0;
-    for (const d of days) {
-      if (active.has(d)) {
-        cur++;
-        best = Math.max(best, cur);
-      } else {
-        cur = 0;
-      }
-    }
-    return best;
-  }, [activity]);
-
-  // Weight trend: last 7 entries, oldest first
-  const weightTrend = [...(weights ?? [])]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-7);
-
-  // Workouts this week (Mon-Sun of current week), local timezone
-  const now = new Date();
-  const dayOfWeek = (now.getDay() + 6) % 7; // Monday = 0
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - dayOfWeek);
-  const weekStart = toDateKey(monday);
-  const workoutsThisWeek = (workoutLogs ?? []).filter(
-    (l) => l.date >= weekStart,
-  ).length;
-
-  // Три кольца героя в стиле Apple Fitness: калории, тренировки за неделю
-  // и вода. Количество/состав колец — просто длина массива: композит не знает
-  // про конкретные метрики.
-  const ringData = useMemo(
-    () => [
-      {
-        id: "calories",
-        label: "Калории",
-        value: calories,
-        max: targets?.calories ?? 1,
-        unit: UNITS.kcal,
-        color: CALORIES_RING,
-      },
-      {
-        id: "training",
-        label: "Тренировки",
-        value: workoutsThisWeek,
-        max: profile?.preferredTrainingDays ?? 3,
-        unit: "за нед.",
-        color: TRAINING_RING,
-      },
-      {
-        id: "water",
-        label: "Вода",
-        value: waterMl,
-        max: waterTarget,
-        unit: "л",
-        color: WATER_RING,
-        // Литры в центре деталей: «2,3 / 3 л» вместо «2300 / 3000 мл».
-        display: (v: number) =>
-          (v / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 }),
-      },
-    ],
-    // Зависимости — примитивы, а не объект targets (он пересоздаётся каждый
-    // рендер и ломал бы memo(Ring)).
+  /** Все цифры дня — единый вход для оценки, чек-листа и коуча. */
+  const todayInput: TodayInput = useMemo(
+    () => ({
+      calories,
+      calorieTarget: targets?.calories ?? 0,
+      protein,
+      proteinTarget: targets?.protein ?? 0,
+      waterMl,
+      waterTarget,
+      workoutsThisWeek,
+      trainingTarget: profile?.preferredTrainingDays ?? 3,
+      workoutToday,
+      meals: { breakfast, lunch, dinner },
+      weightLoggedThisWeek,
+    }),
     [
       calories,
       targets?.calories,
-      workoutsThisWeek,
-      profile?.preferredTrainingDays,
+      protein,
+      targets?.protein,
       waterMl,
       waterTarget,
+      workoutsThisWeek,
+      profile?.preferredTrainingDays,
+      workoutToday,
+      breakfast,
+      lunch,
+      dinner,
+      weightLoggedThisWeek,
     ],
   );
+
+  const todayScore = useMemo(() => computeTodayScore(todayInput), [todayInput]);
+  const checklist = useMemo(() => buildTodayChecklist(todayInput), [todayInput]);
+  const coach = useMemo(() => buildCoachAdvice(todayInput), [todayInput]);
+
+  const doneCount = checklist.filter((i) => i.done).length;
+  // «День закрыт» — все привычки выполнены: повод для спокойной, без
+  // конфетти, celebration-подсветки (свечение + пружинная галочка).
+  const dayComplete = checklist.length > 0 && doneCount === checklist.length;
+
+  // Имя для приветствия: name профиля, иначе локальная часть email.
+  const firstName = useMemo(() => {
+    const raw =
+      user?.name || (user?.email ? user.email.split("@")[0] : undefined);
+    return raw ? capitalize(raw.trim()) : undefined;
+  }, [user]);
+
+  // Главное действие зависит от состояния: тренировка сегодня → еда.
+  const primaryAction = !workoutToday
+    ? { label: "Начать тренировку", to: "/dashboard/workouts", icon: Activity }
+    : {
+        label: "Добавить приём пищи",
+        to: "/dashboard/meals",
+        icon: UtensilsCrossed,
+      };
+  const secondaryActions = !workoutToday
+    ? [
+        {
+          label: "Добавить приём пищи",
+          to: "/dashboard/meals",
+          icon: UtensilsCrossed,
+        },
+        { label: "Записать вес", to: "/dashboard/progress", icon: Scale },
+      ]
+    : [
+        { label: "Начать тренировку", to: "/dashboard/workouts", icon: Activity },
+        { label: "Записать вес", to: "/dashboard/progress", icon: Scale },
+      ];
+
+  const openAssistant = () =>
+    window.dispatchEvent(
+      new CustomEvent("kilo:open-assistant", {
+        // Контекстное приветствие: чат открывается с видом на сегодняшний
+        // прогресс, а не с пустым «Чем могу помочь?».
+        detail: { greeting: buildCoachGreeting(todayInput) },
+      }),
+    );
+
+  // Аналитика (fire-and-forget, один раз за день/сессию): открытие Today,
+  // закрытые кольца и «день закрыт» — это сырьё для retention-воронки.
+  useEffect(() => {
+    track("today_opened");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const trackedRings = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const trainingGoal = profile?.preferredTrainingDays ?? 3;
+    const rings: { key: string; done: boolean }[] = [
+      { key: "calories", done: calPct >= 100 },
+      { key: "water", done: waterPct >= 100 },
+      { key: "workout", done: workoutsThisWeek >= trainingGoal },
+    ];
+    for (const r of rings) {
+      if (r.done && !trackedRings.current.has(r.key)) {
+        trackedRings.current.add(r.key);
+        track("ring_completed", { ring: r.key });
+      }
+    }
+  }, [calPct, waterPct, workoutsThisWeek, profile?.preferredTrainingDays, track]);
+  const dayTracked = useRef(false);
+  useEffect(() => {
+    if (dayComplete && !dayTracked.current) {
+      dayTracked.current = true;
+      track("day_completed", { score: todayScore.score });
+    }
+  }, [dayComplete, todayScore.score, track]);
 
   const noProfile = profile === null;
   const loading =
@@ -406,7 +452,7 @@ export default function Overview() {
 
   return (
     <motion.div
-      className="relative isolate mx-auto max-w-3xl space-y-10"
+      className="relative isolate mx-auto max-w-3xl space-y-6"
       initial="hidden"
       animate="show"
       variants={{
@@ -415,18 +461,15 @@ export default function Overview() {
       }}
     >
       <PageAurora />
-      <motion.header variants={fadeUp} className="flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <p className="label-overline text-muted-foreground">
-            {prettyDate(todayKey())}
-          </p>
-          <h1 className="m3-headline-large mt-2">Сегодня</h1>
-          <div
-            aria-hidden
-            className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
-          />
-        </div>
-        <ChartScene className="hidden h-24 w-40 shrink-0 sm:block" />
+      <motion.header variants={fadeUp} className="flex flex-col gap-1">
+        <p className="label-overline text-muted-foreground">
+          {prettyDate(today)}
+        </p>
+        <h1 className="m3-headline-large mt-1">Сегодня</h1>
+        <p className="mt-1 text-base text-muted-foreground">
+          {greeting()}
+          {firstName ? `, ${firstName}` : ""}
+        </p>
       </motion.header>
 
       {noProfile ? (
@@ -434,11 +477,11 @@ export default function Overview() {
           <EmptyState
             icon={Target}
             title="Настройте профиль, чтобы начать"
-            description="Ваши цели по калориям и макросам рассчитываются из возраста, роста, веса и поставленных целей."
+            description="Ваши цели по калориям и воде рассчитываются из возраста, роста, веса и поставленных целей."
             action={
               <Button asChild>
                 <Link to="/dashboard/profile">
-                  Настроить профиль <ArrowRight className="size-4" />
+                  Настроить профиль <ChevronRight className="size-4" />
                 </Link>
               </Button>
             }
@@ -446,137 +489,176 @@ export default function Overview() {
         </motion.div>
       ) : (
         <>
-          {/* Calorie card */}
+          {/* ── Оценка дня ── */}
           <motion.section
             variants={fadeUp}
             className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
           >
-            <div className="flex flex-wrap items-center justify-between gap-6">
-              <div>
-                <p className="label-overline text-muted-foreground">Калории</p>
-                <p className="mt-2 text-4xl font-semibold tracking-tight num sm:text-5xl">
-                  <CountUp value={calories} />
-                  <span className="text-xl text-muted-foreground">
-                    {" "}
-                    / {targets!.calories.toLocaleString("ru-RU")}
+            <div className="flex flex-col gap-8 lg:flex-row lg:items-center">
+              <div className="flex items-center gap-5 sm:gap-7">
+                <ProgressRing
+                  value={todayScore.score}
+                  max={100}
+                  size={168}
+                  stroke={12}
+                  color="var(--brand)"
+                  delay={0.1}
+                >
+                  <span className="num text-5xl font-semibold tracking-tight">
+                    <CountUp value={todayScore.score} />
                   </span>
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {calories > targets!.calories ? (
-                    <span className="font-medium text-destructive">
-                      Превышение нормы
-                    </span>
-                  ) : (
-                    `Осталось ${(targets!.calories - calories).toLocaleString("ru-RU")} ккал`
-                  )}
-                </p>
+                  <span className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    из 100
+                  </span>
+                </ProgressRing>
+                <div className="max-w-[13rem]">
+                  <p className="label-overline text-muted-foreground">
+                    Оценка дня
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight">
+                    {todayScore.label}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Насколько вы близки к сегодняшним целям по еде, воде и
+                    тренировке.
+                  </p>
+                </div>
               </div>
-              <RingProgress
-                size={184}
-                duration={1.4}
-                delay={0.1}
-                caption="Сегодня"
-                aria-label={`Активность за сегодня: ${calPct}%`}
-                data={ringData}
-                center={
-                  isCalOver ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-1">
-                      <span className="num text-[1.7em] font-semibold leading-none tracking-tight text-destructive">
-                        +{overCalPct < 1 ? overCalPct.toFixed(1) : Math.round(overCalPct)}%
+
+              {/* Расшифровка оценки: привычки с весами */}
+              <div className="min-w-0 flex-1 space-y-2.5">
+                {todayScore.components.map((c, i) => (
+                  <div key={c.key} className="flex items-center gap-3">
+                    <span className="flex w-28 shrink-0 items-baseline gap-1 text-xs text-muted-foreground">
+                      {c.label}
+                      <span className="num text-[9px] font-medium text-muted-foreground">
+                        ×{Math.round(c.weight * 100)}%
                       </span>
-                      <span className="text-[0.56em] font-semibold uppercase tracking-[0.18em] text-destructive">
-                        сверх нормы
-                      </span>
+                    </span>
+                    <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                      <motion.div
+                        className={cn(
+                          "h-full rounded-full",
+                          c.key === "calories" && isCalOver
+                            ? "bg-destructive"
+                            : "bg-brand",
+                        )}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${c.value}%` }}
+                        transition={{
+                          duration: 0.7,
+                          ease: "easeOut",
+                          delay: 0.15 + i * 0.06,
+                        }}
+                      />
                     </div>
-                  ) : undefined
-                }
-              />
-            </div>
-            <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className={cn(
-                  "h-full rounded-full",
-                  isCalOver ? "bg-destructive" : "bg-brand",
-                )}
-                initial={{ width: 0 }}
-                animate={{ width: `${calPct}%` }}
-                transition={{ duration: 0.9, ease: "easeOut", delay: 0.15 }}
-              />
+                    <span className="num w-8 shrink-0 text-right text-xs text-muted-foreground">
+                      {c.value}
+                    </span>
+                  </div>
+                ))}
+
+                {/* Как рассчитывается оценка — раскрывается по клику */}
+                <details className="group mt-4 rounded-md bg-secondary/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  <summary className="cursor-pointer select-none font-medium">
+                    Как рассчитан мой Score?
+                  </summary>
+                  <p className="mt-2 leading-5">
+                    Взвешенная сумма пяти привычек: калории — 30%, вода — 25%,
+                    тренировки — 20%, белок — 15%, дневник — 10%. Перебор
+                    калорий штрафуется. Это поведенческая оценка дня, а не
+                    медицинский показатель.
+                  </p>
+                </details>
+              </div>
             </div>
           </motion.section>
 
-          {/* Macros — кольца вместо баров */}
+          {/* ── День закрыт: все привычки выполнены ── */}
+          {dayComplete && (
+            <motion.section
+              variants={fadeUp}
+              className="relative overflow-hidden rounded-xl border border-brand/30 bg-gradient-to-br from-brand/15 via-brand/5 to-transparent p-5"
+            >
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -top-20 left-1/2 size-56 -translate-x-1/2 rounded-full bg-brand/20 blur-3xl"
+              />
+              <div className="relative flex items-center gap-4">
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.15 }}
+                  className="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-elev-2"
+                >
+                  <Check className="size-5" strokeWidth={3} />
+                </motion.div>
+                <div className="min-w-0">
+                  <p className="m3-title-medium">День закрыт</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Все привычки выполнены. Оценка дня — {todayScore.score} из 100.
+                    Так и держится серия.
+                  </p>
+                </div>
+              </div>
+            </motion.section>
+          )}
+
+          {/* ── Кольца-привычки ── */}
           <motion.section
             variants={fadeUp}
-            className="card-lift grid grid-cols-3 gap-4 rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8"
+            className="card-lift grid grid-cols-3 gap-4 rounded-xl border bg-card px-6 py-6 shadow-elev-1"
           >
-            <MacroRing label="Белки" value={protein} target={targets!.protein} color="var(--macro-protein)" delay={0.2} />
-            <MacroRing label="Углеводы" value={carbs} target={targets!.carbs} color="var(--macro-carbs)" delay={0.3} />
-            <MacroRing label="Жиры" value={fat} target={targets!.fat} color="var(--macro-fat)" delay={0.4} />
+            <RingMini
+              label="Калории"
+              pct={calPct}
+              note={
+                isCalOver
+                  ? `+${Math.round(overCalPct)}% сверх`
+                  : `${calories.toLocaleString("ru-RU")} / ${(targets?.calories ?? 0).toLocaleString("ru-RU")} ккал`
+              }
+              color={isCalOver ? "var(--destructive)" : CALORIES_RING.base}
+              delay={0.15}
+            />
+            <RingMini
+              label="Тренировка"
+              pct={formatPct(workoutsThisWeek, profile?.preferredTrainingDays ?? 3)}
+              note={`${workoutsThisWeek} из ${profile?.preferredTrainingDays ?? 3} за нед.`}
+              color={TRAINING_RING.base}
+              delay={0.25}
+            />
+            <RingMini
+              label="Вода"
+              pct={waterPct}
+              note={`${liters(waterMl)} л`}
+              color={WATER_RING.base}
+              delay={0.35}
+            />
           </motion.section>
 
-          {/* Активность: серия дней + календарь */}
-          <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* ── Чек-лист «Сегодня» ── */}
+          <motion.section
+            variants={fadeUp}
+            className="card-lift rounded-xl border bg-card p-6 shadow-elev-1"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="label-overline text-muted-foreground">План на день</p>
+              <p className="num text-xs text-muted-foreground">
+                {doneCount} из {checklist.length}
+              </p>
+            </div>
+            <div className="mt-3 space-y-0.5">
+              {checklist.map((item) => (
+                <ChecklistRow key={item.id} item={item} />
+              ))}
+            </div>
+
+            {/* Быстрая вода — действие прямо с главного экрана */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+              <p className="text-xs text-muted-foreground">
+                Вода: ~{WATER_ML_PER_KG} мл на кг веса
+              </p>
               <div className="flex items-center gap-2">
-                <Flame className="size-4 text-brand" />
-                <p className="label-overline text-muted-foreground">Активность</p>
-              </div>
-              {bestStreak > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Лучшая серия: {bestStreak} {pluralDays(bestStreak)} за 12 недель
-                </p>
-              )}
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-6">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.45, ease: "easeOut", delay: 0.1 }}
-                className="flex flex-col items-center"
-              >
-                <p className="text-5xl font-semibold tracking-tight num text-gradient">
-                  {streak}
-                </p>
-                <p className="mt-1.5 max-w-[9rem] text-center text-xs leading-4 text-muted-foreground">
-                  {streak === 0
-                    ? "нет серии — начните сегодня"
-                    : `${pluralDays(streak)} подряд`}
-                </p>
-              </motion.div>
-              <div className="min-w-0 flex-1">
-                <ActivityCalendar activityMap={activityMap} />
-              </div>
-            </div>
-
-            <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">
-              Дни, когда вы записывали еду, воду, тренировки или вес. Сегодня
-              обведено рамкой — сделайте запись, чтобы продлить серию.
-            </p>
-          </motion.section>
-
-          {/* Вода */}
-          <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
-                  <Droplets className="size-3.5 text-brand" /> Вода
-                </p>
-                <p className="mt-2 text-4xl font-semibold tracking-tight num sm:text-5xl">
-                  <CountUp value={waterMl} />
-                  <span className="text-xl text-muted-foreground">
-                    {" "}
-                    / {waterTarget} мл
-                  </span>
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {waterPct >= 100
-                    ? "Цель достигнута — отлично!"
-                    : `Осталось ${(waterTarget - waterMl).toLocaleString("ru-RU")} мл`}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -602,166 +684,114 @@ export default function Overview() {
                 </Button>
               </div>
             </div>
-            <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className={cn(
-                  "h-full rounded-full",
-                  waterPct >= 100 ? "bg-brand" : "bg-brand/70",
-                )}
-                initial={{ width: 0 }}
-                animate={{ width: `${waterPct}%` }}
-                transition={{ duration: 0.9, ease: "easeOut", delay: 0.2 }}
-              />
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Цель рассчитана из вашего веса: ~{WATER_ML_PER_KG} мл на кг.
-            </p>
           </motion.section>
 
-          {/* Quick stats */}
+          {/* ── AI Coach ── */}
           <motion.section
             variants={fadeUp}
-            className="grid gap-px overflow-hidden rounded-xl border bg-border shadow-elev-1 sm:grid-cols-3"
+            className="card-lift rounded-xl border bg-card p-6 shadow-elev-1"
           >
-            <div className="bg-card p-6">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <UtensilsCrossed className="size-4" />
-                <span className="text-xs">Приёмов пищи</span>
-              </div>
-              <p className="mt-2 text-2xl font-semibold num">
-                {todayLog!.length}
-              </p>
-            </div>
-            <div className="bg-card p-6">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Activity className="size-4" />
-                <span className="text-xs">Тренировок за неделю</span>
-              </div>
-              <p className="mt-2 text-2xl font-semibold num">
-                {workoutsThisWeek}
-              </p>
-            </div>
-            <div className="bg-card p-6">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Scale className="size-4" />
-                <span className="text-xs">Последний вес</span>
-              </div>
-              <p className="mt-2 text-2xl font-semibold num">
-                {weightTrend.length
-                  ? `${weightTrend[weightTrend.length - 1].weightKg.toFixed(1)}`
-                  : "—"}
-                {weightTrend.length > 0 && (
-                  <span className="text-sm text-muted-foreground"> кг</span>
-                )}
-              </p>
-            </div>
-          </motion.section>
-
-          {/* Weight trend */}
-          {weightTrend.length >= 2 && (
-            <motion.section variants={fadeUp} className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
-              <div className="flex items-center justify-between">
-                <p className="label-overline text-muted-foreground">
-                  Динамика веса
-                </p>
-                <Link
-                  to="/dashboard/progress"
-                  className="text-xs text-brand underline-offset-4 hover:underline"
-                >
-                  Смотреть всё
-                </Link>
-              </div>
-              {overviewProjection && (
-                <p className="mt-2 flex items-center gap-1.5 text-xs text-brand">
-                  <Target className="size-3.5 shrink-0" />
-                  При таком темпе — {targetWeight?.toFixed(1)} кг к{" "}
-                  {new Date(overviewProjection.etaDate).toLocaleDateString("ru-RU", {
-                    day: "numeric",
-                    month: "long",
-                  })}
-                  <span className="text-muted-foreground">
-                    ({overviewProjection.ratePerWeek.toFixed(1)} кг/нед)
-                  </span>
-                </p>
-              )}
-              <div className="mt-6 flex items-end gap-2">
-                {weightTrend.map((w) => (
-                  <div
-                    key={w._id}
-                    className="flex flex-1 flex-col items-center gap-2"
-                  >
-                    <span className="text-[10px] num text-muted-foreground">
-                      {w.weightKg.toFixed(1)}
-                    </span>
-                    <div
-                      className="w-full rounded-sm bg-brand/80"
-                      style={{
-                        height: `${Math.max(
-                          12,
-                          (w.weightKg /
-                            Math.max(...weightTrend.map((x) => x.weightKg))) *
-                            72,
-                        )}px`,
-                      }}
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      {shortDate(w.date)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </motion.section>
-          )}
-
-          <Separator />
-
-          {/* AI assistant CTA */}
-          <motion.section
-            variants={fadeUp}
-            className="card-lift flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-6 shadow-elev-1"
-          >
-            <div className="flex items-center gap-4">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
+            <div className="flex items-start gap-4">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-deep text-brand-foreground">
                 <Sparkles className="size-4" />
               </div>
-              <div>
-                <p className="text-sm font-medium">Спросите ИИ-ассистента</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  «Запиши обед: курица 200 г и гречка», «Сколько белка мне
-                  нужно?»
-                </p>
+              <div className="min-w-0 flex-1">
+                <p className="label-overline text-muted-foreground">AI Coach</p>
+                <p className="mt-1.5 text-sm leading-relaxed">{coach.text}</p>
+                {coach.cta &&
+                  (coach.cta.to ? (
+                    <Button asChild size="sm" className="mt-3">
+                      <Link to={coach.cta.to}>{coach.cta.label}</Link>
+                    </Button>
+                  ) : coach.cta.action === "water" ? (
+                    <Button
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => handleWater(250)}
+                    >
+                      {coach.cta.label}
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="mt-3" onClick={openAssistant}>
+                      {coach.cta.label}
+                    </Button>
+                  ))}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("kilo:open-assistant"))
-              }
-              className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-elev-1 active:scale-[0.97]"
-            >
-              Открыть чат
-            </button>
           </motion.section>
 
-          <Separator />
-
-          {/* Quick actions — M3 filled/tonal buttons */}
+          {/* ── Главное действие ── */}
           <motion.section variants={fadeUp} className="space-y-3">
-            <p className="label-overline text-muted-foreground">Быстрые действия</p>
+            <Button asChild className="h-12 w-full text-base sm:text-lg">
+              <Link to={primaryAction.to}>
+                <primaryAction.icon className="size-5" />
+                {primaryAction.label}
+              </Link>
+            </Button>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Button asChild className="h-12">
-                <Link to="/dashboard/meals">
-                  <UtensilsCrossed className="size-4" />
-                  Добавить приём пищи
-                </Link>
-              </Button>
-              <Button asChild variant="secondary" className="h-12">
-                <Link to="/dashboard/workouts">
-                  <Activity className="size-4" />
-                  Начать тренировку
-                </Link>
-              </Button>
+              {secondaryActions.map((a) => (
+                <Button key={a.to} asChild variant="outline" className="h-11">
+                  <Link to={a.to}>
+                    <a.icon className="size-4" />
+                    {a.label}
+                  </Link>
+                </Button>
+              ))}
             </div>
+          </motion.section>
+
+          {/* ── Неделя: компактно, ссылка на полный прогресс ── */}
+          <motion.section
+            variants={fadeUp}
+            className="card-lift rounded-xl border bg-card p-6 shadow-elev-1"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="label-overline text-muted-foreground">Неделя</p>
+              <Link
+                to="/dashboard/progress"
+                className="text-xs text-brand underline-offset-4 hover:underline"
+              >
+                Вся статистика
+              </Link>
+            </div>
+            <div className="mt-5 grid grid-cols-3 gap-4">
+              <WeekStat
+                icon={Flame}
+                label="Серия"
+                value={String(streak)}
+                hint={
+                  streak === 0
+                    ? "начните сегодня"
+                    : `${pluralDays(streak)} подряд`
+                }
+              />
+              <WeekStat
+                icon={Activity}
+                label="Тренировки"
+                value={String(workoutsThisWeek)}
+                hint={`из ${profile?.preferredTrainingDays ?? 3} за неделю`}
+              />
+              <WeekStat
+                icon={Scale}
+                label="Вес"
+                value={lastWeight !== null ? lastWeight.toFixed(1) : "—"}
+                hint={
+                  weightDelta === null
+                    ? lastWeight !== null
+                      ? "последний замер"
+                      : "нет замеров"
+                    : `${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(1)} кг за нед.`
+                }
+              />
+            </div>
+            {targetWeight !== null && lastWeight !== null && (
+              <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+                Цель: {targetWeight.toFixed(1)} кг ·{" "}
+                {lastWeight > targetWeight
+                  ? "осталось сбросить"
+                  : "цель достигнута — держим!"}
+              </p>
+            )}
           </motion.section>
         </>
       )}

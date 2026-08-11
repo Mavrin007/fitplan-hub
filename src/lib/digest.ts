@@ -152,6 +152,110 @@ export function buildWeeklyDigest(input: DigestInput): WeeklyDigest {
   };
 }
 
+export interface DigestInsightOpts {
+  /** Дневная цель по воде в мл (waterGoal(weightKg)); по умолчанию 2000. */
+  waterTargetMl?: number;
+  /** Цель по тренировкам в неделю (preferredTrainingDays); по умолчанию 3. */
+  trainingTarget?: number;
+  /** Цель по белку в день (computeTargets().protein) для оценки «+N г к среднему». */
+  proteinTargetG?: number | null;
+}
+
+/**
+ * Короткий «AI-разбор» недели для карточки итогов в UI. Приоритетная цепочка
+ * (как buildCoachAdvice в today.ts): сначала самое заметное — вес, затем
+ * перебор/недобор калорий, пропуск тренировок, вода, последовательность;
+ * всё закрыто — похвала. Без React и без Convex — чистая функция.
+ */
+export function buildWeeklyInsight(
+  d: WeeklyDigest,
+  opts: DigestInsightOpts = {},
+): string {
+  if (!d.hasData) {
+    return "За эту неделю записей пока нет — начните с малого: стакан воды или один приём пищи в дневнике.";
+  }
+  const trainingTarget = opts.trainingTarget ?? 3;
+  const waterTarget = opts.waterTargetMl ?? 2000;
+  const waterPct = d.avgWaterMl !== null ? d.avgWaterMl / waterTarget : null;
+
+  if (d.weightDeltaKg !== null && Math.abs(d.weightDeltaKg) >= 0.5) {
+    if (d.weightDeltaKg < 0) {
+      return `Вес снизился на ${fmtNum(Math.abs(d.weightDeltaKg))} кг за неделю — темп хороший. Держите белок и сон, чтобы вес уходил за счёт жира, а не мышц.`;
+    }
+    return `Вес вырос на ${fmtNum(d.weightDeltaKg)} кг. Не паникуйте из-за одного замера — ориентируйтесь на тренд за 2–3 недели.`;
+  }
+  if (d.caloriePct !== null && d.caloriePct > 120) {
+    return `Калорий в среднем ${d.caloriePct}% от цели — похоже, было много перекусов. Вернитесь к трём основным приёмам пищи, и цель снова будет посильной.`;
+  }
+  if (d.caloriePct !== null && d.caloriePct < 70) {
+    return `Питание недотягивает: в среднем ${Math.round(d.avgCalories ?? 0)} ккал/день — это ${d.caloriePct}% от цели. Резкий недобор замедляет прогресс и бьёт по восстановлению.`;
+  }
+  if (d.workoutCount === 0) {
+    const planned =
+      trainingTarget > 0 ? ` из ${trainingTarget} запланированных` : "";
+    return `Тренировок за неделю не было${planned} — главное не прервать ритм. Начните с одной короткой сессии, и серия вернётся.`;
+  }
+  if (waterPct !== null && waterPct < 0.7) {
+    return `Воды в среднем ${fmtNum(d.avgWaterMl! / 1000)} л/день — это ниже цели. Поставьте бутылку на стол и добавляйте +250 мл к каждому приёму пищи.`;
+  }
+  if (d.trackedDays < 5) {
+    return `Активных дней ${d.trackedDays} из 7. Даже 5 минут записи в день строят привычку — начните с фиксации воды.`;
+  }
+  return "Отличная неделя: привычки держатся, и именно последовательность приносит результат. Продолжайте в том же темпе.";
+}
+
+/** Русская плюрализация «тренировка/тренировки/тренировок» для планов. */
+function pluralWorkouts(n: number): string {
+  const abs = Math.abs(Math.round(n)) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "тренировок";
+  if (last === 1) return "тренировку";
+  if (last >= 2 && last <= 4) return "тренировки";
+  return "тренировок";
+}
+
+/**
+ * «На следующей неделе» — конкретный шаг вперёд из сводки недели. В отличие от
+ * buildWeeklyInsight (что было хорошо/плохо) здесь одно действие: дефицит при
+ * наборе веса, план тренировок, белок, вода, калории. Чистая функция без UI.
+ */
+export function buildNextWeekPlan(
+  d: WeeklyDigest,
+  opts: DigestInsightOpts = {},
+): string {
+  if (!d.hasData) {
+    return "Начните с малого: один приём пищи и стакан воды в день — через неделю будет, что подвести.";
+  }
+  const trainingTarget = opts.trainingTarget ?? 3;
+  const waterTarget = opts.waterTargetMl ?? 2000;
+  const workoutsLeft = Math.max(0, trainingTarget - d.workoutCount);
+  const waterPct = d.avgWaterMl !== null ? d.avgWaterMl / waterTarget : null;
+  const proteinTarget = opts.proteinTargetG ?? null;
+  const proteinPct =
+    d.avgProteinG !== null && proteinTarget !== null && proteinTarget > 0
+      ? d.avgProteinG / proteinTarget
+      : null;
+
+  if (d.weightDeltaKg !== null && d.weightDeltaKg >= 0.5) {
+    return "Сфокусируйтесь на лёгком дефиците: −300–500 ккал от цели в день и 8–10 тыс. шагов — вес снова пойдёт вниз.";
+  }
+  if (workoutsLeft > 0) {
+    const days = ["Пн", "Ср", "Пт", "Вт", "Чт", "Сб", "Вс"].slice(0, trainingTarget);
+    return `Проведите ${trainingTarget} ${pluralWorkouts(trainingTarget)} — например, ${days.join(" / ")}. Если ритм потерян — начните с одной.`;
+  }
+  if (proteinPct !== null && proteinPct < 0.9) {
+    const need = Math.round(proteinTarget! - (d.avgProteinG ?? 0));
+    return `Увеличьте белок до ${proteinTarget} г в день (+${Math.max(0, need)} г к среднему) — порция белка к каждому приёму пищи.`;
+  }
+  if (waterPct !== null && waterPct < 0.8) {
+    return `Пейте ${fmtNum(waterTarget / 1000)} л воды в день — сейчас в среднем ${fmtNum((d.avgWaterMl ?? 0) / 1000)} л. Бутылка на столе = половина успеха.`;
+  }
+  if (d.caloriePct !== null && d.caloriePct > 115) {
+    return "Удержите калории в цели: три основных приёма пищи и без перекусов после ужина.";
+  }
+  return "Удерживайте текущий темп — он уже даёт результат. Добавьте один новый источник белка для разнообразия.";
+}
+
 /** Экранирование HTML для имени пользователя в письме (защита от инъекций). */
 function escapeHtml(s: string): string {
   return s
