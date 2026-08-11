@@ -806,7 +806,8 @@ describe("Meals", () => {
     await user.type(within(dialog).getByLabelText("Поиск по библиотеке"), "курин");
     await user.click(within(dialog).getByRole("button", { name: /Куриная грудка/ }));
 
-    const qty = within(dialog).getByLabelText("Порций");
+    // Метка порции считается по продукту: «Порций (≈ 150 г)».
+    const qty = within(dialog).getByLabelText(/Порций \(≈/);
     await user.clear(qty);
     await user.type(qty, "0");
     await user.click(
@@ -1237,5 +1238,74 @@ describe("Meals", () => {
     );
 
     expect(toast.error).toHaveBeenCalledWith("Не удалось добавить план");
+  });
+
+  it("выбранный продукт: порция, макросы и кнопка добавления рядом с результатами", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: /Добавить в завтрак/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Поиск по библиотеке"), "курин");
+    await user.click(within(dialog).getByRole("button", { name: /Куриная грудка/ }));
+
+    // Порция понятными единицами и макросы выбранного количества.
+    expect(within(dialog).getByLabelText(/Порций \(≈ 150 г\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText("≈ 248 ккал")).toBeInTheDocument();
+
+    // Шаг «+» увеличивает порцию на 0.5: 1 → 1.5 порции (225 г).
+    await user.click(within(dialog).getByRole("button", { name: "Увеличить порцию" }));
+    expect(within(dialog).getByLabelText(/Порций \(≈ 225 г\)/)).toBeInTheDocument();
+  });
+
+  it("подсказка белка открывает диалог с уже выбранным продуктом", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // Сегодня пусто — белок не добит, чипы-подсказки на месте.
+    await user.click(screen.getByRole("button", { name: /Творог \(нежирный\)/ }));
+    const dialog = screen.getByRole("dialog");
+
+    // Продукт уже выбран: порция и кнопка добавления видны сразу.
+    expect(within(dialog).getByLabelText(/Порций \(≈ 150 г\)/)).toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: /Добавить в перекус/ }),
+    );
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntry",
+        args: [
+          expect.objectContaining({
+            mealType: "snack",
+            name: "Творог (нежирный)",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("вода: быстрая добавка пишет в дневник воды прямо со страницы питания", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    await user.click(screen.getByRole("button", { name: "+250 мл" }));
+    await user.click(screen.getByRole("button", { name: "+500 мл" }));
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "water.addWater",
+        args: [{ date: todayKey(), amountMl: 250 }],
+      }),
+    );
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "water.addWater",
+        args: [{ date: todayKey(), amountMl: 500 }],
+      }),
+    );
   });
 });

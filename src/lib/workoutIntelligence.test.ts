@@ -4,6 +4,7 @@ import {
   loadEquipmentFor,
   parseRepsRange,
   recommendLoad,
+  shiftAvailableWeight,
   type LastExerciseEntry,
 } from "./workoutIntelligence";
 
@@ -17,6 +18,28 @@ describe("loadEquipmentFor", () => {
     expect(loadEquipmentFor("Тяга верхнего блока")).toBe("machine"); // machine + cable → тренажёр
     expect(loadEquipmentFor("Отжимания")).toBe("bodyweight");
     expect(loadEquipmentFor("Неизвестное упражнение")).toBe("unknown");
+  });
+});
+
+describe("shiftAvailableWeight", () => {
+  it("гантели шагают по реальному ряду: 20 → 22.5, 22.5 → 20", () => {
+    expect(shiftAvailableWeight("dumbbell", 20, 1, 2.5)).toBe(22.5);
+    expect(shiftAvailableWeight("dumbbell", 22.5, -1, 2.5)).toBe(20);
+  });
+
+  it("гири шагают по стандартному ряду: 20 → 24, 24 → 20", () => {
+    expect(shiftAvailableWeight("kettlebell", 20, 1, 2.5)).toBe(24);
+    expect(shiftAvailableWeight("kettlebell", 24, -1, 2.5)).toBe(20);
+  });
+
+  it("штанга шагает по 2.5 кг и не опускается ниже грифа", () => {
+    expect(shiftAvailableWeight("barbell", 70, 1, 20)).toBe(72.5);
+    expect(shiftAvailableWeight("barbell", 21, -1, 20)).toBe(20);
+  });
+
+  it("собственный вес не меняется, направление 0 возвращает текущий вес", () => {
+    expect(shiftAvailableWeight("bodyweight", 70, 1, 2.5)).toBeUndefined();
+    expect(shiftAvailableWeight("dumbbell", 20, 0, 2.5)).toBe(20);
   });
 });
 

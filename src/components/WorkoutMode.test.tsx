@@ -50,6 +50,7 @@ function renderMode(
         reps?: number;
         rpe?: number;
         sets?: number;
+        setDetails?: { weightKg: number; reps: number; rpe?: number }[];
       }[];
     }[];
     saving?: boolean;
@@ -74,6 +75,8 @@ function renderMode(
 describe("WorkoutMode", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    // Черновик сессии не должен протекать между тестами.
+    sessionStorage.clear();
   });
 
   it("показывает план, упражнения и заметки дня", () => {
@@ -205,9 +208,31 @@ describe("WorkoutMode", () => {
       string,
     ];
     expect(effort).toBe("normal");
+    // Каждый подход логируется отдельно (setDetails): вес × повторы из плана
+    // (фолбэк без редактора), агрегаты берутся из последнего подхода.
     expect(exercises).toEqual([
-      { name: "Жим гантелей", sets: 3, reps: 8, weightKg: 20 },
-      { name: "Подтягивания", sets: 3, reps: 5, weightKg: 0 },
+      {
+        name: "Жим гантелей",
+        sets: 3,
+        reps: 8,
+        weightKg: 20,
+        setDetails: [
+          { weightKg: 20, reps: 8 },
+          { weightKg: 20, reps: 8 },
+          { weightKg: 20, reps: 8 },
+        ],
+      },
+      {
+        name: "Подтягивания",
+        sets: 3,
+        reps: 5,
+        weightKg: 0,
+        setDetails: [
+          { weightKg: 0, reps: 5 },
+          { weightKg: 0, reps: 5 },
+          { weightKg: 0, reps: 5 },
+        ],
+      },
     ]);
   });
 
@@ -301,5 +326,137 @@ describe("WorkoutMode", () => {
     expect(
       within(exerciseSection("Жим гантелей")).getByText(/7\.5 кг × 8/),
     ).toBeInTheDocument();
+  });
+
+  it("редактор подхода: вес × повторы × RPE пишутся в лог по подходам", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderMode();
+
+    // Отмечаем первый подход — открывается редактор «Подход 1».
+    await markSets(user, "Жим гантелей", 1);
+    const section = exerciseSection("Жим гантелей");
+    const repsInput = within(section).getByLabelText(
+      "Повторы подхода 1 для Жим гантелей",
+    );
+    expect(repsInput).toHaveValue("8"); // фолбэк из плана «8-12»
+    await user.clear(repsInput);
+    await user.type(repsInput, "10");
+    await user.click(
+      within(section).getByRole("button", { name: "RPE 7 для подхода 1" }),
+    );
+
+    // Остальные подходы жима (первый уже отмечен) — по умолчанию.
+    await user.click(
+      within(section).getByRole("button", { name: "Подход 2 — отметить выполненным" }),
+    );
+    await user.click(
+      within(section).getByRole("button", { name: "Подход 3 — отметить выполненным" }),
+    );
+    await markSets(user, "Подтягивания", 3);
+    await user.click(screen.getByRole("button", { name: /Завершить тренировку/ }));
+    await user.click(screen.getByRole("button", { name: /Норм/ }));
+
+    const [exercises] = onSave.mock.calls[0] as unknown as [unknown[]];
+    expect(exercises).toEqual([
+      {
+        name: "Жим гантелей",
+        sets: 3,
+        reps: 8,
+        weightKg: 20,
+        setDetails: [
+          { weightKg: 20, reps: 10, rpe: 7 },
+          { weightKg: 20, reps: 8 },
+          { weightKg: 20, reps: 8 },
+        ],
+      },
+      expect.objectContaining({
+        name: "Подтягивания",
+        setDetails: expect.any(Array),
+      }),
+    ]);
+  });
+
+  it("черновик: введённые подходы восстанавливаются после закрытия режима", async () => {
+    const user = userEvent.setup();
+    const props = {
+      day: DAY,
+      planName: "Силовой фулбоди",
+      logs: [] as never[],
+      saving: false,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => {}),
+    };
+    const { unmount } = render(<WorkoutMode {...props} />);
+    await markSets(user, "Жим гантелей", 2);
+    const section = exerciseSection("Жим гантелей");
+    const repsInput = within(section).getByLabelText(
+      "Повторы подхода 2 для Жим гантелей",
+    );
+    await user.clear(repsInput);
+    await user.type(repsInput, "12");
+
+    // Закрыли режим, не сохранив тренировку.
+    unmount();
+
+    // Повторный запуск того же дня — прогресс и вводы на месте.
+    render(<WorkoutMode {...props} />);
+    expect(screen.getByText("2 из 6 подходов")).toBeInTheDocument();
+    const section2 = exerciseSection("Жим гантелей");
+    expect(
+      within(section2).getByLabelText("Повторы подхода 2 для Жим гантелей"),
+    ).toHaveValue("12");
+  });
+
+  it("«прошлый раз» показывает полную прошлую сессию (подходы)", () => {
+    renderMode({
+      logs: [
+        {
+          date: "2026-07-20",
+          exercises: [
+            {
+              name: "Жим гантелей",
+              weightKg: 22.5,
+              reps: 10,
+              sets: 3,
+              setDetails: [
+                { weightKg: 22.5, reps: 10, rpe: 7 },
+                { weightKg: 22.5, reps: 10, rpe: 8 },
+                { weightKg: 20, reps: 9, rpe: 9 },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByText((content, el) =>
+        el?.textContent ===
+          "прошлый раз: 22.5 × 10 · 22.5 × 10 · 20 × 9" &&
+        content !== "",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("−/+ у веса шагают к реально доступному весу снаряда", async () => {
+    const user = userEvent.setup();
+    renderMode();
+
+    // «Жим гантелей»: стартовый вес из плана 20 кг, следующий доступный — 22.5.
+    await user.click(
+      screen.getByRole("button", { name: "Следующий вес для Жим гантелей" }),
+    );
+    expect(screen.getByLabelText("Вес для Жим гантелей")).toHaveValue("22.5");
+
+    // «−» возвращает к предыдущему доступному весу: 22.5 → 20.
+    await user.click(
+      screen.getByRole("button", { name: "Предыдущий вес для Жим гантелей" }),
+    );
+    expect(screen.getByLabelText("Вес для Жим гантелей")).toHaveValue("20");
+
+    // Собственный вес (подтягивания) — кнопок −/+ нет: вес тела не меняется.
+    expect(
+      screen.queryByRole("button", { name: /для Подтягивания/ }),
+    ).not.toBeInTheDocument();
   });
 });

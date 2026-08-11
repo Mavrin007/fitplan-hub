@@ -114,8 +114,11 @@ function stepWeight(w: number, direction: 1 | -1, minKg: number): number {
   return Math.max(minKg, rounded);
 }
 
-/** Шаг нагрузки по оборудованию: следующий/предыдущий доступный вес. */
-function shiftWeight(
+/** Шаг нагрузки по оборудованию: следующий/предыдущий доступный вес.
+ *  Публичная обёртка — используется и в рекомендации, и в −/+ рядом с полем
+ *  веса в режиме тренировки (тот же «реальный следующий снаряд», что и у
+ *  рекомендации: гантели 20 → 22.5, гири 20 → 24, штанга 70 → 72.5). */
+export function shiftAvailableWeight(
   equipment: LoadEquipment,
   current: number,
   direction: 1 | 0 | -1,
@@ -264,7 +267,7 @@ export function recommendLoad(input: RecommendLoadInput): LoadRecommendation {
 
   const minKg = isBarbellExercise(input.name) ? BARBELL_BAR_WEIGHT_KG : 2.5;
   const direction = kind === "up" ? 1 : kind === "down" ? -1 : 0;
-  const weightKg = shiftWeight(equipment, last.weightKg, direction, minKg);
+  const weightKg = shiftAvailableWeight(equipment, last.weightKg, direction, minKg);
   if (weightKg === undefined) {
     // Практически недостижимо для не-bodyweight, но TS требует ветку.
     return { kind, repsMin, repsMax, equipment, reasoning: why };
@@ -294,6 +297,9 @@ export interface SummaryExercise {
   sets: number;
   reps: number;
   weightKg: number;
+  /** Фактические подходы (вес × повторы × RPE) — объём и повторы считаются
+   *  по ним, когда они есть; иначе фолбэк на агрегат sets × reps. */
+  setDetails?: { weightKg: number; reps: number; rpe?: number }[];
 }
 
 export interface SummaryLog {
@@ -325,7 +331,13 @@ export interface WorkoutSummary {
 }
 
 function tonnageOf(exercises: SummaryExercise[]): number {
-  return exercises.reduce((s, e) => s + e.weightKg * e.reps * e.sets, 0);
+  return exercises.reduce((s, e) => {
+    if (e.setDetails && e.setDetails.length > 0) {
+      // Реальный тоннаж: сумма весов × повторов по каждому подходу.
+      return s + e.setDetails.reduce((ss, d) => ss + d.weightKg * d.reps, 0);
+    }
+    return s + e.weightKg * e.reps * e.sets;
+  }, 0);
 }
 
 /**
@@ -362,7 +374,13 @@ export function buildWorkoutSummary(input: WorkoutSummaryInput): WorkoutSummary 
   return {
     exerciseCount: input.exercises.length,
     setCount: input.exercises.reduce((s, e) => s + e.sets, 0),
-    totalReps: input.exercises.reduce((s, e) => s + e.reps, 0),
+    // Сумма повторов по подходам (по setDetails — точно, иначе агрегат).
+    totalReps: input.exercises.reduce((s, e) => {
+      if (e.setDetails && e.setDetails.length > 0) {
+        return s + e.setDetails.reduce((ss, d) => ss + d.reps, 0);
+      }
+      return s + e.reps;
+    }, 0),
     tonnage,
     minutes: input.planMinutes ?? null,
     tonnageDeltaPct,

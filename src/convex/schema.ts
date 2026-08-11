@@ -99,6 +99,16 @@ export const workoutDayValidator = v.object({
   approxMinutes: v.optional(v.number()), // примерная длительность сессии (мин)
 });
 
+/** Один подход упражнения: фактический вес × повторы (+RPE, если заполнен).
+ *  Собирается в WorkoutMode по каждому подходу и хранится в `setDetails`
+ *  лога — «прошлый раз» показывает полную прошлую сессию, а объём считается
+ *  по реальным подходам, а не по агрегату. */
+export const loggedSetValidator = v.object({
+  weightKg: v.number(),
+  reps: v.number(),
+  rpe: v.optional(v.number()),
+});
+
 export const loggedExerciseValidator = v.object({
   name: v.string(),
   sets: v.number(),
@@ -108,6 +118,9 @@ export const loggedExerciseValidator = v.object({
   // поля читаются нормально (schemaValidation: false), а «Рекомендация KILO»
   // использует RPE, когда он есть, иначе — усилие тренировки.
   rpe: v.optional(v.number()),
+  // Фактические подходы (вес × повторы × RPE) — мягкая миграция: старые
+  // логи без детализации читаются через агрегаты sets/reps/weightKg.
+  setDetails: v.optional(v.array(loggedSetValidator)),
 });
 
 // Поля таблиц вынесены в отдельные валидаторы: единый источник правды для

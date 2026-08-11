@@ -129,6 +129,16 @@ export const logWorkout = mutation({
       assertRange(ex.sets, 1, 50, "Подходы");
       assertRange(ex.reps, 1, 500, "Повторения");
       assertRange(ex.weightKg, 0, 1000, "Вес (кг)");
+      if (ex.setDetails !== undefined) {
+        assertMaxItems(ex.setDetails, ex.sets, "Подходы детализации");
+        for (const set of ex.setDetails) {
+          assertRange(set.weightKg, 0, 1000, "Вес подхода (кг)");
+          assertRange(set.reps, 1, 500, "Повторения подхода");
+          if (set.rpe !== undefined) {
+            assertRange(set.rpe, 1, 10, "RPE подхода");
+          }
+        }
+      }
     }
     await consumeRateLimit(ctx, `${userId}:workoutLog`, RATE_LIMITS.workoutLog);
 

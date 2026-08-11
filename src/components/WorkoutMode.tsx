@@ -15,6 +15,7 @@ import {
   buildWorkoutSummary,
   loadEquipmentFor,
   recommendLoad,
+  shiftAvailableWeight,
   type WorkoutSummary,
 } from "@/lib/workoutIntelligence";
 import { WEEKDAYS } from "@/lib/i18n";
@@ -30,8 +31,10 @@ import {
   Dumbbell,
   Flame,
   Info,
+  Minus,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   SkipForward,
   Sparkles,
@@ -51,6 +54,8 @@ interface LogExercise {
   rpe?: number;
   /** Подходы (для объёма в сводке завершения). */
   sets?: number;
+  /** Фактические подходы прошлой сессии — «прошлый раз» списком. */
+  setDetails?: { weightKg: number; reps: number; rpe?: number }[];
 }
 interface WorkoutLogLite {
   date: string;
@@ -65,6 +70,55 @@ interface SavedExercise {
   reps: number;
   weightKg: number;
   rpe?: number;
+  /** Фактические подходы (вес × повторы × RPE) — пишутся в лог. */
+  setDetails: { weightKg: number; reps: number; rpe?: number }[];
+}
+
+/** Ввод одного подхода в редакторе: вес/повторы строками (как в полях). */
+interface SetInput {
+  weight: string;
+  reps: string;
+  rpe?: number;
+}
+
+/** Повторы по умолчанию из строки плана: «8-12» → 8, «5» → 5, «30s» → 30. */
+function defaultReps(planReps: string): number {
+  return parseInt(planReps.match(/\d+/)?.[0] ?? "10", 10);
+}
+
+/** Число без лишних нулей: 22.5 → «22.5», 20 → «20». */
+function fmtWeight(kg: number): string {
+  return String(Math.round(kg * 10) / 10);
+}
+
+/** «Прошлый раз» для упражнения: полная прошлая сессия (подходы) при наличии
+ *  setDetails, иначе — вес × повторы (или только вес/повторы). */
+function lastSessionLabel(
+  last:
+    | {
+        weightKg: number;
+        reps?: number;
+        setDetails?: { weightKg: number; reps: number; rpe?: number }[];
+      }
+    | undefined,
+): string | null {
+  if (!last) return null;
+  if (last.setDetails && last.setDetails.length > 0) {
+    return last.setDetails
+      .slice(0, 4)
+      .map((d) =>
+        d.weightKg > 0
+          ? `${fmtWeight(d.weightKg)} × ${d.reps}`
+          : `${d.reps} повт`,
+      )
+      .join(" · ");
+  }
+  if (last.reps) {
+    return last.weightKg > 0
+      ? `${fmtWeight(last.weightKg)} × ${last.reps}`
+      : `${last.reps} повт`;
+  }
+  return last.weightKg > 0 ? `${fmtWeight(last.weightKg)} кг` : null;
 }
 
 interface WorkoutModeProps {
@@ -86,6 +140,33 @@ function fmt(sec: number): string {
 
 const EFFORT_KEYS: Effort[] = ["easy", "normal", "hard"];
 
+/** Черновик тренировки в sessionStorage: введённые подходы не теряются при
+ *  закрытии режима, перезагрузке или случайном выходе. Очищается после
+ *  успешного сохранения. */
+interface DraftState {
+  done: Record<string, number>;
+  weights: Record<string, string>;
+  setLogs: Record<string, Record<number, SetInput>>;
+  /** Редактируемый подход — возвращаемся к тому, где остановились. */
+  activeSet: { name: string; idx: number } | null;
+}
+
+function readDraft(key: string): DraftState | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DraftState>;
+    return {
+      done: parsed.done ?? {},
+      weights: parsed.weights ?? {},
+      setLogs: parsed.setLogs ?? {},
+      activeSet: parsed.activeSet ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Полноэкранный режим тренировки: отмечаем подходы, отдыхаем по таймеру,
  *  веса подставлены из последних логов («с прошлого раза»), под упражнениями —
  *  подсказки по технике и разминочные подходы. Для штанговых упражнений вес
@@ -101,8 +182,13 @@ export function WorkoutMode({
   onClose,
   onSave,
 }: WorkoutModeProps) {
+  // Ключ черновика: день плана + название — разные дни не затирают друг друга.
+  const draftKey = `kilo:workout-draft:${day.day}:${planName}`;
+  // Восстановленный черновик (лениво, один раз при монтировании).
+  const [draft] = useState(() => readDraft(draftKey));
+
   // Сколько подходов сделано по каждому упражнению (по имени).
-  const [done, setDone] = useState<Record<string, number>>({});
+  const [done, setDone] = useState<Record<string, number>>(() => draft?.done ?? {});
   // Открытые подсказки по технике.
   const [tipsOpen, setTipsOpen] = useState<Record<string, boolean>>({});
   // Таймер отдыха: сколько секунд осталось, от какого значения, идёт ли отсчёт.
@@ -113,8 +199,14 @@ export function WorkoutMode({
   } | null>(null);
   // Подготовленные к сохранению упражнения — ожидают оценку усилия.
   const [pending, setPending] = useState<SavedExercise[] | null>(null);
-  // RPE (1–10) по упражнениям — заполняется после первых подходов.
-  const [rpes, setRpes] = useState<Record<string, number | undefined>>({});
+  // Редактируемый подход: упражнение + номер (1-based).
+  const [activeSet, setActiveSet] = useState<{ name: string; idx: number } | null>(
+    () => draft?.activeSet ?? null,
+  );
+  // Данные подходов (вес × повторы × RPE) по упражнению и номеру подхода.
+  const [setLogs, setSetLogs] = useState<Record<string, Record<number, SetInput>>>(
+    () => draft?.setLogs ?? {},
+  );
   // Сводка завершённой тренировки — показывается после сохранения.
   const [summary, setSummary] = useState<WorkoutSummary | null>(null);
 
@@ -124,7 +216,13 @@ export function WorkoutMode({
   const lastEntries = useMemo(() => {
     const map: Record<
       string,
-      { weightKg: number; reps?: number; rpe?: number; effort?: Effort }
+      {
+        weightKg: number;
+        reps?: number;
+        rpe?: number;
+        effort?: Effort;
+        setDetails?: { weightKg: number; reps: number; rpe?: number }[];
+      }
     > = {};
     for (const log of [...logs].sort((a, b) => b.date.localeCompare(a.date))) {
       for (const ex of log.exercises) {
@@ -138,6 +236,7 @@ export function WorkoutMode({
             reps: ex.reps,
             rpe: ex.rpe,
             effort: log.effort,
+            setDetails: ex.setDetails,
           };
         }
       }
@@ -152,14 +251,26 @@ export function WorkoutMode({
     for (const ex of day.exercises) {
       const last = lastEntries[ex.name];
       initial[ex.name] =
-        last !== undefined && last.weightKg > 0
+        draft?.weights?.[ex.name] ??
+        (last !== undefined && last.weightKg > 0
           ? String(last.weightKg)
           : ex.weightKg != null
             ? String(ex.weightKg)
-            : "";
+            : "");
     }
     return initial;
   });
+
+  // Черновик в sessionStorage: каждый сдвиг состояния подхватывается сразу.
+  // Ошибки хранилища (приватный режим) не должны ломать тренировку.
+  useEffect(() => {
+    try {
+      const payload: DraftState = { done, weights, setLogs, activeSet };
+      sessionStorage.setItem(draftKey, JSON.stringify(payload));
+    } catch {
+      /* не критично — черновик просто не сохранится */
+    }
+  }, [done, weights, setLogs, activeSet, draftKey]);
 
   // Ссылки на секции упражнений — для автопрокрутки к следующему подходу.
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -218,33 +329,66 @@ export function WorkoutMode({
 
   /** Отметить/снять подход с номером setIdx (1-based) у упражнения ex. */
   const toggleSet = (ex: Exercise, setIdx: number) => {
-    setDone((d) => {
-      const current = Math.min(d[ex.name] ?? 0, ex.sets);
-      const next = current === setIdx ? setIdx - 1 : setIdx;
+    const current = Math.min(done[ex.name] ?? 0, ex.sets);
+    const next = current === setIdx ? setIdx - 1 : setIdx;
+    if (next > current) {
+      // Подход отмечен — открываем редактор только что выполненного подхода
+      // (вес × повторы × RPE): вписал данные → отметил следующий круг.
+      setActiveSet({ name: ex.name, idx: setIdx });
       // Подход добавился — запускаем таймер отдыха, если ещё не идёт.
-      if (next > current && ex.restSeconds > 0) {
+      if (ex.restSeconds > 0) {
         setRest((r) =>
           r && r.left > 0
             ? r
             : { left: ex.restSeconds, total: ex.restSeconds, running: true },
         );
       }
-      return { ...d, [ex.name]: next };
-    });
+    } else {
+      // Подход снят — удаляем данные снятых и более поздних подходов.
+      setSetLogs((m) => {
+        const exLogs = m[ex.name] ? { ...m[ex.name] } : {};
+        for (let i = next + 1; i <= current; i++) delete exLogs[i];
+        const copy = { ...m };
+        if (Object.keys(exLogs).length === 0) delete copy[ex.name];
+        else copy[ex.name] = exLogs;
+        return copy;
+      });
+      setActiveSet((a) => (a?.name === ex.name && a.idx > next ? null : a));
+    }
+    setDone((d) => ({ ...d, [ex.name]: next }));
   };
 
-  /** «Завершить тренировку» — собираем упражнения и спрашиваем оценку усилия. */
+  /** «Завершить тренировку» — собираем упражнения (по подходам из setLogs,
+   *  фолбэк — вес упражнения и повторы из плана) и спрашиваем оценку усилия. */
   const handleFinish = () => {
     const exercises = day.exercises
       .filter((ex) => (done[ex.name] ?? 0) > 0)
       .map((ex) => {
-        const rpe = rpes[ex.name];
+        const doneCount = Math.min(done[ex.name] ?? 0, ex.sets);
+        const fallbackWeight = parseLocalNumber(weights[ex.name] ?? "") ?? 0;
+        const fallbackReps = defaultReps(ex.reps);
+        const sets = Array.from({ length: doneCount }, (_, i) => {
+          const input = setLogs[ex.name]?.[i + 1];
+          return {
+            weightKg:
+              parseLocalNumber(input?.weight ?? "") ?? fallbackWeight,
+            reps: Math.max(
+              1,
+              Math.round(
+                parseLocalNumber(input?.reps ?? "") ?? fallbackReps,
+              ),
+            ),
+            ...(input?.rpe !== undefined ? { rpe: input.rpe } : {}),
+          };
+        });
+        const lastSet = sets[sets.length - 1];
         return {
           name: ex.name,
-          sets: Math.min(done[ex.name] ?? 0, ex.sets),
-          reps: parseInt(ex.reps.match(/^(\d+)/)?.[1] ?? "10", 10),
-          weightKg: parseLocalNumber(weights[ex.name] ?? "") ?? 0,
-          ...(rpe !== undefined ? { rpe } : {}),
+          sets: doneCount,
+          reps: lastSet.reps,
+          weightKg: lastSet.weightKg,
+          ...(lastSet.rpe !== undefined ? { rpe: lastSet.rpe } : {}),
+          setDetails: sets,
         };
       });
     if (exercises.length === 0) return;
@@ -255,6 +399,12 @@ export function WorkoutMode({
   const submitEffort = async (effort: Effort) => {
     if (!pending) return;
     await onSave(pending, effort);
+    // Тренировка сохранена — черновик больше не нужен.
+    try {
+      sessionStorage.removeItem(draftKey);
+    } catch {
+      /* не критично */
+    }
     setSummary(
       buildWorkoutSummary({
         exercises: pending,
@@ -265,6 +415,7 @@ export function WorkoutMode({
             sets: e.sets ?? 1,
             reps: e.reps ?? 0,
             weightKg: e.weightKg,
+            ...(e.setDetails ? { setDetails: e.setDetails } : {}),
           })),
         })),
         planMinutes: day.approxMinutes,
@@ -395,6 +546,22 @@ export function WorkoutMode({
             const last = lastEntries[ex.name];
             const tip = EXERCISE_TIPS[ex.name];
             const barbell = isBarbellExercise(ex.name);
+            const equipment = loadEquipmentFor(ex.name);
+            // −/+ шагают к реально доступному следующему весу снаряда
+            // (гантели 20 → 22.5, гири 20 → 24, штанга 70 → 72.5).
+            const weightStep = (dir: 1 | -1) => {
+              const cur = parseLocalNumber(weights[ex.name] ?? "") ?? 0;
+              if (cur <= 0) return;
+              const next = shiftAvailableWeight(
+                equipment,
+                cur,
+                dir,
+                barbell ? BARBELL_BAR_WEIGHT_KG : 2.5,
+              );
+              if (next !== undefined) {
+                setWeights((w) => ({ ...w, [ex.name]: fmtWeight(next) }));
+              }
+            };
             const warmups = warmUpSets(
               parseLocalNumber(weights[ex.name] ?? "") ?? undefined,
               barbell ? BARBELL_BAR_WEIGHT_KG : 2.5,
@@ -408,7 +575,30 @@ export function WorkoutMode({
               last,
               effort: last?.effort,
             });
-            const rpe = rpes[ex.name];
+            // Редактируемый подход: значения по умолчанию — вес упражнения и
+            // повторы из плана (или введённые ранее для этого подхода).
+            const setInput: SetInput =
+              activeSet?.name === ex.name
+                ? (setLogs[ex.name]?.[activeSet.idx] ?? {
+                    weight: weights[ex.name] ?? "",
+                    reps: String(defaultReps(ex.reps)),
+                  })
+                : { weight: "", reps: "" };
+            const updateSetInput = (patch: Partial<SetInput>) => {
+              if (!activeSet || activeSet.name !== ex.name) return;
+              const current =
+                setLogs[ex.name]?.[activeSet.idx] ?? {
+                  weight: weights[ex.name] ?? "",
+                  reps: String(defaultReps(ex.reps)),
+                };
+              setSetLogs((m) => ({
+                ...m,
+                [ex.name]: {
+                  ...(m[ex.name] ?? {}),
+                  [activeSet.idx]: { ...current, ...patch },
+                },
+              }));
+            };
             return (
               <section
                 key={ex.name}
@@ -481,47 +671,60 @@ export function WorkoutMode({
                     })}
                   </div>
 
-                  {/* Вес */}
-                  <div className="w-28">
-                    <div className="relative">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        placeholder="—"
-                        value={weights[ex.name] ?? ""}
-                        onChange={(e) =>
-                          setWeights((w) => ({
-                            ...w,
-                            [ex.name]: e.target.value.replace(/[^\d.,]/g, ""),
-                          }))
-                        }
-                        className="h-10 pr-8 text-right"
-                        aria-label={`Вес для ${ex.name}`}
-                      />
-                      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
-                        кг
-                      </span>
+                  {/* Вес: −/+ шагают к реально доступному весу снаряда */}
+                  <div className={equipment === "bodyweight" ? "w-28" : "w-36"}>
+                    <div className="flex items-center gap-1">
+                      {equipment !== "bodyweight" && (
+                        <button
+                          type="button"
+                          onClick={() => weightStep(-1)}
+                          disabled={!parseLocalNumber(weights[ex.name] ?? "")}
+                          className="flex size-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-40"
+                          aria-label={`Предыдущий вес для ${ex.name}`}
+                        >
+                          <Minus className="size-4" />
+                        </button>
+                      )}
+                      <div className="relative min-w-0 flex-1">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          placeholder="—"
+                          value={weights[ex.name] ?? ""}
+                          onChange={(e) =>
+                            setWeights((w) => ({
+                              ...w,
+                              [ex.name]: e.target.value.replace(/[^\d.,]/g, ""),
+                            }))
+                          }
+                          className="h-10 pr-8 text-right"
+                          aria-label={`Вес для ${ex.name}`}
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
+                          кг
+                        </span>
+                      </div>
+                      {equipment !== "bodyweight" && (
+                        <button
+                          type="button"
+                          onClick={() => weightStep(1)}
+                          disabled={!parseLocalNumber(weights[ex.name] ?? "")}
+                          className="flex size-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-40"
+                          aria-label={`Следующий вес для ${ex.name}`}
+                        >
+                          <Plus className="size-4" />
+                        </button>
+                      )}
                     </div>
                     {barbell ? (
                       <p className="mt-1 text-right text-[10px] text-muted-foreground">
                         общий вес · гриф {BARBELL_BAR_WEIGHT_KG} кг включён
                       </p>
-                    ) : last !== undefined ? (
+                    ) : lastSessionLabel(last) ? (
                       <p className="mt-1 text-right text-[10px] text-muted-foreground">
-                        {last.reps ? (
-                          <>
-                            прошлый раз:{" "}
-                            <span className="num">
-                              {last.weightKg} × {last.reps}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            прошлый раз:{" "}
-                            <span className="num">{last.weightKg} кг</span>
-                          </>
-                        )}
+                        прошлый раз:{" "}
+                        <span className="num">{lastSessionLabel(last)}</span>
                       </p>
                     ) : null}
                   </div>
@@ -565,43 +768,70 @@ export function WorkoutMode({
                   </div>
                 )}
 
-                {/* RPE подхода (необязательно) — появляется после первых подходов */}
-                {doneCount > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-2.5">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      RPE:
-                    </span>
-                    {[7, 8, 9, 10].map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        onClick={() =>
-                          setRpes((m) => ({
-                            ...m,
-                            [ex.name]: m[ex.name] === r ? undefined : r,
-                          }))
+                {/* Редактор подхода: вес × повторы × RPE. Открывается при отметке
+                    подхода; изменения сразу пишутся в setLogs и попадут в лог. */}
+                {activeSet?.name === ex.name && (
+                  <div className="mt-3 rounded-md border bg-secondary/30 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        Подход {activeSet.idx}
+                      </span>
+                      <div className="relative w-16">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={setInput.weight}
+                          onChange={(e) =>
+                            updateSetInput({
+                              weight: e.target.value.replace(/[^\d.,]/g, ""),
+                            })
+                          }
+                          className="h-9 pr-5 text-right"
+                          aria-label={`Вес подхода ${activeSet.idx} для ${ex.name}`}
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-[10px] text-muted-foreground">
+                          кг
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">×</span>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        value={setInput.reps}
+                        onChange={(e) =>
+                          updateSetInput({
+                            reps: e.target.value.replace(/[^\d]/g, ""),
+                          })
                         }
-                        aria-pressed={rpe === r}
-                        aria-label={`RPE ${r}`}
-                        className={cn(
-                          "flex size-10 items-center justify-center rounded-full border text-xs font-semibold num transition-colors",
-                          rpe === r
-                            ? "border-transparent bg-foreground text-background"
-                            : "border-border text-muted-foreground hover:border-foreground/40",
-                        )}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                    <span className="ml-1 text-[10px] text-muted-foreground">
-                      {rpe
-                        ? rpe <= 7
-                          ? "можно прибавить"
-                          : rpe === 8
-                            ? "рабочая нагрузка"
-                            : "тяжело — вес не поднимаем"
-                        : "необязательно"}
-                    </span>
+                        className="h-9 w-14 text-center"
+                        aria-label={`Повторы подхода ${activeSet.idx} для ${ex.name}`}
+                      />
+                      <div className="ml-auto flex items-center gap-1">
+                        {[7, 8, 9, 10].map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() =>
+                              updateSetInput({
+                                rpe: setInput.rpe === r ? undefined : r,
+                              })
+                            }
+                            aria-pressed={setInput.rpe === r}
+                            aria-label={`RPE ${r} для подхода ${activeSet.idx}`}
+                            className={cn(
+                              "flex size-9 items-center justify-center rounded-full border text-xs font-semibold num transition-colors",
+                              setInput.rpe === r
+                                ? "border-transparent bg-foreground text-background"
+                                : "border-border text-muted-foreground hover:border-foreground/40",
+                            )}
+                          >
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
 

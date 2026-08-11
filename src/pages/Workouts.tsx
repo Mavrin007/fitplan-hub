@@ -364,7 +364,14 @@ export default function Workouts() {
 
   /** Сохранение результата из режима тренировки (с оценкой усилия). */
   const handleSaveTraining = async (
-    exercises: { name: string; sets: number; reps: number; weightKg: number }[],
+    exercises: {
+      name: string;
+      sets: number;
+      reps: number;
+      weightKg: number;
+      rpe?: number;
+      setDetails?: { weightKg: number; reps: number; rpe?: number }[];
+    }[],
     effort: Effort,
   ) => {
     if (!trainingDay) return;
@@ -900,6 +907,7 @@ export default function Workouts() {
               weightKg: e.weightKg,
               reps: e.reps,
               rpe: e.rpe,
+              ...(e.setDetails ? { setDetails: e.setDetails } : {}),
             })),
           }))}
           saving={savingLog}
