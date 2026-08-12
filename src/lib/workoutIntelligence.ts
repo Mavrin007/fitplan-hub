@@ -172,28 +172,43 @@ export function parseRepsRange(planReps: string): [number, number] | null {
   return [Math.max(1, n - 2), n];
 }
 
-/** RPE 1–10 → направление нагрузки (по заданию: ≤7 — добавить, 8–10 — нет). */
-function kindFromRpe(rpe: number): { kind: "up" | "keep"; why: string } {
-  if (rpe <= 7) {
-    return {
-      kind: "up",
-      why: "в прошлый раз оставались повторы в запасе — можно прибавить",
-    };
+/** Целевые повторы под «двойную прогрессию» (сначала повторы, потом вес):
+ *  - тяжёлый подход (RPE 9–10): повторяем фактический результат, не опускаясь
+ *    ниже планки плана — «не штрафуем» за неудачный подход (7 из 10 → снова
+ *    8–10), а не «80 × 7»;
+ *  - рабочий/лёгкий (keep): +1 повтор к фактическому, не выше верха диапазона
+ *    (70 × 8 @ RPE 8 → 70 × 9–10);
+ *  - рост веса (up): повторы возвращаются к диапазону плана (70 × 12 @ RPE 7
+ *    на верху диапазона → 72.5 × 8–10).
+ *  null — повторы неприменимы (нет данных о повторах или подход «на время»). */
+function nextRepsTarget(
+  kind: "up" | "keep",
+  lastReps: number | undefined,
+  range: [number, number] | null,
+  rpe: number | undefined,
+): [number, number] | null {
+  if (!range || lastReps === undefined) return null;
+  const [planMin, planMax] = range;
+  if (rpe !== undefined && rpe >= 9) {
+    return [Math.max(lastReps, planMin), Math.max(planMax, lastReps)];
   }
-  if (rpe === 8) {
-    return { kind: "keep", why: "нагрузка была рабочей — вес сохраняем, добираем повторы" };
+  if (kind === "keep") {
+    return [Math.min(Math.max(lastReps, planMin) + 1, planMax), planMax];
   }
-  if (rpe === 9) {
-    return { kind: "keep", why: "было тяжело — вес не поднимаем, цель — те же повторы" };
-  }
-  return { kind: "keep", why: "подходы шли на пределе — не увеличиваем вес" };
+  return [planMin, planMax];
 }
 
 /**
- * Рекомендуемая нагрузка на сегодня для упражнения (Load Intelligence v2):
- *  - RPE ≤ 7    → следующий доступный вес по оборудованию;
- *  - RPE 8–10   → вес сохраняем (8 — добираем повторы, 9–10 — не поднимаем);
- *  - RPE нет    → фолбэк по усилию «легко/норм/тяжело»;
+ * Рекомендуемая нагрузка на сегодня для упражнения (Load Intelligence v2 +
+ * двойная прогрессия «сначала повторы, потом вес»):
+ *  - RPE ≤ 7    → пока повторы ниже верха диапазона плана — добираем повторы
+ *                  на том же весе; на верхней планке — следующий доступный
+ *                  вес по оборудованию;
+ *  - RPE 8      → вес сохраняем, добираем повторы (+1 к факту);
+ *  - RPE 9–10   → вес не поднимаем, повторяем фактический результат (не ниже
+ *                  планки плана — подход «не получился» не штрафуется);
+ *  - RPE нет    → фолбэк по усилию «легко/норм/тяжело» (легко — та же
+ *                  двойная прогрессия);
  *  - собственный вес → вес не меняется, прогресс через повторы;
  *  - данных нет → рекомендация не выдаётся («new»).
  *
@@ -226,16 +241,45 @@ export function recommendLoad(input: RecommendLoadInput): LoadRecommendation {
     : `${last.weightKg} кг × ${last.reps ?? "—"}`;
   let kind: LoadKind;
   let why: string;
+  // Двойная прогрессия: целевые повторы (репс-таргет), см. nextRepsTarget.
+  let repsTarget: [number, number] | null = null;
 
   const rpe = last.rpe;
   if (rpe !== undefined && rpe >= 1 && rpe <= 10) {
-    const byRpe = kindFromRpe(rpe);
-    kind = byRpe.kind;
-    why = `в прошлый раз ${prev} при RPE ${rpe} — ${byRpe.why}`;
+    if (rpe <= 7) {
+      // «Сначала повторы, потом вес»: пока фактический результат ниже верха
+      // диапазона плана — добавляем повторы на том же весе; на верху — вес.
+      const atRangeTop =
+        range !== null && last.reps !== undefined && last.reps >= range[1];
+      if (!atRangeTop) {
+        kind = "keep";
+        why = `в прошлый раз ${prev} при RPE ${rpe} было легко — сначала добираем повторы, вес сохраняем`;
+      } else {
+        kind = "up";
+        why = `в прошлый раз ${prev} при RPE ${rpe} — повторы на верхней планке, можно прибавить вес`;
+      }
+    } else if (rpe === 8) {
+      kind = "keep";
+      why = `в прошлый раз ${prev} при RPE 8 — нагрузка рабочая, вес сохраняем и добираем повторы`;
+    } else {
+      // RPE 9–10: подход не получился или был на пределе — не штрафуем и не
+      // прибавляем: повторяем фактический результат (не ниже планки плана).
+      kind = "keep";
+      why = `в прошлый раз ${prev} при RPE ${rpe} было тяжело — вес не поднимаем, повторяем результат`;
+    }
+    repsTarget = nextRepsTarget(kind, last.reps, range, rpe);
   } else if (input.effort) {
     if (input.effort === "easy") {
-      kind = "up";
-      why = `в прошлый раз ${prev} и было легко — можно прибавить`;
+      // Та же двойная прогрессия по усилию: в диапазоне — повторы, на верху — вес.
+      const atRangeTop =
+        range !== null && last.reps !== undefined && last.reps >= range[1];
+      if (!atRangeTop) {
+        kind = "keep";
+        why = `в прошлый раз ${prev} и было легко — сначала добираем повторы, вес сохраняем`;
+      } else {
+        kind = "up";
+        why = `в прошлый раз ${prev} и было легко — можно прибавить`;
+      }
     } else if (input.effort === "hard") {
       kind = "down";
       why = `тренировка была тяжёлой — снизьте нагрузку и добейте повторы`;
@@ -248,15 +292,20 @@ export function recommendLoad(input: RecommendLoadInput): LoadRecommendation {
     why = `в прошлый раз ${prev} — сохраните нагрузку, ориентир по самочувствию`;
   }
 
+  // Применяем целевые повторы двойной прогрессии (когда они вычислимы),
+  // иначе — диапазон плана.
+  const targetMin = repsTarget?.[0] ?? repsMin;
+  const targetMax = repsTarget?.[1] ?? repsMax;
+
   // Собственный вес: снаряд не меняется — двигаем повторы (up) или советуем
   // облегчить подход (down), вес в рекомендации не указываем.
   if (isBodyweight) {
-    const shifted = kind === "up" && repsMin !== null && repsMax !== null;
+    const shifted = kind === "up" && targetMin !== null && targetMax !== null;
     return {
       kind,
       equipment,
-      repsMin: shifted ? repsMin + 1 : repsMin,
-      repsMax: shifted ? repsMax + 1 : repsMax,
+      repsMin: shifted ? targetMin + 1 : targetMin,
+      repsMax: shifted ? targetMax + 1 : targetMax,
       stepLabel: stepLabelFor(equipment, kind),
       reasoning:
         kind === "up"
@@ -270,7 +319,7 @@ export function recommendLoad(input: RecommendLoadInput): LoadRecommendation {
   const weightKg = shiftAvailableWeight(equipment, last.weightKg, direction, minKg);
   if (weightKg === undefined) {
     // Практически недостижимо для не-bodyweight, но TS требует ветку.
-    return { kind, repsMin, repsMax, equipment, reasoning: why };
+    return { kind, repsMin: targetMin, repsMax: targetMax, equipment, reasoning: why };
   }
 
   // В обоснование вплетаем конкретный доступный вес: «можно взять 22.5 кг».
@@ -283,8 +332,8 @@ export function recommendLoad(input: RecommendLoadInput): LoadRecommendation {
   return {
     kind,
     weightKg,
-    repsMin,
-    repsMax,
+    repsMin: targetMin,
+    repsMax: targetMax,
     equipment,
     stepLabel: stepLabelFor(equipment, kind),
     reasoning: `${why}${deltaNote}`,

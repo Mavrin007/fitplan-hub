@@ -18,6 +18,7 @@ import {
   shiftAvailableWeight,
   type WorkoutSummary,
 } from "@/lib/workoutIntelligence";
+import { EQUIPMENT_ALTERNATIVES, type Equipment } from "@/lib/workoutData";
 import { WEEKDAYS } from "@/lib/i18n";
 import {
   EFFORT_COLORS,
@@ -35,6 +36,7 @@ import {
   Pause,
   Play,
   Plus,
+  Repeat,
   RotateCcw,
   SkipForward,
   Sparkles,
@@ -98,25 +100,20 @@ function lastSessionLabel(
     | {
         weightKg: number;
         reps?: number;
+        rpe?: number;
         setDetails?: { weightKg: number; reps: number; rpe?: number }[];
       }
     | undefined,
 ): string | null {
   if (!last) return null;
+  // «70 × 10 @7» — с RPE понятнее, почему рекомендация такая (было легко/тяжело).
+  const fmtSet = (d: { weightKg: number; reps: number; rpe?: number }) =>
+    `${d.weightKg > 0 ? `${fmtWeight(d.weightKg)} × ` : ""}${d.reps}${d.rpe !== undefined ? ` @${d.rpe}` : ""}`;
   if (last.setDetails && last.setDetails.length > 0) {
-    return last.setDetails
-      .slice(0, 4)
-      .map((d) =>
-        d.weightKg > 0
-          ? `${fmtWeight(d.weightKg)} × ${d.reps}`
-          : `${d.reps} повт`,
-      )
-      .join(" · ");
+    return last.setDetails.slice(0, 4).map(fmtSet).join(" · ");
   }
   if (last.reps) {
-    return last.weightKg > 0
-      ? `${fmtWeight(last.weightKg)} × ${last.reps}`
-      : `${last.reps} повт`;
+    return `${last.weightKg > 0 ? `${fmtWeight(last.weightKg)} × ` : ""}${last.reps}${last.rpe !== undefined ? ` @${last.rpe}` : ""}`;
   }
   return last.weightKg > 0 ? `${fmtWeight(last.weightKg)} кг` : null;
 }
@@ -127,8 +124,13 @@ interface WorkoutModeProps {
   weekLabel?: string;
   logs: WorkoutLogLite[];
   saving: boolean;
+  /** Инвентарь пользователя (нормализованные ключи) — фильтр замен упражнения.
+   *  Не передан — показываем все альтернативы из каталога. */
+  equipment?: Equipment[];
   onClose: () => void;
-  onSave: (exercises: SavedExercise[], effort: Effort) => Promise<void>;
+  /** Сохранить тренировку; true — успех (показываем сводку и стираем
+   *  черновик), false — ошибка (черновик и ввод остаются, можно повторить). */
+  onSave: (exercises: SavedExercise[], effort: Effort) => Promise<boolean>;
 }
 
 /** Формат mm:ss из секунд. */
@@ -140,22 +142,33 @@ function fmt(sec: number): string {
 
 const EFFORT_KEYS: Effort[] = ["easy", "normal", "hard"];
 
-/** Черновик тренировки в sessionStorage: введённые подходы не теряются при
- *  закрытии режима, перезагрузке или случайном выходе. Очищается после
- *  успешного сохранения. */
+/** Черновик тренировки в localStorage: введённые подходы переживают не только
+ *  закрытие режима/перезагрузку, но и закрытие вкладки или сворачивание
+ *  приложения на телефоне (ОС может убить вкладку). Очищается после успешного
+ *  сохранения. Черновик старше суток считаем брошенным — не воскрешаем
+ *  недельной давности тренировку. */
 interface DraftState {
   done: Record<string, number>;
   weights: Record<string, string>;
   setLogs: Record<string, Record<number, SetInput>>;
   /** Редактируемый подход — возвращаемся к тому, где остановились. */
   activeSet: { name: string; idx: number } | null;
+  /** Когда черновик обновлён в последний раз (мс). */
+  savedAt?: number;
 }
+
+/** Черновик живёт сутки — дальше это скорее брошенная тренировка. */
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 function readDraft(key: string): DraftState | null {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<DraftState>;
+    if (parsed.savedAt && Date.now() - parsed.savedAt > DRAFT_TTL_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
     return {
       done: parsed.done ?? {},
       weights: parsed.weights ?? {},
@@ -179,6 +192,7 @@ export function WorkoutMode({
   weekLabel,
   logs,
   saving,
+  equipment,
   onClose,
   onSave,
 }: WorkoutModeProps) {
@@ -209,6 +223,54 @@ export function WorkoutMode({
   );
   // Сводка завершённой тренировки — показывается после сохранения.
   const [summary, setSummary] = useState<WorkoutSummary | null>(null);
+  // Локальная копия упражнений дня — «заменить упражнение» меняет только её
+  // (план в Convex не переписываем): в лог уйдёт фактическое упражнение.
+  const [exercises, setExercises] = useState<Exercise[]>(() => day.exercises);
+  // Открытая панель замены по упражнению.
+  const [replaceOpen, setReplaceOpen] = useState<Record<string, boolean>>({});
+
+  // Доступные замены по упражнению: фильтр по инвентарю пользователя (если
+  // передан) + исключение упражнений, уже стоящих в этом дне.
+  const alternatives = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const ex of exercises) {
+      map[ex.name] = (EQUIPMENT_ALTERNATIVES[ex.name] ?? [])
+        .filter(
+          (alt) =>
+            !equipment || alt.equipment.some((eq) => equipment.includes(eq)),
+        )
+        .filter((alt) => !exercises.some((e) => e.name === alt.name))
+        .slice(0, 3)
+        .map((a) => a.name);
+    }
+    return map;
+  }, [exercises, equipment]);
+
+  /** Заменить упражнение альтернативой (по инвентарю/движению): подходы,
+   *  веса и логи старого упражнения сбрасываются, день/план не меняются. */
+  const replaceExercise = (oldName: string, newName: string) => {
+    setExercises((prev) =>
+      prev.map((e) => (e.name === oldName ? { ...e, name: newName } : e)),
+    );
+    setDone((d) => {
+      const c = { ...d };
+      delete c[oldName];
+      return c;
+    });
+    setWeights((w) => {
+      const c = { ...w };
+      delete c[oldName];
+      return c;
+    });
+    setSetLogs((m) => {
+      const c = { ...m };
+      delete c[oldName];
+      return c;
+    });
+    setActiveSet((a) => (a?.name === oldName ? null : a));
+    setRest(null);
+    setReplaceOpen((r) => ({ ...r, [oldName]: false }));
+  };
 
   // «С прошлого раза»: самый свежий лог, где встречалось это упражнение — вес и
   // повторы. Вычисляется ДО weights, чтобы ленивый инициализатор useState мог
@@ -261,12 +323,18 @@ export function WorkoutMode({
     return initial;
   });
 
-  // Черновик в sessionStorage: каждый сдвиг состояния подхватывается сразу.
+  // Черновик в localStorage: каждый сдвиг состояния подхватывается сразу.
   // Ошибки хранилища (приватный режим) не должны ломать тренировку.
   useEffect(() => {
     try {
-      const payload: DraftState = { done, weights, setLogs, activeSet };
-      sessionStorage.setItem(draftKey, JSON.stringify(payload));
+      const payload: DraftState = {
+        done,
+        weights,
+        setLogs,
+        activeSet,
+        savedAt: Date.now(),
+      };
+      localStorage.setItem(draftKey, JSON.stringify(payload));
     } catch {
       /* не критично — черновик просто не сохранится */
     }
@@ -281,15 +349,15 @@ export function WorkoutMode({
   // Автопрокрутка: упражнение закрыто → плавно ведём к следующему недоделанному.
   // Пользователь не думает, куда идти дальше — экран сам подводит.
   useEffect(() => {
-    for (const ex of day.exercises) {
+    for (const ex of exercises) {
       const complete = (done[ex.name] ?? 0) >= ex.sets;
       if (complete && !prevComplete.current.has(ex.name)) {
-        const idx = day.exercises.indexOf(ex);
+        const idx = exercises.indexOf(ex);
         const next =
-          day.exercises
+          exercises
             .slice(idx + 1)
             .find((e) => (done[e.name] ?? 0) < e.sets) ??
-          day.exercises.find((e) => (done[e.name] ?? 0) < e.sets);
+          exercises.find((e) => (done[e.name] ?? 0) < e.sets);
         sectionRefs.current[next?.name ?? ""]?.scrollIntoView?.({
           behavior: "smooth",
           block: "start",
@@ -298,11 +366,11 @@ export function WorkoutMode({
       }
     }
     prevComplete.current = new Set(
-      day.exercises
+      exercises
         .filter((e) => (done[e.name] ?? 0) >= e.sets)
         .map((e) => e.name),
     );
-  }, [done, day.exercises]);
+  }, [done, exercises]);
 
   // Отсчёт таймера отдыха. Зависим только от флага running (а не от всего
   // объекта rest), чтобы интервал не пересоздавался на каждый тик.
@@ -319,8 +387,8 @@ export function WorkoutMode({
     return () => window.clearInterval(id);
   }, [restRunning]);
 
-  const totalSets = day.exercises.reduce((s, ex) => s + ex.sets, 0);
-  const doneSets = day.exercises.reduce(
+  const totalSets = exercises.reduce((s, ex) => s + ex.sets, 0);
+  const doneSets = exercises.reduce(
     (s, ex) => s + Math.min(done[ex.name] ?? 0, ex.sets),
     0,
   );
@@ -361,7 +429,7 @@ export function WorkoutMode({
   /** «Завершить тренировку» — собираем упражнения (по подходам из setLogs,
    *  фолбэк — вес упражнения и повторы из плана) и спрашиваем оценку усилия. */
   const handleFinish = () => {
-    const exercises = day.exercises
+    const savedExercises = exercises
       .filter((ex) => (done[ex.name] ?? 0) > 0)
       .map((ex) => {
         const doneCount = Math.min(done[ex.name] ?? 0, ex.sets);
@@ -391,17 +459,20 @@ export function WorkoutMode({
           setDetails: sets,
         };
       });
-    if (exercises.length === 0) return;
-    setPending(exercises);
+    if (savedExercises.length === 0) return;
+    setPending(savedExercises);
   };
 
-  /** Сохранили + сразу показываем сводку (сравнение с прошлой тренировкой). */
+  /** Сохранили + сразу показываем сводку (сравнение с прошлой тренировкой).
+   *  При ошибке сохранения (onSave → false) сводку НЕ показываем и черновик
+   *  не стираем — пользователь видит тост об ошибке и может повторить. */
   const submitEffort = async (effort: Effort) => {
     if (!pending) return;
-    await onSave(pending, effort);
+    const ok = await onSave(pending, effort);
+    if (!ok) return;
     // Тренировка сохранена — черновик больше не нужен.
     try {
-      sessionStorage.removeItem(draftKey);
+      localStorage.removeItem(draftKey);
     } catch {
       /* не критично */
     }
@@ -540,7 +611,7 @@ export function WorkoutMode({
             </div>
           )}
 
-          {day.exercises.map((ex) => {
+          {exercises.map((ex) => {
             const doneCount = Math.min(done[ex.name] ?? 0, ex.sets);
             const complete = doneCount >= ex.sets;
             const last = lastEntries[ex.name];
@@ -620,12 +691,51 @@ export function WorkoutMode({
                         : ""}
                     </p>
                   </div>
-                  {complete && (
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-                      <Check className="size-3.5" />
-                    </span>
-                  )}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {complete && (
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                        <Check className="size-3.5" />
+                      </span>
+                    )}
+                    {(alternatives[ex.name]?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setReplaceOpen((r) => ({
+                            ...r,
+                            [ex.name]: !r[ex.name],
+                          }))
+                        }
+                        aria-expanded={!!replaceOpen[ex.name]}
+                        aria-label={`Заменить ${ex.name}`}
+                        title="Заменить упражнение"
+                        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <Repeat className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Замена упражнения: 2–4 альтернативы по движению/инвентарю.
+                    Подходы старого упражнения сбрасываются — честный рестарт. */}
+                {replaceOpen[ex.name] && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5 rounded-md bg-secondary/30 px-3 py-2">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      Заменить на:
+                    </span>
+                    {(alternatives[ex.name] ?? []).map((alt) => (
+                      <button
+                        key={alt}
+                        type="button"
+                        onClick={() => replaceExercise(ex.name, alt)}
+                        className="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors hover:border-brand hover:text-brand"
+                      >
+                        {alt}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* Разминочные подходы (пересчитываются от введённого веса).
                     Для штанги не опускаются ниже пустого грифа (20 кг). */}
@@ -805,6 +915,11 @@ export function WorkoutMode({
                             reps: e.target.value.replace(/[^\d]/g, ""),
                           })
                         }
+                        // Enter = «Готово»: вес → повторы → Enter, клавиатуру
+                        // закрывать вручную не нужно.
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") setActiveSet(null);
+                        }}
                         className="h-9 w-14 text-center"
                         aria-label={`Повторы подхода ${activeSet.idx} для ${ex.name}`}
                       />
@@ -830,6 +945,14 @@ export function WorkoutMode({
                             {r}
                           </button>
                         ))}
+                        <button
+                          type="button"
+                          onClick={() => setActiveSet(null)}
+                          aria-label="Закрыть редактор подхода"
+                          className="ml-1 rounded-md px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          Готово
+                        </button>
                       </div>
                     </div>
                   </div>

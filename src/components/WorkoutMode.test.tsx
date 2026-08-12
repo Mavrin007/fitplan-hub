@@ -54,9 +54,10 @@ function renderMode(
       }[];
     }[];
     saving?: boolean;
+    equipment?: ("barbell" | "dumbbell" | "machine" | "cable" | "kettlebell" | "bodyweight")[];
   } = {},
 ) {
-  const onSave = vi.fn(async () => {});
+  const onSave = vi.fn(async () => true);
   const onClose = vi.fn();
   render(
     <WorkoutMode
@@ -65,6 +66,7 @@ function renderMode(
       weekLabel="Неделя 2 · Прогресс"
       logs={overrides.logs ?? []}
       saving={overrides.saving ?? false}
+      equipment={overrides.equipment}
       onClose={onClose}
       onSave={onSave}
     />,
@@ -75,8 +77,9 @@ function renderMode(
 describe("WorkoutMode", () => {
   beforeEach(() => {
     vi.useRealTimers();
-    // Черновик сессии не должен протекать между тестами.
-    sessionStorage.clear();
+    // Черновик сессии не должен протекать между тестами (localStorage —
+    // черновик тренировки теперь живёт там, чтобы переживать закрытие вкладки).
+    localStorage.clear();
   });
 
   it("показывает план, упражнения и заметки дня", () => {
@@ -253,8 +256,7 @@ describe("WorkoutMode", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("показывает рекомендацию KILO по прошлому логу (RPE ≤ 7 → +2.5 кг)", async () => {
-    const user = userEvent.setup();
+  it("показывает рекомендацию KILO по прошлому логу (двойная прогрессия: повторы → вес)", async () => {
     renderMode({
       logs: [
         {
@@ -267,21 +269,21 @@ describe("WorkoutMode", () => {
       ],
     });
 
-    // План: 3 × 8-12 → рекомендация 22.5 кг × 8–12 с обоснованием.
+    // План: 3 × 8-12. 10 повторов — в середине диапазона: «сначала повторы» —
+    // тот же вес 20 кг, цель 11–12 (вес 22.5 только на верхней планке 12).
     const rec = within(exerciseSection("Жим гантелей"));
-    // Узел содержит и суффикс (« · добавь 2.5 кг») — матчим по регэкспу.
     expect(rec.getByText(/Рекомендация KILO/)).toBeInTheDocument();
-    // Рекомендуемая нагрузка: 22.5 кг × 8–12 (текст собран в одном узле).
     expect(
       rec.getByText((content, el) =>
-        el?.textContent === "22.5 кг × 8–12" && content !== "",
+        el?.textContent === "20 кг × 11–12" && content !== "",
       ),
     ).toBeInTheDocument();
     expect(rec.getByText(/RPE 7/)).toBeInTheDocument();
-
-    // «Применить» подставляет вес в поле ввода.
-    await user.click(rec.getByRole("button", { name: /Применить 22\.5 кг/ }));
-    expect(screen.getByLabelText("Вес для Жим гантелей")).toHaveValue("22.5");
+    expect(rec.getByText(/добираем повторы/)).toBeInTheDocument();
+    // Вес тот же — кнопки «Применить» нет.
+    expect(
+      rec.queryByRole("button", { name: /Применить/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("без данных прошлой тренировки рекомендация не показывается", () => {
@@ -310,6 +312,39 @@ describe("WorkoutMode", () => {
 
     await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ошибка сохранения: сводка не показывается, черновик не стирается, можно повторить", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => false);
+    render(
+      <WorkoutMode
+        day={DAY}
+        planName="Силовой фулбоди"
+        weekLabel="Неделя 2 · Прогресс"
+        logs={[]}
+        saving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+
+    await markSets(user, "Жим гантелей", 3);
+    await user.click(screen.getByRole("button", { name: /Завершить тренировку/ }));
+    await user.click(screen.getByRole("button", { name: /Норм/ }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    // Сохранение не удалось — сводки «завершено» нет, экран усилия на месте.
+    expect(screen.queryByText("Тренировка завершена")).not.toBeInTheDocument();
+    expect(screen.getByText("Насколько тяжело было?")).toBeInTheDocument();
+
+    // Повторная попытка успешна — сводка появляется, черновик можно очищать.
+    onSave.mockResolvedValue(true);
+    await user.click(screen.getByRole("button", { name: /Норм/ }));
+    await waitFor(() =>
+      expect(screen.getByText("Тренировка завершена")).toBeInTheDocument(),
+    );
+    expect(onSave).toHaveBeenCalledTimes(2);
   });
 
   it("показывает разминочные подходы для упражнения с весом", async () => {
@@ -384,7 +419,7 @@ describe("WorkoutMode", () => {
       logs: [] as never[],
       saving: false,
       onClose: vi.fn(),
-      onSave: vi.fn(async () => {}),
+      onSave: vi.fn(async () => true),
     };
     const { unmount } = render(<WorkoutMode {...props} />);
     await markSets(user, "Жим гантелей", 2);
@@ -432,10 +467,73 @@ describe("WorkoutMode", () => {
     expect(
       screen.getByText((content, el) =>
         el?.textContent ===
-          "прошлый раз: 22.5 × 10 · 22.5 × 10 · 20 × 9" &&
+          "прошлый раз: 22.5 × 10 @7 · 22.5 × 10 @8 · 20 × 9 @9" &&
         content !== "",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("«прошлый раз» показывает RPE, когда он есть в логе", () => {
+    renderMode({
+      logs: [
+        {
+          date: "2026-07-20",
+          exercises: [{ name: "Жим гантелей", weightKg: 22.5, reps: 10, rpe: 7 }],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByText((content, el) =>
+        el?.textContent === "прошлый раз: 22.5 × 10 @7" &&
+        content !== "",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("«Готово» закрывает редактор подхода (вес → повторы → Done)", async () => {
+    const user = userEvent.setup();
+    renderMode();
+
+    await markSets(user, "Жим гантелей", 1);
+    const section = exerciseSection("Жим гантелей");
+    // Редактор открыт: подпись «Подход 1» видна.
+    expect(within(section).getByText("Подход 1")).toBeInTheDocument();
+
+    await user.click(
+      within(section).getByRole("button", { name: "Закрыть редактор подхода" }),
+    );
+    expect(within(section).queryByText("Подход 1")).not.toBeInTheDocument();
+  });
+
+  it("замена упражнения: альтернативы по инвентарю, состояние сбрасывается", async () => {
+    const user = userEvent.setup();
+    renderMode({ equipment: ["dumbbell", "bodyweight"] });
+
+    // «Жим гантелей» в карте замен нет — кнопки нет; у «Подтягиваний» есть.
+    expect(
+      screen.queryByRole("button", { name: "Заменить Жим гантелей" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Заменить Подтягивания" }),
+    );
+
+    const section = exerciseSection("Подтягивания");
+    // Тяга гантели (гантели) доступна; тяга верхнего блока (тренажёр/блок) —
+    // отфильтрована по инвентарю пользователя.
+    expect(
+      within(section).getByRole("button", { name: "Тяга гантели в наклоне" }),
+    ).toBeInTheDocument();
+    expect(
+      within(section).queryByRole("button", { name: "Тяга верхнего блока" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(section).getByRole("button", { name: "Тяга гантели в наклоне" }),
+    );
+    // Упражнение заменено: старого нет, новое на его месте.
+    expect(screen.queryByText("Подтягивания")).not.toBeInTheDocument();
+    expect(screen.getByText("Тяга гантели в наклоне")).toBeInTheDocument();
   });
 
   it("−/+ у веса шагают к реально доступному весу снаряда", async () => {
