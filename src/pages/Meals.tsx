@@ -295,17 +295,25 @@ export default function Meals() {
   };
 
   const activeMenuGoal = menuGoal ?? (profile ? profile.fitnessGoal : "maintain");
+  // Цели под выбранную цель меню: те же параметры тела, но цель чипа. Раньше
+  // меню строилось под цель ПРОФИЛЯ — переключение «Похудение»/«Набор массы»
+  // почти не меняло меню (всё подгонялось под одни и те же цели профиля), а
+  // строка «К цели» сравнивала день с чужой целью. Теперь у каждой цели свои
+  // калории/КБЖУ, и меню считается и показывается под СВОЮ цель.
+  const menuTargets = profile
+    ? computeTargets({ ...profile, fitnessGoal: activeMenuGoal })
+    : null;
   // Дневной план строится под выбранную цель меню — если переключили стиль
   // меню на неделе, план на сегодня совпадает с первым днём недельного меню.
   const plan = useMemo(() => {
-    if (!targets) return null;
-    return generateMealPlan(todayKey(), activeMenuGoal, targets);
-  }, [targets, activeMenuGoal]);
+    if (!menuTargets) return null;
+    return generateMealPlan(todayKey(), activeMenuGoal, menuTargets);
+  }, [menuTargets, activeMenuGoal]);
 
   const weeklyPlan = useMemo(() => {
-    if (!targets) return null;
-    return generateWeeklyMealPlan(activeMenuGoal, targets);
-  }, [targets, activeMenuGoal]);
+    if (!menuTargets) return null;
+    return generateWeeklyMealPlan(activeMenuGoal, menuTargets);
+  }, [menuTargets, activeMenuGoal]);
 
   // Записи выбранного «прошлого» дня — для предпросмотра количества.
   const copyLog = useQuery(api.mealLog.getByDate, { date: copyFromDate });
@@ -1379,7 +1387,7 @@ export default function Meals() {
       </Dialog>
 
       {/* Недельное меню под цель */}
-      {weeklyPlan && targets && (
+      {weeklyPlan && targets && menuTargets && (
         <section className="space-y-5">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
@@ -1394,24 +1402,32 @@ export default function Meals() {
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  "lose_weight",
-                  "gain_muscle",
-                  "maintain",
-                  "improve_endurance",
-                  "strength",
-                ] as FitnessGoal[]
-              ).map((g) => (
-                <Chip
-                  key={g}
-                  selected={activeMenuGoal === g}
-                  onClick={() => setMenuGoal(g)}
-                >
-                  {GOAL_LABELS[g]}
-                </Chip>
-              ))}
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    "lose_weight",
+                    "gain_muscle",
+                    "maintain",
+                    "improve_endurance",
+                    "strength",
+                  ] as FitnessGoal[]
+                ).map((g) => (
+                  <Chip
+                    key={g}
+                    selected={activeMenuGoal === g}
+                    onClick={() => setMenuGoal(g)}
+                  >
+                    {GOAL_LABELS[g]}
+                  </Chip>
+                ))}
+              </div>
+              {profile && activeMenuGoal !== profile.fitnessGoal && (
+                <p className="w-full text-right text-[11px] text-muted-foreground">
+                  Предпросмотр под «{GOAL_LABELS[activeMenuGoal].toLowerCase()}» —
+                  цели профиля не меняются.
+                </p>
+              )}
             </div>
           </div>
 
@@ -1419,7 +1435,7 @@ export default function Meals() {
             {weeklyPlan.days.map((day, dIdx) => {
               const pct = Math.min(
                 100,
-                Math.round((day.calories / targets.calories) * 100),
+                Math.round((day.calories / menuTargets.calories) * 100),
               );
               return (
                 <div
@@ -1500,11 +1516,11 @@ export default function Meals() {
                       />
                     </div>
                     <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
-                      <span>Б {day.protein}/{targets.protein} г</span>
-                      <span>У {day.carbs}/{targets.carbs} г</span>
-                      <span>Ж {day.fat}/{targets.fat} г</span>
+                      <span>Б {day.protein}/{menuTargets.protein} г</span>
+                      <span>У {day.carbs}/{menuTargets.carbs} г</span>
+                      <span>Ж {day.fat}/{menuTargets.fat} г</span>
                     </div>
-                    <MacroMatchRow value={day} target={targets} />
+                    <MacroMatchRow value={day} target={menuTargets} />
                   </div>
                 </div>
               );
@@ -2220,14 +2236,14 @@ export default function Meals() {
                 <DialogTitle>Предложенный план на сегодня</DialogTitle>
                 <DialogDescription>
                   Меню под цель «{GOAL_LABELS[activeMenuGoal].toLowerCase()}» —
-                  {targets.calories.toLocaleString("ru-RU")} ккал. Блюда совпадают с первым
+                  {menuTargets ? menuTargets.calories.toLocaleString("ru-RU") : ""} ккал. Блюда совпадают с первым
                   днём недельного меню. После добавления всё можно отредактировать.
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          {plan && (
+          {plan && menuTargets && (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 {plan.meals.map((m: PlannedMeal, mi) => (
@@ -2277,7 +2293,7 @@ export default function Meals() {
                     {plan.calories.toLocaleString("ru-RU")}
                     <span className="text-sm text-muted-foreground">
                       {" "}
-                      / {targets.calories.toLocaleString("ru-RU")} ккал
+                      / {menuTargets.calories.toLocaleString("ru-RU")} ккал
                     </span>
                   </span>
                 </div>
@@ -2286,17 +2302,17 @@ export default function Meals() {
                     className="h-full rounded-full bg-brand"
                     initial={{ width: 0 }}
                     animate={{
-                      width: `${Math.min(100, Math.round((plan.calories / targets.calories) * 100))}%`,
+                      width: `${Math.min(100, Math.round((plan.calories / menuTargets.calories) * 100))}%`,
                     }}
                     transition={{ duration: 0.7, ease: "easeOut", delay: 0.1 }}
                   />
                 </div>
                 <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
-                  <span>Б {plan.protein}/{targets.protein} г</span>
-                  <span>У {plan.carbs}/{targets.carbs} г</span>
-                  <span>Ж {plan.fat}/{targets.fat} г</span>
+                  <span>Б {plan.protein}/{menuTargets.protein} г</span>
+                  <span>У {plan.carbs}/{menuTargets.carbs} г</span>
+                  <span>Ж {plan.fat}/{menuTargets.fat} г</span>
                 </div>
-                <MacroMatchRow value={plan} target={targets} />
+                <MacroMatchRow value={plan} target={menuTargets} />
               </div>
 
               <Button className="w-full" onClick={handleAddAllPlan}>

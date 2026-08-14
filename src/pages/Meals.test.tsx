@@ -29,6 +29,7 @@ import {
   type MealLogUpdateArgs,
 } from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
+import { computeTargets } from "@/lib/nutrition";
 import {
   generateMealPlan,
   generateWeeklyMealPlan,
@@ -700,6 +701,39 @@ describe("Meals", () => {
       }),
     );
     expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
+  });
+
+  it("переключение цели меню пересчитывает цели КБЖУ под выбранную цель, а не цель профиля", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // Профиль — «Похудение»: меню по умолчанию строится под СВОЮ цель, а не
+    // под цель профиля — именно она считается «эталонной» для подгонки порций
+    // и строки «К цели» в каждом дне.
+    expect(vi.mocked(generateWeeklyMealPlan)).toHaveBeenCalledWith(
+      "lose_weight",
+      computeTargets({ ...profile, fitnessGoal: "lose_weight" }),
+    );
+
+    // Переключаем на «Набор массы» — цели меню пересчитываются под набор
+    // (больше ккал/углеводов/белка). Раньше меню всех целей подгонялось под
+    // цели ПРОФИЛЯ, из-за чего «Похудение»/«Поддержание»/«Набор» почти не
+    // отличались, а строка «К цели» сравнивала день с чужой целью.
+    await user.click(screen.getByRole("button", { name: "Набор мышечной массы" }));
+    expect(vi.mocked(generateWeeklyMealPlan)).toHaveBeenCalledWith(
+      "gain_muscle",
+      computeTargets({ ...profile, fitnessGoal: "gain_muscle" }),
+    );
+    expect(vi.mocked(generateMealPlan)).toHaveBeenCalledWith(
+      todayKey(),
+      "gain_muscle",
+      computeTargets({ ...profile, fitnessGoal: "gain_muscle" }),
+    );
+
+    // Строка «К цели» в дне меню теперь сравнивает с целями выбранной цели:
+    // при наборе массы дневная калорийность ≈ цели набора, а не цели профиля.
+    expect(screen.getByText(/5 приёмов/)).toBeInTheDocument();
   });
 
   // Бывший источник duplicate-key: ключ недельного меню — `${mealType}-${name}`,
