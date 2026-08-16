@@ -29,6 +29,7 @@ import type * as premium from "../premium.js";
 import type * as profiles from "../profiles.js";
 import type * as rateLimit from "../rateLimit.js";
 import type * as roles from "../roles.js";
+import type * as telegram from "../telegram.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
 import type * as water from "../water.js";
@@ -63,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   profiles: typeof profiles;
   rateLimit: typeof rateLimit;
   roles: typeof roles;
+  telegram: typeof telegram;
   users: typeof users;
   validation: typeof validation;
   water: typeof water;

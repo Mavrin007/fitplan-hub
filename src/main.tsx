@@ -10,6 +10,7 @@ import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { MotionConfig } from "framer-motion";
 import { StrictMode, useEffect, lazy, Suspense } from "react";
+import { initTelegramWebApp } from "./lib/telegram/webApp";
 
 // AssistantChat и VlyToolbar не входят в первый экран (плавающие оверлеи):
 // грузим их лениво после первичной отрисовки — это убирает из стартового
@@ -59,6 +60,10 @@ if (sentryEnabled) {
 }
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+
+// Telegram Mini App: как можно раньше подтверждаем показ и разворачиваем
+// WebView на весь экран. Вне Telegram — no-op (см. lib/telegram/webApp.ts).
+initTelegramWebApp();
 
 // PWA: сервис-воркер регистрируем только в прод-сборке. В dev он ломал бы
 // HMR (кэширование навигаций и /assets), поэтому офлайн-оболочка включена

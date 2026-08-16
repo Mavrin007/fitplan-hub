@@ -16,6 +16,7 @@
     "perf:check": "node scripts/lighthouse-check.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "seo:gen": "node scripts/generate-seo.mjs",
+    "telegram:setup": "node scripts/telegram-setup.mjs",
     "format": "prettier --write .",
     "preview": "vite preview"
   },
@@ -35,7 +36,7 @@
     "@zumer/snapdom": "^2.23.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "convex": "^1.43.0",
+    "convex": "^1.44.0",
     "framer-motion": "^12.23.25",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.555.0",

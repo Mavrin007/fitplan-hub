@@ -497,6 +497,66 @@ describe("Profile", () => {
     expect(authMocks.signOut).toHaveBeenCalledTimes(1);
   });
 
+  describe("Telegram-бот", () => {
+    it("без привязки показывает кнопку и выдаёт код по клику", async () => {
+      const user = userEvent.setup();
+      setupFilled();
+      setMutation(api.telegram.requestLinkCode, async () => ({
+        code: "ABC123",
+        expiresAt: Date.now() + 600_000,
+      }));
+
+      renderWithRouter(<Profile />);
+      const btn = await screen.findByRole("button", {
+        name: "Получить код привязки",
+      });
+      await user.click(btn);
+
+      expect(
+        convexMock.mutationCalls.some((c) => c.path === "telegram.requestLinkCode"),
+      ).toBe(true);
+      expect(await screen.findByText("ABC123")).toBeInTheDocument();
+      expect(screen.getByText(/действует 10 мин/)).toBeInTheDocument();
+    });
+
+    it("с привязкой показывает имя и кнопку отвязки", async () => {
+      setupFilled();
+      setQuery(api.telegram.myLink, undefined, {
+        username: "tester",
+        firstName: null,
+        linkedAt: Date.now(),
+      });
+
+      renderWithRouter(<Profile />);
+      expect(await screen.findByText("@tester")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Отвязать" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Получить код привязки")).not.toBeInTheDocument();
+    });
+
+    it("отвязка вызывает мутацию unlink", async () => {
+      const user = userEvent.setup();
+      setupFilled();
+      setQuery(api.telegram.myLink, undefined, {
+        username: "tester",
+        firstName: null,
+        linkedAt: Date.now(),
+      });
+      setMutation(api.telegram.unlink, async () => {});
+
+      renderWithRouter(<Profile />);
+      await user.click(
+        await screen.findByRole("button", { name: "Отвязать" }),
+      );
+      await waitFor(() => {
+        expect(
+          convexMock.mutationCalls.some((c) => c.path === "telegram.unlink"),
+        ).toBe(true);
+      });
+    });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

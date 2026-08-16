@@ -92,6 +92,11 @@ export const api = {
   premium: { getMyAccess: ref("premium.getMyAccess") },
   photo: { analyzeMealPhoto: ref("photo.analyzeMealPhoto") },
   rateLimit: { consumeRateLimitAction: ref("rateLimit.consumeRateLimitAction") },
+  telegram: {
+    myLink: ref("telegram.myLink"),
+    requestLinkCode: ref("telegram.requestLinkCode"),
+    unlink: ref("telegram.unlink"),
+  },
 };
 
 function pathOf(ref: unknown): string {

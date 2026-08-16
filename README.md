@@ -211,6 +211,54 @@ Heavy calculations are cached: workout plans are generated once and stored in
 derive from the user's own logs with client-side memoization — no per-render
 recomputation, and no denormalized weekly summary is needed at this scale.
 
+## Telegram: бот + Mini App
+
+КИЛО работает в Telegram двумя способами (оба уже в коде, осталось создать
+бота и зарегистрировать вебхук — см. ниже):
+
+1. **Бот-помощник** (`src/lib/telegram/bot.ts` + `src/convex/telegram.ts`) —
+   чат, привязанный к аккаунту приложения по одноразовому коду
+   (Профиль → Telegram → «Получить код» → `/link <код>`). Команды:
+   `/day` (итог дня), `/meal` или просто текст «курица 150» (поиск продукта →
+   порция → запись в дневник), `/water`, `/recent`, `/today` (план
+   тренировки с рекомендованными весами). Вся логика покрыта юнит-тестами
+   (`src/lib/telegram/bot.test.ts`) без рантайма Convex/Telegram.
+2. **Mini App** (`src/lib/telegram/webApp.ts`) — то же веб-приложение,
+   открытое внутри Telegram по `https://t.me/<бот>/app`: WebView
+   разворачивается на весь экран, вход/привязка — как на сайте.
+
+Приём апдейтов — без отдельного сервера: Telegram шлёт POST на
+`/telegram-webhook` (Convex httpAction, см. `src/convex/http.ts`).
+
+### Переменные окружения (Convex Dashboard)
+
+| Переменная | Зачем |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | токен от @BotFather; обязателен для вебхука и исходящих сообщений |
+| `TELEGRAM_WEBHOOK_SECRET` | произвольная строка; Telegram кладёт её в заголовок `X-Telegram-Bot-Api-Secret-Token`, `handleUpdate` её проверяет (рекомендуется) |
+| `TELEGRAM_MINI_APP_URL` | https-URL приложения для кнопки Mini App в меню бота (фолбэк — канонический домен проекта) |
+
+### Настройка (один раз)
+
+1. В @BotFather создайте бота и (для Mini App) включите WebApp-режим
+   (`/newapp` с https-URL приложения).
+2. Задайте переменные из таблицы выше в Convex Dashboard.
+3. Зарегистрируйте вебхук и команды:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=<токен> \
+   TELEGRAM_WEBHOOK_URL=https://<deploy>.convex.site/telegram-webhook \
+   TELEGRAM_WEBHOOK_SECRET=<строка> \
+   npm run telegram:setup
+   ```
+
+   Скрипт (`scripts/telegram-setup.mjs`) вызывает `setWebhook` (с secret_token),
+   `setMyCommands` и ставит кнопку Mini App в чате с ботом. Флаги:
+   `--commands-only`, `--webhook-only`, `--unset` (снять вебхук).
+
+После этого: `https://t.me/<бот>` — чат с ботом, `https://t.me/<бот>/app` —
+Mini App. Кнопка «Открыть приложение» в меню бота ведёт в Mini App.
+
 ## Production: Convex cloud + Vercel
 
 ### 1. Deploy the backend to Convex cloud

@@ -97,6 +97,9 @@ const DEFAULT_TABLES = [
   "authRefreshTokens",
   "authVerifiers",
   "events", // product analytics (analytics.ts / day1Email.ts)
+  "telegramAccounts", // привязки Telegram (telegram.ts)
+  "linkCodes", // одноразовые коды привязки Telegram
+  "telegramStates", // состояние диалога бота
 ];
 
 export function makeConvexDb(

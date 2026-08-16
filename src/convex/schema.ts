@@ -264,6 +264,44 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_email_created", ["email", "createdAt"]),
 
+    // Привязка Telegram-аккаунта к пользователю приложения (бот + Mini App):
+    // одна строка = один telegram-аккаунт. Создаётся только через linkByCode
+    // (код из приложения), поэтому чужой telegram id не может «приклеиться»
+    // к чужому аккаунту.
+    telegramAccounts: defineTable({
+      telegramUserId: v.number(),
+      userId: v.id("users"),
+      username: v.optional(v.string()),
+      firstName: v.optional(v.string()),
+      chatId: v.optional(v.number()), // последний чат с ботом (для будущей рассылки)
+      linkedAt: v.number(),
+    })
+      .index("by_telegram", ["telegramUserId"])
+      .index("by_user", ["userId"]),
+
+    // Одноразовые коды привязки Telegram: пользователь получает код в
+    // приложении (Профиль → Telegram) и отправляет его боту (/link <код>).
+    // Строка живёт 10 минут и удаляется при первом использовании.
+    linkCodes: defineTable({
+      userId: v.id("users"),
+      code: v.string(),
+      expiresAt: v.number(),
+      createdAt: v.number(),
+    })
+      .index("by_code", ["code"])
+      .index("by_user", ["userId"]),
+
+    // Состояние диалога пользователя с ботом (одна строка на чат): текущий
+    // шаг флоу «поиск продукта → порция». Хранится на сервере, потому что
+    // callback_data инлайн-кнопок Telegram ограничен 64 байтами — кодировать
+    // в него и поисковый запрос, и выбранный продукт нельзя. Протухшие
+    // состояния удаляются при следующем обращении к чату.
+    telegramStates: defineTable({
+      chatId: v.number(),
+      state: v.any(), // JSON-стейт флоу; валидируется кодом бота (src/lib/telegram/bot.ts)
+      updatedAt: v.number(),
+    }).index("by_chat", ["chatId"]),
+
     // Rate-limit отправки OTP: одна строка на email, lastSentAt — время
     // последней отправки кода. Серверная защита прод-пути: интервал повторной
     // отправки 60с, чтобы не дёргать VLY-шлюз вхолостую (лимит попыток

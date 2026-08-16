@@ -37,6 +37,8 @@ export const RATE_LIMITS = {
   savePlan: { limit: 6, windowMs: 60_000 },
   /** Распознавание фото еды: 5 запросов в час — дорогой внешний вызов. */
   photo: { limit: 5, windowMs: 3_600_000 },
+  /** Запрос кода привязки Telegram: 5 кодов в минуту — перебор. */
+  telegramLink: { limit: 5, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitSpec>;
 
 /** Строка события лимита: только поля, нужные для подсчёта. */

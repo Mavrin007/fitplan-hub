@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router";
 import { exportAllJson } from "@/lib/export";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,10 @@ import {
   TRAINING_STYLE_LABELS,
 } from "@/lib/i18n";
 import { todayKey, shortDate } from "@/lib/dates";
+import {
+  TELEGRAM_BOT_USERNAME,
+  telegramMiniAppUrl,
+} from "@/lib/telegram/api";
 import { cn, parseLocalNumber } from "@/lib/utils";
 import { formatConvexError } from "@/lib/errors";
 import { motion } from "framer-motion";
@@ -58,6 +62,7 @@ import {
   CalendarDays,
   Check,
   Dumbbell,
+  ExternalLink,
   Grip,
   Link2,
   Loader2,
@@ -65,6 +70,7 @@ import {
   PersonStanding,
   Plus,
   Scale,
+  Send,
   ShieldAlert,
   Target,
   Weight,
@@ -145,6 +151,56 @@ export default function Profile() {
   const exportMyData = useQuery(api.account.exportMyData);
   const deleteMyAccount = useMutation(api.account.deleteMyAccount);
   const [deletingAccount, setDeletingAccount] = useState(false);
+
+  // Telegram-бот: привязка по одноразовому коду (живёт 10 минут).
+  const myLink = useQuery(api.telegram.myLink);
+  const requestTelegramCode = useMutation(api.telegram.requestLinkCode);
+  const unlinkTelegram = useMutation(api.telegram.unlink);
+  const [telegramCode, setTelegramCode] = useState<{
+    code: string;
+    expiresAt: number;
+  } | null>(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramNow, setTelegramNow] = useState(() => Date.now());
+
+  // Таймер на срок жизни кода: каждые 30 с обновляем «осталось минут».
+  useEffect(() => {
+    if (!telegramCode) return;
+    const t = window.setInterval(() => setTelegramNow(Date.now()), 30_000);
+    return () => window.clearInterval(t);
+  }, [telegramCode]);
+
+  const telegramLinkExpired =
+    telegramCode !== null && telegramNow >= telegramCode.expiresAt;
+  const telegramMinutesLeft =
+    telegramCode === null
+      ? 0
+      : Math.max(1, Math.ceil((telegramCode.expiresAt - telegramNow) / 60_000));
+
+  const handleTelegramCode = async () => {
+    setTelegramBusy(true);
+    try {
+      const res = await requestTelegramCode();
+      setTelegramCode(res);
+      // Срок жизни считаем от момента выдачи кода, а не от момента открытия
+      // страницы: иначе «осталось минут» завышается на время, проведённое на
+      // странице до нажатия кнопки.
+      setTelegramNow(Date.now());
+    } catch (err) {
+      toast.error(formatConvexError(err));
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
+  const handleTelegramUnlink = async () => {
+    try {
+      await unlinkTelegram();
+      toast.success("Telegram отвязан");
+    } catch (err) {
+      toast.error(formatConvexError(err));
+    }
+  };
 
   // Привязка почты к гостевому аккаунту: данные, сохранённые под анонимной
   // сессией, после этого доступны и при входе по почте с любого устройства.
@@ -1250,6 +1306,91 @@ export default function Profile() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Telegram-бот: привязка для быстрого лога еды/воды из Telegram */}
+      <section className="card-lift rounded-xl border bg-card p-6 shadow-elev-1 sm:p-8">
+        <div className="flex items-center gap-2">
+          <Send className="size-5 text-muted-foreground" />
+          <h2 className="m3-title-large">Telegram-бот</h2>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Записывайте еду и воду прямо из Telegram: напишите боту название
+          продукта, пользуйтесь кнопками или откройте приложение в Telegram
+          (Mini App). Для этого привяжите аккаунт.
+        </p>
+
+        {myLink ? (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center gap-2 rounded-lg border bg-secondary-container/30 px-3 py-2.5 text-sm">
+              <Check className="size-4 shrink-0 text-emerald-500" />
+              <span>
+                Привязано:{" "}
+                <span className="font-semibold">
+                  {myLink.username
+                    ? `@${myLink.username}`
+                    : (myLink.firstName ?? "аккаунт Telegram")}
+                </span>
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTelegramUnlink}
+              >
+                Отвязать
+              </Button>
+              <Button asChild variant="secondary" size="sm">
+                <a
+                  href={telegramMiniAppUrl()}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="size-4" />
+                  Открыть Mini App
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : telegramCode && !telegramLinkExpired ? (
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl border-2 border-dashed border-brand/40 bg-secondary-container/20 p-4 text-center">
+              <p className="label-overline text-muted-foreground">Код привязки</p>
+              <p className="mt-1 font-mono text-3xl font-bold tracking-[0.25em] num">
+                {telegramCode.code}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Отправьте боту <b>@{TELEGRAM_BOT_USERNAME}</b> команду{" "}
+                <b>/link {telegramCode.code}</b> — действует {telegramMinutesLeft} мин.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleTelegramCode}
+              disabled={telegramBusy}
+            >
+              Новый код
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <Button
+              type="button"
+              onClick={handleTelegramCode}
+              disabled={telegramBusy}
+            >
+              <Send className="size-4" />
+              {telegramBusy ? "Генерация…" : "Получить код привязки"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Бот: @{TELEGRAM_BOT_USERNAME}
+            </span>
           </div>
         )}
       </section>
