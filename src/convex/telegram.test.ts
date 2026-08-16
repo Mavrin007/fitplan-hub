@@ -34,7 +34,7 @@ const runRequestLinkCode = (
   requestLinkCode as unknown as {
     _handler: (
       ctx: Ctx,
-      args: {},
+      args: Record<string, never>,
     ) => Promise<{ code: string; expiresAt: number }>;
   }
 )._handler;
@@ -43,7 +43,7 @@ const runMyLink = (
   myLink as unknown as {
     _handler: (
       ctx: Ctx,
-      args: {},
+      args: Record<string, never>,
     ) => Promise<{
       username: string | null;
       firstName: string | null;
@@ -54,7 +54,7 @@ const runMyLink = (
 
 const runUnlink = (
   unlink as unknown as {
-    _handler: (ctx: Ctx, args: {}) => Promise<void>;
+    _handler: (ctx: Ctx, args: Record<string, never>) => Promise<void>;
   }
 )._handler;
 
