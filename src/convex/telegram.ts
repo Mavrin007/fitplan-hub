@@ -31,6 +31,7 @@ import {
   escapeHtml,
   sendMessage,
 } from "../lib/telegram/api";
+import { telegramStatus as buildTelegramStatus } from "../lib/telegram/status";
 import {
   handleUpdate as dispatchBotUpdate,
   normalizeUpdate,
@@ -618,6 +619,24 @@ function extractChatId(raw: unknown): number | null {
   const chat = source?.chat as Record<string, unknown> | undefined;
   return typeof chat?.id === "number" ? (chat.id as number) : null;
 }
+
+/**
+ * GET /telegram-status — диагностика интеграции без секретов:
+ * задан ли токен (только префикс), принимает ли его Bot API (getMe),
+ * зарегистрирован ли вебхук, заданы ли TELEGRAM_WEBHOOK_SECRET и
+ * TELEGRAM_MINI_APP_URL. Полезно после деплоя/смены токена: ответ — JSON,
+ * который можно открыть в браузере или curl'ом.
+ */
+export const telegramStatus = httpAction(async () => {
+  const status = await buildTelegramStatus({
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
+    miniAppUrl: process.env.TELEGRAM_MINI_APP_URL,
+  });
+  return new Response(JSON.stringify(status, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+});
 
 /** POST /telegram-webhook — приём апдейтов от Telegram. */
 export const handleUpdate = httpAction(async (ctx, request) => {

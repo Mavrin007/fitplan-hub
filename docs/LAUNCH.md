@@ -80,7 +80,7 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
   при деплое (проверьте, если деплоили с другим URL). После изменения — передеплой
   (CI или `vercel deploy --prod`).
 
-## Шаг 5 — Telegram: бот + Mini App ✅ (сделано 2026-08-17)
+## Шаг 5 — Telegram: бот + Mini App ✅ (сделано 2026-08-17, диагноз 2026-08-17)
 
 - Бот: **https://t.me/FitplanKiloBot** (id 8659935112, «Kilo»)
 - Mini App: **https://t.me/FitplanKiloBot/app** (кнопка «Открыть КИЛО» → https://fitplan-hub.vercel.app)
@@ -91,6 +91,41 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
   на `/auth` (Login Widget, подпись проверяется на сервере по
   `TELEGRAM_BOT_TOKEN`) + автовход в Mini App (initData). Новый Telegram
   сразу получает аккаунт КИЛО; уже привязанный — входит в свой.
+
+### Диагностика «бот молчит на /start» (проверено 2026-08-17)
+
+Снаружи всё зелёное: токен валиден (`getMe` → FitplanKiloBot, id 8659935112),
+вебхук зарегистрирован, `pending_update_count=0`, ошибок доставки нет.
+Полный конвейер (вебхук → обработка → sendMessage) проверен на dev-деплое
+с рабочим токеном: имитация `/start` возвращает HTTP 200. Значит, если бот
+не отвечает в проде, причина почти всегда одна из двух:
+
+1. **В Convex prod (energetic-coyote-927) стоит старый TELEGRAM_BOT_TOKEN**
+   (токен перевыпущен в BotFather после настройки). Входящие апдейты приходят
+   в любом случае, а исходящие `sendMessage` молча падают с 401 — вебхук
+   отвечает 200, Telegram ошибок не показывает (pending=0). Проверьте в
+   Convex Dashboard → Project **energetic-coyote-927** → Settings →
+   Environment Variables, что `TELEGRAM_BOT_TOKEN` равен актуальному токену
+   от @BotFather (актуальный рабочий: `8659935112:AAEO…`, сверка по
+   префиксу `86599` через `GET /telegram-status`). После обновления
+   переменной передеплойте функции (`npx convex deploy`) и нажмите `/start`
+   ещё раз.
+2. **Пользователь тестировал до регистрации вебхука** — просто нажать
+   `/start` ещё раз.
+
+### Эндпоинт диагностики `GET /telegram-status`
+
+Деплой с этим эндпоинтом отвечает JSON без секретов:
+
+```bash
+curl https://energetic-coyote-927.convex.site/telegram-status
+```
+
+Поля: `ok` (токен принят Bot API), `token.prefix` (первые 5 символов —
+сверка), `getMe` (id/username бота), `webhook` (url, pending, lastError),
+`webhookSecretConfigured`, `miniAppUrlConfigured`. Роут объявлен в
+`src/convex/http.ts`, логика — `src/lib/telegram/status.ts` (покрыта
+тестами).
 
 Если понадобится пересоздать вебхук (например, после смены токена):
 

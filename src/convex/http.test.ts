@@ -29,7 +29,7 @@ describe("http", () => {
     expect(auth.addHttpRoutes).toHaveBeenCalledTimes(1);
   });
 
-  it("регистрирует вебхук Telegram-бота", () => {
+  it("регистрирует вебхук Telegram-бота и статус-эндпоинт", () => {
     const router = (httpRouter as ReturnType<typeof vi.fn>).mock.results[0]
       .value as { route: ReturnType<typeof vi.fn> };
     expect(router.route).toHaveBeenCalledWith(
@@ -38,8 +38,14 @@ describe("http", () => {
         method: "POST",
       }),
     );
-    // Роут ровно один — вебхук Telegram.
-    expect(router.route).toHaveBeenCalledTimes(1);
+    expect(router.route).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/telegram-status",
+        method: "GET",
+      }),
+    );
+    // Ровно два роута: вебхук Telegram + диагностика.
+    expect(router.route).toHaveBeenCalledTimes(2);
   });
 
   it("экспортирует собранный роутер", () => {

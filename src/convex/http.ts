@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { auth } from "./auth";
-import { handleUpdate } from "./telegram";
+import { handleUpdate, telegramStatus } from "./telegram";
 
 const http = httpRouter();
 
@@ -12,6 +12,14 @@ http.route({
   path: "/telegram-webhook",
   method: "POST",
   handler: handleUpdate,
+});
+
+// Диагностика: GET /telegram-status — какой токен стоит на сервере, отвечает
+// ли он Bot API, зарегистрирован ли вебхук (без секретов в ответе).
+http.route({
+  path: "/telegram-status",
+  method: "GET",
+  handler: telegramStatus,
 });
 
 export default http;
