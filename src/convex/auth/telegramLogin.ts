@@ -26,6 +26,18 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** Только поля, которые подписал Telegram (без служебных source/create):
+ *  data_check_string строится ровно по полям виджета, лишний ключ ломает
+ *  подпись. */
+function widgetFields(credentials: unknown): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    ...(credentials as Record<string, unknown>),
+  };
+  delete fields.source;
+  delete fields.create;
+  return fields;
+}
+
 export const telegramLogin = ConvexCredentials({
   id: "telegram",
   authorize: async (
@@ -54,10 +66,7 @@ export const telegramLogin = ConvexCredentials({
       verified = await verifyTelegramAuth({
         source,
         botToken,
-        fields:
-          source === "widget"
-            ? (credentials as unknown as Record<string, unknown>)
-            : undefined,
+        fields: source === "widget" ? widgetFields(credentials) : undefined,
         initData:
           source === "webapp" ? asString(credentials.initData) ?? "" : undefined,
       });

@@ -661,9 +661,16 @@ export const handleUpdate = httpAction(async (ctx, request) => {
     try {
       await executeOp(op, token);
     } catch (e) {
-      // Одно сообщение может не уйти (бот заблокирован, сообщение удалено) —
-      // остальные операции выполняем, апдейт не валим.
-      console.error("Telegram op failed:", e);
+      // Одно сообщение может не уйти (бот заблокирован, сообщение удалено,
+      // некорректный parse_mode=HTML) — остальные операции выполняем, апдейт
+      // не валим. Но логируем с контекстом, чтобы «молчаливые» сбои (как
+      // непроэскейпленные <код> в тексте) было видно в dashboard.
+      const chatLabel =
+        op.op === "answerCallback" ? op.callbackQueryId : String(op.chatId);
+      console.error(
+        `Telegram op ${op.op} failed (${chatLabel}):`,
+        e instanceof Error ? e.message : e,
+      );
     }
   }
   return new Response("OK", { status: 200 });

@@ -115,6 +115,22 @@ function sendText(ops: BotOp[]): string {
   return op.op === "sendMessage" ? op.text : "";
 }
 
+/**
+ * Telegram parse_mode=HTML принимает только ограниченный набор тегов
+ * (<b>/<i>/<a>/<code>/<pre>/<tg-spoiler> и т.п.); любой другой `<...>`
+ * роняет sendMessage с 400 «Unsupported start tag», а вебхук молча
+ * глотает ошибку — пользователь не видит вообще ничего.
+ * Проверяем: после удаления разрешённых тегов в тексте не остаётся
+ * ни одного `<` или `>`.
+ */
+function expectHtmlSafe(text: string): void {
+  const withoutTags = text.replace(
+    /<\/?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|tg-spoiler|a)(?:\s[^>]*)?>/gi,
+    "",
+  );
+  expect(withoutTags).not.toMatch(/[<>]/);
+}
+
 describe("normalizeUpdate", () => {
   it("парсит текстовое сообщение", () => {
     const u = normalizeUpdate({
@@ -208,6 +224,25 @@ describe("/start и привязка", () => {
     });
     const ops = await handleUpdate(msg("/link XXXX"), deps);
     expect(sendText(ops)).toBe("Код истёк");
+  });
+});
+
+describe("HTML-безопасность сообщений (parse_mode=HTML)", () => {
+  it("/start без привязки экранирует <код> (иначе Telegram 400 и тишина)", async () => {
+    const deps = makeDeps({ findUserByTelegram: vi.fn(async () => null) });
+    const ops = await handleUpdate(msg("/start"), deps);
+    const text = sendText(ops);
+    expect(text).toContain("&lt;код&gt;");
+    expect(text).not.toContain("<код>");
+    expectHtmlSafe(text);
+  });
+
+  it("все ключевые команды шлют HTML-безопасный текст", async () => {
+    const deps = makeDeps({ findUserByTelegram: vi.fn(async () => null) });
+    for (const command of ["/start", "/help", "/link", "/menu"]) {
+      const ops = await handleUpdate(msg(command), deps);
+      expectHtmlSafe(sendText(ops));
+    }
   });
 });
 
