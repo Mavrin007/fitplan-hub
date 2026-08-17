@@ -4,6 +4,11 @@
  * Приложение КИЛО работает и как обычный сайт, и как Telegram Mini App
  * (кнопка бота). Вне Telegram все функции безопасно возвращают null/false —
  * ничего не ломается, скрипт telegram-web-app.js просто не инициализируется.
+ *
+ * ВАЖНО: официальный telegram-web-app.js создаёт стаб-объект window.Telegram
+ * и в обычном браузере (initData="", platform="unknown") — поэтому о
+ * «настоящем» Mini App судим по подписанным данным, а не по наличию объекта
+ * (см. isTelegramWebApp).
  */
 
 export interface TelegramWebAppUser {
@@ -32,12 +37,18 @@ export interface TelegramWebAppApi {
   setHeaderColor(color: string): void;
   colorScheme: "light" | "dark";
   isExpanded: boolean;
+  /** Платформа клиента (android/ios/macos/windows/tdesktop/web…); стаб вне
+   *  Telegram отдаёт "unknown". */
+  platform: string;
+  version: string;
   close(): void;
 }
 
 declare global {
   interface Window {
     Telegram?: { WebApp?: TelegramWebAppApi };
+    /** Есть только в настоящем WebView Telegram (в обычном браузере — нет). */
+    TelegramWebviewProxy?: unknown;
   }
 }
 
@@ -47,9 +58,31 @@ export function telegramWebApp(): TelegramWebAppApi | null {
   return window.Telegram?.WebApp ?? null;
 }
 
-/** Запущено ли приложение внутри Telegram Mini App. */
+/** Запущено ли приложение внутри Telegram Mini App.
+ *
+ *  Стаб telegram-web-app.js в обычном браузере даёт initData="" и
+ *  platform="unknown" — по одному наличию window.Telegram судить нельзя,
+ *  иначе кнопка входа через Telegram скрыта на вебе. Настоящий Mini App
+ *  всегда получает подписанный initData от Telegram (или держит
+ *  TelegramWebviewProxy / реальную платформу). */
 export function isTelegramWebApp(): boolean {
-  return telegramWebApp() !== null;
+  const app = telegramWebApp();
+  if (!app) return false;
+  // Подписанные данные запуска — главный признак настоящего Mini App.
+  if (typeof app.initData === "string" && app.initData.length > 0) {
+    return true;
+  }
+  // Страховка: WebView Telegram без initData (редкие краевые случаи).
+  if (typeof window.TelegramWebviewProxy !== "undefined") {
+    return true;
+  }
+  // Стаб вне Telegram отдаёт platform="unknown" — реальная платформа
+  // (android/ios/macos/windows/tdesktop/web…) бывает только в WebView.
+  return (
+    typeof app.platform === "string" &&
+    app.platform.length > 0 &&
+    app.platform !== "unknown"
+  );
 }
 
 /** Инициализация: подтвердить показ, развернуть на весь экран, запретить
