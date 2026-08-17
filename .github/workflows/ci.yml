@@ -199,7 +199,16 @@ jobs:
       # (reuseExistingServer: true).
       - name: Prepare local Convex backend (auth env)
         run: |
-          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1
+          # auth.config.ts читает VLY_CONVEX_AUTH_ISSUER и CONVEX_SITE_URL при
+          # старте `convex dev` — без них CLI падает ещё до `env set`
+          # («Environment variable … is used in auth config file but its value
+          # was not set»), и все e2e-тесты не стартуют. Задаём их прямо в
+          # команде: эмиттер свободного аккаунта для локального деплоя не нужен
+          # (гостевой вход + dev-OTP), поэтому подставляем заглушку freebuff.
+          CONVEX_DEV_DEPLOYMENT=local \
+          VLY_CONVEX_AUTH_ISSUER=https://freebuff.com \
+          CONVEX_SITE_URL=http://127.0.0.1:3210 \
+          npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1
           node scripts/e2e-setup-convex.mjs
           tail -5 /tmp/convex-e2e.log
 
