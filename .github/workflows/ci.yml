@@ -199,7 +199,27 @@ jobs:
           tail -2 /tmp/convex-e2e.log
 
       - name: E2E (critical path · axe · mobile)
+        env:
+          # Локальный режим: Playwright поднимает/ждёт Convex на :3210 и даёт
+          # vite VITE_CONVEX_URL=http://127.0.0.1:3210. Без него (cloud-режим)
+          # в CI нет .env.local, приложение стартует без бэкенда, и все тесты
+          # падают (страницы 404, кнопок нет, таймауты).
+          E2E_CONVEX: local
         run: npx playwright test
+
+      # HTML-отчёт и трейсы загружаются даже при упавших тестах (if: always()) —
+      # иначе детали ошибок живут только в логах раннера, а HTML-отчёт пропадает
+      # вместе с ним, и диагностика превращается в гадание.
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn
+          retention-days: 7
 
   # Деплой в продакшен: только push в основную ветку main, только после
   # зелёной проверки, и только если в репозитории настроены Vercel-секреты
