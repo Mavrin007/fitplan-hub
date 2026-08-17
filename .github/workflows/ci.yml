@@ -188,15 +188,29 @@ jobs:
       # JWKS, SITE_URL) и dev-перехватом OTP (VLY_EMAIL_DEV_CAPTURE=1). Свежий
       # `convex dev` на раннере создаёт пустой деплой — без этих переменных
       # @convex-dev/auth падает (requireEnv), /auth не рендерится, и все тесты
-      # уходят в таймаут по h1. Поднимаем бэкенд в фоне и ставим env скриптом
-      # scripts/e2e-setup-convex.mjs (JWT-ключи генерируются на лету — в
-      # репозиторий и GitHub-секреты ничего не кладётся). Playwright затем
-      # переиспользует уже поднятый бэкенд (reuseExistingServer: true).
+      # уходят в таймаут по h1. Пуш функций делаем БЛОКИРУЮЩЕ (--once: залил и
+      # вышел), чтобы к моменту `env set` локальный деплой гарантированно имел
+      # все функции — иначе клиент получает «Could not find public function»
+      # и приложение падает в ErrorBoundary. CONVEX_DEV_DEPLOYMENT=local держит
+      # `dev --once`, `env set` и webServer Playwright в ОДНОМ деплое (фоновый
+      # `convex dev` без этого env целился в другой инстанс). Скрипт e2e-setup
+      # ставит env (JWT-ключи генерируются на лету — в репозиторий и
+      # GitHub-секреты ничего не кладётся); Playwright переиспользует бэкенд
+      # (reuseExistingServer: true).
       - name: Prepare local Convex backend (auth env)
         run: |
-          npx convex dev --typecheck disable > /tmp/convex-e2e.log 2>&1 &
+          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1
           node scripts/e2e-setup-convex.mjs
-          tail -2 /tmp/convex-e2e.log
+          tail -5 /tmp/convex-e2e.log
+
+      - name: Upload convex-e2e log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: convex-e2e-log
+          path: /tmp/convex-e2e.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: E2E (critical path · axe · mobile)
         env:
