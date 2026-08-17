@@ -10,6 +10,11 @@
 /** Имя бота (без @) — видно пользователям в приложении и в подсказках. */
 export const TELEGRAM_BOT_USERNAME = "FitplanKiloBot";
 
+/** Числовой id бота — цифры из TELEGRAM_BOT_TOKEN до «:». Публичное значение
+ *  (как и username): нужно клиенту для OAuth-флоу oauth.telegram.org
+ *  (параметр bot_id). При перевыпуске токена id не меняется. */
+export const TELEGRAM_BOT_ID = 8659935112;
+
 /** URL веб-версии КИЛО, который открывается как Telegram Mini App.
  *  Переопределяется env-переменной TELEGRAM_MINI_APP_URL на сервере
  *  (Convex dashboard); здесь — фолбэк на канонический домен проекта. */

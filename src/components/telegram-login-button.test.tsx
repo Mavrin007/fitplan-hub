@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import {
-  TelegramLoginButton,
-  type TelegramWidgetUser,
-} from "./telegram-login-button";
-import { TELEGRAM_BOT_USERNAME } from "@/lib/telegram/api";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { TelegramLoginButton, type TelegramWidgetUser } from "./telegram-login-button";
+import { TELEGRAM_BOT_ID } from "@/lib/telegram/api";
 
 const widgetUser: TelegramWidgetUser = {
   id: 12345,
@@ -13,31 +11,91 @@ const widgetUser: TelegramWidgetUser = {
   auth_date: 1700000000,
   hash: "abc123",
 };
+const tgAuthHash = `#tgAuthResult=${encodeURIComponent(
+  JSON.stringify(widgetUser),
+)}`;
+
+/** Фейковый попап: hash проставляется тестом («Telegram редиректнул»). */
+function fakePopup(hash = "") {
+  return { location: { hash }, closed: false, close: vi.fn() };
+}
 
 describe("TelegramLoginButton", () => {
   beforeEach(() => {
     delete window.Telegram;
-    delete window.onTelegramAuth;
+    window.history.replaceState(null, "", "/");
+    vi.restoreAllMocks();
   });
 
-  it("рендерит контейнер и подключает виджет с именем бота", () => {
-    const onAuth = vi.fn();
-    render(<TelegramLoginButton onAuth={onAuth} />);
+  it("рендерит заметную кнопку с подписью", () => {
+    render(<TelegramLoginButton onAuth={vi.fn()} />);
 
-    expect(screen.getByTestId("telegram-login-widget")).toBeInTheDocument();
-    const script = document.querySelector("script[data-telegram-login]");
-    expect(script).not.toBeNull();
-    expect(script!.getAttribute("data-telegram-login")).toBe(TELEGRAM_BOT_USERNAME);
-    expect(script!.getAttribute("data-onauth")).toBe("onTelegramAuth(user)");
+    expect(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    ).toBeInTheDocument();
   });
 
-  it("callback виджета вызывает onAuth с данными пользователя", () => {
+  it("клик открывает попап oauth.telegram.org с bot_id/origin/embed/return_to", async () => {
+    const user = userEvent.setup();
+    const open = vi
+      .spyOn(window, "open")
+      .mockReturnValue(fakePopup() as unknown as Window);
+
+    render(<TelegramLoginButton onAuth={vi.fn()} />);
+    await user.click(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    );
+
+    expect(open).toHaveBeenCalledTimes(1);
+    const url = new URL(open.mock.calls[0][0] as string);
+    expect(url.origin + url.pathname).toBe("https://oauth.telegram.org/auth");
+    expect(url.searchParams.get("bot_id")).toBe(String(TELEGRAM_BOT_ID));
+    expect(url.searchParams.get("origin")).toBe(window.location.origin);
+    expect(url.searchParams.get("embed")).toBe("1");
+    expect(url.searchParams.get("return_to")).toBe(window.location.origin + "/");
+    expect(open.mock.calls[0][1]).toBe("telegram-oauth");
+  });
+
+  it("после редиректа попапа (tgAuthResult в хэше) вызывает onAuth и закрывает попап", async () => {
+    const user = userEvent.setup();
     const onAuth = vi.fn();
+    const popup = fakePopup();
+    vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+
+    render(<TelegramLoginButton onAuth={onAuth} />);
+    await user.click(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    );
+
+    // Telegram подтвердил и редиректнул попап на наш return_to с результатом.
+    popup.location.hash = tgAuthHash;
+
+    await waitFor(() => expect(onAuth).toHaveBeenCalledWith(widgetUser));
+    expect(popup.close).toHaveBeenCalled();
+  });
+
+  it("хэш #tgAuthResult на странице (вкладка-фолбэк) вызывает onAuth и чистит URL", async () => {
+    const onAuth = vi.fn();
+    window.location.hash = tgAuthHash;
+
     render(<TelegramLoginButton onAuth={onAuth} />);
 
-    expect(typeof window.onTelegramAuth).toBe("function");
-    window.onTelegramAuth!(widgetUser);
-    expect(onAuth).toHaveBeenCalledWith(widgetUser);
+    await waitFor(() => expect(onAuth).toHaveBeenCalledWith(widgetUser));
+    expect(window.location.hash).toBe("");
+  });
+
+  it("при заблокированном попапе открывает вкладку и показывает подсказку", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "open").mockReturnValue(null);
+
+    render(<TelegramLoginButton onAuth={vi.fn()} />);
+    await user.click(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    );
+
+    // Первый вызов — попап (вернул null), второй — вкладка-фолбэк.
+    expect(window.open).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/новой вкладке/)).toBeInTheDocument();
   });
 
   it("не рендерится внутри Telegram Mini App (там автовход через initData)", () => {
@@ -48,12 +106,10 @@ describe("TelegramLoginButton", () => {
       },
     } as unknown as NonNullable<typeof window.Telegram>;
 
-    const onAuth = vi.fn();
-    render(<TelegramLoginButton onAuth={onAuth} />);
+    render(<TelegramLoginButton onAuth={vi.fn()} />);
 
     expect(
-      screen.queryByTestId("telegram-login-widget"),
+      screen.queryByRole("button", { name: "Войти через Telegram" }),
     ).not.toBeInTheDocument();
-    expect(document.querySelector("script[data-telegram-login]")).toBeNull();
   });
 });

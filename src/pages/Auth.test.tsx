@@ -27,7 +27,7 @@ vi.mock("@/hooks/use-auth", () => ({
 import { resetConvexMock, setQuery, api } from "@/test/convex-react-mock";
 import { renderWithRouter } from "@/test/utils";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { act, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import Auth from "./Auth";
 
 /** Один провайдер, но разные этапы: форма email (FormData без code) должна
@@ -85,7 +85,7 @@ describe("Auth", () => {
     // Между тестами — без Telegram-окружения (автовход Mini App не должен
     // стрелять в тестах email-флоу).
     delete window.Telegram;
-    delete window.onTelegramAuth;
+    vi.restoreAllMocks();
   });
 
   it("автовход из Telegram Mini App: signIn с webapp initData (create: true)", async () => {
@@ -108,8 +108,8 @@ describe("Auth", () => {
     });
   });
 
-  it("«Войти через Telegram» (виджет) зовёт signIn с source=widget", async () => {
-    renderWithRouter(<Auth />);
+  it("«Войти через Telegram»: попап отдал результат → signIn с source=widget", async () => {
+    const user = userEvent.setup();
     const widgetUser = {
       id: 12345,
       first_name: "Иван",
@@ -117,12 +117,18 @@ describe("Auth", () => {
       auth_date: 1700000000,
       hash: "abc123",
     };
+    // Фейковый попап oauth.telegram.org: hash проставляем, как если бы
+    // Telegram подтвердил и редиректнул на наш return_to.
+    const popup = { location: { hash: "" }, closed: false, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
 
-    // Виджет oauth.telegram.org вызывает глобальный callback — симулируем.
-    expect(typeof window.onTelegramAuth).toBe("function");
-    await act(async () => {
-      window.onTelegramAuth!(widgetUser);
-    });
+    renderWithRouter(<Auth />);
+    await user.click(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    );
+    popup.location.hash = `#tgAuthResult=${encodeURIComponent(
+      JSON.stringify(widgetUser),
+    )}`;
 
     await waitFor(() => {
       expect(authMocks.signIn).toHaveBeenCalledWith("telegram", {

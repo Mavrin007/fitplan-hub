@@ -428,6 +428,11 @@ function Auth({
                       <div className="h-px flex-1 bg-border" />
                     </div>
 
+                    <TelegramLoginButton
+                      onAuth={handleTelegramWidgetAuth}
+                      disabled={isLoading}
+                    />
+
                     <Button
                       type="button"
                       variant="ghost"
@@ -437,16 +442,6 @@ function Auth({
                     >
                       Продолжить как гость
                     </Button>
-
-                    <div className="flex items-center gap-3 py-1">
-                      <div className="h-px flex-1 bg-border" />
-                      <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                        Через Telegram
-                      </span>
-                      <div className="h-px flex-1 bg-border" />
-                    </div>
-
-                    <TelegramLoginButton onAuth={handleTelegramWidgetAuth} />
                   </form>
                 ) : (
                   <form onSubmit={handleOtpSubmit} className="space-y-5">

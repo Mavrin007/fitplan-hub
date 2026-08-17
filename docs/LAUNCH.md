@@ -87,10 +87,41 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
 - Вебхук: `https://energetic-coyote-927.convex.site/telegram-webhook` (secret_token задан, проверен: без секрета 401, с секретом 200)
 - Команды: `/day`, `/meal`, `/water`, `/recent`, `/today`, `/menu`, `/link`, `/help`
 - Env в Convex prod: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_MINI_APP_URL`
-- **Вход через Telegram** (сделано 2026-08-17): кнопка «Войти через Telegram»
-  на `/auth` (Login Widget, подпись проверяется на сервере по
-  `TELEGRAM_BOT_TOKEN`) + автовход в Mini App (initData). Новый Telegram
-  сразу получает аккаунт КИЛО; уже привязанный — входит в свой.
+- **Вход через Telegram** (сделано 2026-08-17): заметная кнопка «Войти через
+  Telegram» на `/auth` (кастомная кнопка поверх официального popup-флоу
+  oauth.telegram.org, подпись проверяется на сервере по `TELEGRAM_BOT_TOKEN`)
+  + автовход в Mini App (initData). Новый Telegram сразу получает аккаунт
+  КИЛО; уже привязанный — входит в свой.
+
+### Вход через Telegram на /auth — обязательная настройка домена (проверено 2026-08-17)
+
+Кнопка использует официальный OAuth-флоу `oauth.telegram.org`. Telegram
+разрешает вход **только** с доменов, добавленных в настройке Login Widget
+бота. Проверка показала, что сейчас у бота **не добавлено ни одного домена**
+— `oauth.telegram.org` отвечает «Bot domain invalid» даже для прод-домена и
+`localhost`, поэтому кнопка молча не срабатывает (попап висит на странице
+Telegram, ничего не происходит; через 10 секунд приложение покажет подсказку).
+
+Что сделать в Telegram (один раз, от владельца бота):
+
+1. Откройте @BotFather → `/mybots` → **FitplanKiloBot** → **Bot Settings** →
+   **Login Widget**.
+2. В **Allowed URLs** добавьте минимум:
+   - `https://fitplan-hub.vercel.app` (прод);
+   - `http://localhost:5173` (локальная разработка);
+   - домен превью Freebuff (например `<project>.vly.sh`), если тестируете там.
+3. Готово — кнопка на `/auth` заработает без передеплоя (проверка домена —
+   на стороне Telegram).
+
+Проверка из консоли (должен быть ответ без «Bot domain invalid»):
+
+```bash
+curl "https://oauth.telegram.org/auth?bot_id=8659935112&origin=https%3A%2F%2Ffitplan-hub.vercel.app&embed=1&return_to=https%3A%2F%2Ffitplan-hub.vercel.app%2Fauth"
+```
+
+Дополнительные причины «кнопка не работает»: всплывающие окна заблокированы
+браузером (кнопка тогда открывает вкладку и входит там) и сайт без HTTPS
+(Telegram разрешает только HTTPS-домены, кроме `localhost`).
 
 ### Диагностика «бот молчит на /start» (проверено 2026-08-17)
 
