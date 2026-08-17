@@ -9,10 +9,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@convex-dev/auth/server", () => ({ getAuthUserId: vi.fn() }));
+vi.mock("@convex-dev/auth/server", () => ({
+  getAuthUserId: vi.fn(),
+  // telegram.ts импортирует ./schema, а он тянет authTables — заглушка
+  // (как в остальных convex-тестах).
+  authTables: {},
+}));
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import {
+  createAccountFromTelegram,
+  findByTelegram,
   linkByCode,
   myLink,
   processBotUpdate,
@@ -73,6 +80,28 @@ const runLinkByCode = (
   }
 )._handler;
 
+const runFindByTelegram = (
+  findByTelegram as unknown as {
+    _handler: (
+      ctx: Ctx,
+      args: { telegramUserId: number },
+    ) => Promise<{ userId: string } | null>;
+  }
+)._handler;
+
+const runCreateAccountFromTelegram = (
+  createAccountFromTelegram as unknown as {
+    _handler: (
+      ctx: Ctx,
+      args: {
+        telegramUserId: number;
+        firstName?: string;
+        username?: string;
+      },
+    ) => Promise<string>;
+  }
+)._handler;
+
 /** ctx processBotUpdate: db + runMutation (для linkByCode из deps). */
 type BotCtx = Ctx & {
   runMutation: () => Promise<never>;
@@ -108,6 +137,63 @@ function seedTelegram(db: ConvexDbMock, userId = "u1", telegramUserId = 111): vo
     linkedAt: 1,
   });
 }
+
+describe("findByTelegram", () => {
+  it("возвращает null, если Telegram не привязан", async () => {
+    const { db } = makeConvexDb();
+    const res = await runFindByTelegram({ db }, { telegramUserId: 999 });
+    expect(res).toBeNull();
+  });
+
+  it("возвращает userId привязанного аккаунта", async () => {
+    const { db } = makeConvexDb();
+    seedTelegram(db, "u1", 111);
+    const res = await runFindByTelegram({ db }, { telegramUserId: 111 });
+    expect(res).toEqual({ userId: "u1" });
+  });
+});
+
+describe("createAccountFromTelegram", () => {
+  it("создаёт пользователя и привязывает Telegram", async () => {
+    const { db, store } = makeConvexDb();
+    const userId = await runCreateAccountFromTelegram(
+      { db },
+      { telegramUserId: 555, firstName: "Иван", username: "ivan_tg" },
+    );
+
+    expect(typeof userId).toBe("string");
+    const users = store["users"];
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({
+      name: "Иван",
+      isAnonymous: false,
+    });
+    const links = store["telegramAccounts"];
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({
+      telegramUserId: 555,
+      userId,
+      username: "ivan_tg",
+      firstName: "Иван",
+    });
+  });
+
+  it("повторный вызов с тем же telegram id не плодит аккаунты", async () => {
+    const { db, store } = makeConvexDb();
+    const first = await runCreateAccountFromTelegram(
+      { db },
+      { telegramUserId: 555, firstName: "Иван" },
+    );
+    const second = await runCreateAccountFromTelegram(
+      { db },
+      { telegramUserId: 555, firstName: "Иван" },
+    );
+
+    expect(second).toBe(first);
+    expect(store["users"]).toHaveLength(1);
+    expect(store["telegramAccounts"]).toHaveLength(1);
+  });
+});
 
 describe("requestLinkCode", () => {
   beforeEach(() => {

@@ -15,6 +15,7 @@ import type * as assistant from "../assistant.js";
 import type * as assistantLimits from "../assistantLimits.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as auth_telegramLogin from "../auth/telegramLogin.js";
 import type * as crons from "../crons.js";
 import type * as day1Email from "../day1Email.js";
 import type * as devOtp from "../devOtp.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   assistantLimits: typeof assistantLimits;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
+  "auth/telegramLogin": typeof auth_telegramLogin;
   crons: typeof crons;
   day1Email: typeof day1Email;
   devOtp: typeof devOtp;

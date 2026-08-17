@@ -27,7 +27,7 @@ vi.mock("@/hooks/use-auth", () => ({
 import { resetConvexMock, setQuery, api } from "@/test/convex-react-mock";
 import { renderWithRouter } from "@/test/utils";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import Auth from "./Auth";
 
 /** Один провайдер, но разные этапы: форма email (FormData без code) должна
@@ -82,6 +82,54 @@ describe("Auth", () => {
     authMocks.signIn.mockClear();
     authMocks.signOut.mockClear();
     setupSignIn();
+    // Между тестами — без Telegram-окружения (автовход Mini App не должен
+    // стрелять в тестах email-флоу).
+    delete window.Telegram;
+    delete window.onTelegramAuth;
+  });
+
+  it("автовход из Telegram Mini App: signIn с webapp initData (create: true)", async () => {
+    const initData =
+      "auth_date=1700000000&query_id=AAHdF6IQ&user=%7B%22id%22%3A5%2C%22first_name%22%3A%22%D0%90%D0%BD%D1%8F%22%7D&hash=abc";
+    window.Telegram = {
+      WebApp: { initData, initDataUnsafe: {} },
+    } as unknown as NonNullable<typeof window.Telegram>;
+
+    renderWithRouter(<Auth />);
+
+    // Автовход без формы: signIn вызван с подписанным initData и правом
+    // создать аккаунт (Mini App открыт из бота — явное действие).
+    await waitFor(() => {
+      expect(authMocks.signIn).toHaveBeenCalledWith("telegram", {
+        source: "webapp",
+        initData,
+        create: true,
+      });
+    });
+  });
+
+  it("«Войти через Telegram» (виджет) зовёт signIn с source=widget", async () => {
+    renderWithRouter(<Auth />);
+    const widgetUser = {
+      id: 12345,
+      first_name: "Иван",
+      username: "ivan_test",
+      auth_date: 1700000000,
+      hash: "abc123",
+    };
+
+    // Виджет oauth.telegram.org вызывает глобальный callback — симулируем.
+    expect(typeof window.onTelegramAuth).toBe("function");
+    await act(async () => {
+      window.onTelegramAuth!(widgetUser);
+    });
+
+    await waitFor(() => {
+      expect(authMocks.signIn).toHaveBeenCalledWith("telegram", {
+        source: "widget",
+        ...widgetUser,
+      });
+    });
   });
 
   it("dev-блок показывает обратный отсчёт истечения кода", async () => {

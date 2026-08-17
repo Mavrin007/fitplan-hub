@@ -43,9 +43,16 @@ import {
   type TgUser,
   type TodayWorkout,
 } from "../lib/telegram/bot";
-import { httpAction, mutation, query } from "./_generated/server";
+import {
+  httpAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { api } from "./_generated/api";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
+import { ROLES } from "./schema";
 import { assertRange } from "./validation";
 
 /** Контекст мутации (с типизированной схемой). */
@@ -214,6 +221,56 @@ export const linkByCode = mutation({
       linkedAt: Date.now(),
     });
     return { linked: true, username: args.username ?? null };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Вход через Telegram (используется провайдером auth/telegramLogin)  */
+/* ------------------------------------------------------------------ */
+
+/** Internal: поиск аккаунта по telegram id (для авторизации). */
+export const findByTelegram = internalQuery({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const doc = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    return doc ? { userId: doc.userId } : null;
+  },
+});
+
+/**
+ * Internal: создание аккаунта КИЛО по Telegram (первый вход). Подпись уже
+ * проверена в authorize провайдера; здесь — только запись. Повторная проверка
+ * by_telegram защищает от гонки двух одновременных входов одного telegram id.
+ */
+export const createAccountFromTelegram = internalMutation({
+  args: {
+    telegramUserId: v.number(),
+    firstName: v.optional(v.string()),
+    username: v.optional(v.string()),
+  },
+  handler: async (ctx, { telegramUserId, firstName, username }) => {
+    const existing = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    if (existing) return existing.userId;
+
+    const userId = await ctx.db.insert("users", {
+      name: firstName ?? undefined,
+      role: ROLES.USER,
+      isAnonymous: false,
+    });
+    await ctx.db.insert("telegramAccounts", {
+      telegramUserId,
+      userId,
+      username,
+      firstName,
+      linkedAt: Date.now(),
+    });
+    return userId;
   },
 });
 

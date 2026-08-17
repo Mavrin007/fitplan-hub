@@ -87,6 +87,10 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
 - Вебхук: `https://energetic-coyote-927.convex.site/telegram-webhook` (secret_token задан, проверен: без секрета 401, с секретом 200)
 - Команды: `/day`, `/meal`, `/water`, `/recent`, `/today`, `/menu`, `/link`, `/help`
 - Env в Convex prod: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_MINI_APP_URL`
+- **Вход через Telegram** (сделано 2026-08-17): кнопка «Войти через Telegram»
+  на `/auth` (Login Widget, подпись проверяется на сервере по
+  `TELEGRAM_BOT_TOKEN`) + автовход в Mini App (initData). Новый Telegram
+  сразу получает аккаунт КИЛО; уже привязанный — входит в свой.
 
 Если понадобится пересоздать вебхук (например, после смены токена):
 
@@ -110,4 +114,6 @@ npm run telegram:setup
 - [ ] Открыть сайт — лендинг и вход работают
 - [ ] Войти по email (код приходит) — авторизация жива
 - [ ] Бот: `/start`, `/link <код>`, `/day` — отвечает
-- [ ] Mini App: `https://t.me/<бот>/app` — приложение открывается в Telegram
+- [ ] Mini App: `https://t.me/<бот>/app` — приложение открывается в Telegram и
+      вход выполняется автоматически (кнопка «Войти через Telegram» на `/auth`
+      работает и в обычном браузере)

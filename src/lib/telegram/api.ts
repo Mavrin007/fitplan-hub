@@ -7,9 +7,8 @@
  * (TELEGRAM_BOT_TOKEN), в тестах — мок.
  */
 
-/** Имя бота (без @) — видно пользователям в приложении и в подсказках.
- *  Заменить на реальный handle после создания бота в @BotFather. */
-export const TELEGRAM_BOT_USERNAME = "KILO_fitplan_bot";
+/** Имя бота (без @) — видно пользователям в приложении и в подсказках. */
+export const TELEGRAM_BOT_USERNAME = "FitplanKiloBot";
 
 /** URL веб-версии КИЛО, который открывается как Telegram Mini App.
  *  Переопределяется env-переменной TELEGRAM_MINI_APP_URL на сервере

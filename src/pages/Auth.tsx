@@ -9,8 +9,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { readableError } from "@/lib/errors";
 import { FitnessHero } from "@/components/illustrations";
+import {
+  TelegramLoginButton,
+  type TelegramWidgetUser,
+} from "@/components/telegram-login-button";
+import { telegramWebApp } from "@/lib/telegram/webApp";
 import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useConvex, useQuery } from "convex/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
@@ -129,6 +134,39 @@ function Auth({
       navigate(redirect);
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
+
+  // Автовход из Telegram Mini App: приложение открыто внутри Telegram, и
+  // Telegram уже выдал подписанные данные (initData). Входим без формы.
+  // create: true — открытие Mini App из бота это явное действие пользователя,
+  // поэтому аккаунт КИЛО создаётся и привязывается к Telegram.
+  const telegramAutoLoginDone = useRef(false);
+  useEffect(() => {
+    if (authLoading || isAuthenticated || telegramAutoLoginDone.current) return;
+    const initData = telegramWebApp()?.initData;
+    if (!initData) return;
+    telegramAutoLoginDone.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        await withAuthTimeout(
+          signIn("telegram", { source: "webapp", initData, create: true }),
+        );
+        // Успех: useEffect(isAuthenticated) сам переведёт на redirect.
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Telegram auto sign-in error:", error);
+        if (!cancelled) {
+          setError(readableError(error));
+          setIsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, isAuthenticated, signIn]);
 
   // Тикающий отсчёт кнопки «Отправить ещё раз»: раз в секунду до нуля.
   useEffect(() => {
@@ -263,6 +301,21 @@ function Auth({
     setOtpRemainingSec(0);
   };
 
+  // «Войти через Telegram» в обычном браузере: виджет отдал пользователя,
+  // проверка подписи происходит на сервере (telegramLogin provider).
+  const handleTelegramWidgetAuth = async (user: TelegramWidgetUser) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await withAuthTimeout(signIn("telegram", { source: "widget", ...user }));
+      navigate(redirect);
+    } catch (error) {
+      console.error("Telegram sign-in error:", error);
+      setError(readableError(error));
+      setIsLoading(false);
+    }
+  };
+
   const handleGuestLogin = async () => {
     setIsLoading(true);
     setError(null);
@@ -384,6 +437,16 @@ function Auth({
                     >
                       Продолжить как гость
                     </Button>
+
+                    <div className="flex items-center gap-3 py-1">
+                      <div className="h-px flex-1 bg-border" />
+                      <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                        Через Telegram
+                      </span>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+
+                    <TelegramLoginButton onAuth={handleTelegramWidgetAuth} />
                   </form>
                 ) : (
                   <form onSubmit={handleOtpSubmit} className="space-y-5">

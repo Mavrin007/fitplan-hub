@@ -3,11 +3,12 @@
 import { convexAuth, getAuthSessionId } from "@convex-dev/auth/server";
 import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
 import { emailOtp } from "./auth/emailOtp";
+import { telegramLogin } from "./auth/telegramLogin";
 import { ROLES } from "./schema";
 
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [emailOtp, Anonymous],
+  providers: [emailOtp, Anonymous, telegramLogin],
   signIn: {
     // Лимит неудачных попыток ввода OTP/пароля в час (встроенный rate-limit
     // @convex-dev/auth, таблица authRateLimits). 10 по умолчанию — ужесточаем
