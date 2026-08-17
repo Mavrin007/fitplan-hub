@@ -18,7 +18,7 @@
 | Фронтенд Vercel | ✅ **живой** | <https://fitplan-hub.vercel.app> (HTTP 200, `VITE_CONVEX_URL=https://energetic-coyote-927.convex.cloud`) |
 | Бэкенд Convex (production) | ✅ **функции задеплоены** | `energetic-coyote-927` — `users:currentUser` отвечает, http-роуты живые (вебхук ждёт токен) |
 | Переменные окружения Convex | ✅ заданы платформой | `JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL`, `VLY_CONVEX_AUTH_ISSUER`, `VLY_INTEGRATION_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`, … |
-| Telegram (бот + Mini App) | ⏳ осталось: токен бота + вебхук | см. Шаг 5 |
+| Telegram (бот + Mini App) | ✅ **готов** | бот **@FitplanKiloBot**, вебхук + команды + кнопка Mini App зарегистрированы |
 | Секреты GitHub (авто-деплой) | ⚠️ опционально | джоба `deploy` в CI запускается; без секретов — шаги skipped |
 | Google OAuth | ⏳ опционально | README → «Enabling Google OAuth» |
 
@@ -80,21 +80,22 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
   при деплое (проверьте, если деплоили с другим URL). После изменения — передеплой
   (CI или `vercel deploy --prod`).
 
-## Шаг 5 — Telegram: бот + Mini App
+## Шаг 5 — Telegram: бот + Mini App ✅ (сделано 2026-08-17)
 
-1. **@BotFather** (`https://t.me/BotFather`):
-   - `/newbot` → получите токен → `TELEGRAM_BOT_TOKEN`
-   - `/newapp` → укажите https-URL приложения (домен Vercel) — включит Mini App
-2. `TELEGRAM_BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET` → в Convex Dashboard (Шаг 3)
-3. После деплоя бэкенда зарегистрируйте вебхук (один раз, с любой машины):
-   ```bash
-   TELEGRAM_BOT_TOKEN=<токен> \
-   TELEGRAM_WEBHOOK_URL=https://energetic-coyote-927.convex.site/telegram-webhook \
-   TELEGRAM_WEBHOOK_SECRET=<строка> \
-   npm run telegram:setup
-   ```
-   Скрипт поставит вебхук, команды (`/day`, `/meal`, `/water`, …) и кнопку
-   «Открыть КИЛО» (Mini App). Если пришлёте токен мне — запущу сам.
+- Бот: **https://t.me/FitplanKiloBot** (id 8659935112, «Kilo»)
+- Mini App: **https://t.me/FitplanKiloBot/app** (кнопка «Открыть КИЛО» → https://fitplan-hub.vercel.app)
+- Вебхук: `https://energetic-coyote-927.convex.site/telegram-webhook` (secret_token задан, проверен: без секрета 401, с секретом 200)
+- Команды: `/day`, `/meal`, `/water`, `/recent`, `/today`, `/menu`, `/link`, `/help`
+- Env в Convex prod: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_MINI_APP_URL`
+
+Если понадобится пересоздать вебхук (например, после смены токена):
+
+```bash
+TELEGRAM_BOT_TOKEN=<токен> \
+TELEGRAM_WEBHOOK_URL=https://energetic-coyote-927.convex.site/telegram-webhook \
+TELEGRAM_WEBHOOK_SECRET=<строка> \
+npm run telegram:setup
+```
 
 ## Шаг 6 — Авто-деплой из CI (когда секреты из Шага 2 заданы)
 
