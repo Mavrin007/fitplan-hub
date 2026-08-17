@@ -119,9 +119,25 @@ Telegram, ничего не происходит; через 10 секунд п�
 curl "https://oauth.telegram.org/auth?bot_id=8659935112&origin=https%3A%2F%2Ffitplan-hub.vercel.app&embed=1&return_to=https%3A%2F%2Ffitplan-hub.vercel.app%2Fauth"
 ```
 
-Дополнительные причины «кнопка не работает»: всплывающие окна заблокированы
-браузером (кнопка тогда открывает вкладку и входит там) и сайт без HTTPS
-(Telegram разрешает только HTTPS-домены, кроме `localhost`).
+Дополнительные причины «кнопка не работает»:
+
+1. **Стаб telegram-web-app.js (починено в v2.14)** — официальный скрипт
+   создаёт стаб-объект `window.Telegram.WebApp` и в обычном браузере
+   (`initData=""`, `platform="unknown"`). Раньше детект Mini App смотрел
+   только на наличие объекта, поэтому кнопка (и старый виджет) не рендерилась
+   на вебе вообще. Теперь `isTelegramWebApp()` требует подписанный `initData`
+   (или `TelegramWebviewProxy` / реальную платформу) — в обычном браузере
+   кнопка видна.
+2. Всплывающие окна заблокированы браузером — кнопка тогда открывает вкладку
+   и входит там.
+3. Сайт без HTTPS — Telegram разрешает только HTTPS-домены, кроме `localhost`.
+
+### Проверка входа в браузере (пост-деплой)
+
+`node scripts/telegram-login-check.mjs` открывает `/auth` в headless-chromium,
+кликает кнопку, ловит попап oauth.telegram.org и убеждается, что Telegram
+отдал страницу авторизации (а не «Bot domain invalid»), а в консоли нет
+ошибок. Скриншот — в `test-results/tg-login-auth.png`.
 
 ### Диагностика «бот молчит на /start» (проверено 2026-08-17)
 
