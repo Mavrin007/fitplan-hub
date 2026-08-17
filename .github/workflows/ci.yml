@@ -185,32 +185,26 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # E2E требует локального Convex-бэкенда с auth-окружением (JWT_PRIVATE_KEY,
-      # JWKS, SITE_URL) и dev-перехватом OTP (VLY_EMAIL_DEV_CAPTURE=1). Свежий
-      # `convex dev` на раннере создаёт пустой деплой — без этих переменных
-      # @convex-dev/auth падает (requireEnv), /auth не рендерится, и все тесты
-      # уходят в таймаут по h1. Пуш функций делаем БЛОКИРУЮЩЕ (--once: залил и
-      # вышел), чтобы к моменту `env set` локальный деплой гарантированно имел
-      # все функции — иначе клиент получает «Could not find public function»
-      # и приложение падает в ErrorBoundary. CONVEX_DEV_DEPLOYMENT=local держит
-      # `dev --once`, `env set` и webServer Playwright в ОДНОМ деплое (фоновый
-      # `convex dev` без этого env целился в другой инстанс). Скрипт e2e-setup
-      # ставит env (JWT-ключи генерируются на лету — в репозиторий и
-      # GitHub-секреты ничего не кладётся); Playwright переиспользует бэкенд
-      # (reuseExistingServer: true).
+      # JWKS, SITE_URL, VLY_CONVEX_AUTH_ISSUER) и dev-перехватом OTP
+      # (VLY_EMAIL_DEV_CAPTURE=1). Локальный бэкенд проверяет auth.config.ts по
+      # env-хранилищу ДЕПЛОЯ (не process.env): свежий деплой без переменных
+      # падает на пуше («used in auth config file but its value was not set»),
+      # @convex-dev/auth падает в рантайме (requireEnv), /auth не рендерится,
+      # и все тесты уходят в таймаут по h1. Поэтому порядок такой:
+      #   1) первый `dev --once` падает на env-проверке (ожидаемо — `|| true`),
+      #      но создаёт состояние локального деплоя (.env.local + хранилище);
+      #   2) e2e-setup ставит env (JWT-ключи генерируются на лету — в
+      #      репозиторий и GitHub-секреты ничего не кладётся);
+      #   3) повторный `dev --once` — env-проверка проходит, функции залиты
+      #      БЛОКИРУЮЩЕ (--once: залил и вышел), иначе клиент получает
+      #      «Could not find public function» и падает в ErrorBoundary.
+      # Playwright затем переиспользует бэкенд (reuseExistingServer: true).
       - name: Prepare local Convex backend (auth env)
         run: |
-          # auth.config.ts читает VLY_CONVEX_AUTH_ISSUER и CONVEX_SITE_URL при
-          # старте `convex dev` — без них CLI падает ещё до `env set`
-          # («Environment variable … is used in auth config file but its value
-          # was not set»), и все e2e-тесты не стартуют. Задаём их прямо в
-          # команде: эмиттер свободного аккаунта для локального деплоя не нужен
-          # (гостевой вход + dev-OTP), поэтому подставляем заглушку freebuff.
-          CONVEX_DEV_DEPLOYMENT=local \
-          VLY_CONVEX_AUTH_ISSUER=https://freebuff.com \
-          CONVEX_SITE_URL=http://127.0.0.1:3210 \
-          npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1
+          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1 || true
           node scripts/e2e-setup-convex.mjs
-          tail -5 /tmp/convex-e2e.log
+          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e2.log 2>&1
+          tail -5 /tmp/convex-e2e2.log
 
       - name: Upload convex-e2e log
         if: always()
