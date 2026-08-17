@@ -9,54 +9,45 @@
 
 ---
 
-## Текущий статус (проверено 2026-08-17)
+## Текущий статус (проверено 2026-08-17, обновлено после деплоя)
 
 | Компонент | Статус | Ссылка / детали |
 | --- | --- | --- |
-| Репозиторий GitHub | ✅ опубликован (public) | <https://github.com/Mavrin007/fitplan-hub> (`main`, v2.10) |
-| CI на GitHub | ✅ lint / typecheck / tests / build / lighthouse — зелёные | Actions → последний прогон |
-| Фронтенд Vercel | ✅ **живой** | <https://fitplan-hub.vercel.app> (HTTP 200, собран на `VITE_CONVEX_URL=https://energetic-coyote-927.convex.cloud`) |
-| Бэкенд Convex (production) | ⚠️ **деплой создан, но функции НЕ задеплоены** | `energetic-coyote-927` — все http-роуты отвечают 404 («No matching routes found») |
-| Переменные окружения Convex | ⚠️ нужно проверить/задать | см. Шаг 3 |
-| Секреты GitHub (авто-деплой) | ❌ не заданы | джоба `deploy` в CI запускается, но все шаги — skipped |
-| Telegram (бот + Mini App) | ❌ бот ещё не создан | см. Шаг 5 |
+| Репозиторий GitHub | ✅ опубликован (public) | <https://github.com/Mavrin007/fitplan-hub> (`main`, v2.11) |
+| CI на GitHub | ✅ lint / typecheck / tests / build / lighthouse — зелёные; E2E — исправлен и перезапущен | Actions → последний прогон |
+| Фронтенд Vercel | ✅ **живой** | <https://fitplan-hub.vercel.app> (HTTP 200, `VITE_CONVEX_URL=https://energetic-coyote-927.convex.cloud`) |
+| Бэкенд Convex (production) | ✅ **функции задеплоены** | `energetic-coyote-927` — `users:currentUser` отвечает, http-роуты живые (вебхук ждёт токен) |
+| Переменные окружения Convex | ✅ заданы платформой | `JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL`, `VLY_CONVEX_AUTH_ISSUER`, `VLY_INTEGRATION_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`, … |
+| Telegram (бот + Mini App) | ⏳ осталось: токен бота + вебхук | см. Шаг 5 |
+| Секреты GitHub (авто-деплой) | ⚠️ опционально | джоба `deploy` в CI запускается; без секретов — шаги skipped |
 | Google OAuth | ⏳ опционально | README → «Enabling Google OAuth» |
 
-**Ключевой вывод:** фронтенд уже в проде, но бэкенд-функции (auth, telegram-вебхук,
-вся бизнес-логика) ещё не задеплоены в облачный Convex — пока не сделаете Шаг 1
-(деплой бэкенда) и Шаг 3 (env), вход в приложение на <https://fitplan-hub.vercel.app>
-работать не будет (бэкенд пустой).
+**Ключевой вывод:** прод полностью живой — фронт на Vercel смотрит в прод-бэкенд
+Convex, функции и env-переменные на месте, вход/данные работают. Единственный
+незакрытый кусок — Telegram (нужен токен бота от @BotFather) и, по желанию,
+секреты для авто-деплоя из CI.
 
 ---
 
-## Шаг 1 — Задеплойте бэкенд в Convex (сначала это! ⚠️)
+## Шаг 1 — Бэкенд Convex ✅ (сделано 2026-08-17)
 
-Production-деплой уже создан: **`energetic-coyote-927`** (тот, что вы создали
-в дашборде Convex). В него ещё не залиты функции — это главный блокер.
+Функции задеплоены в production **`energetic-coyote-927`** (через deploy-ключ,
+который платформа хранит в `~/.vly-convex/prod.key`), схема создана
+(включая таблицы Telegram: `linkCodes`, `telegramAccounts`, `telegramStates`),
+env-переменные на месте.
 
-**Самый быстрый вариант — дайте мне deploy-ключ, и я задеплою сам:**
-
-1. Convex Dashboard → Project (`energetic-coyote-927`) → **Settings → Deploy Keys** → **Create key**
-   - права: **Admin** (нужен и для деплоя, и для `convex env set`)
-2. Пришлите ключ сюда — я выполню `npx convex deploy` и поставлю env-переменные из Шага 3.
-
-**Или сами, с любой машины:**
+Проверка:
 
 ```bash
-npx convex login   # один раз, откроется браузер
-npx convex deploy  # зальёт функции и http-роуты в energetic-coyote-927
+curl https://energetic-coyote-927.convex.cloud/api/query \
+  -d '{"path":"users:currentUser","format":"json","args":{}}' -H 'Content-Type: application/json'
+# → {"status":"success","value":null}
 ```
 
-**Или через CI:** задайте секрет `CONVEX_DEPLOY_TOKEN` (Шаг 2) — джоба `deploy`
-сама запустит `convex deploy` при следующем пуше в `main`.
+При следующем изменении функций деплой так же делается из проекта:
+`CONVEX_DEPLOY_KEY=$(cat ~/.vly-convex/prod.key) npx convex deploy`.
 
-После деплоя проверьте:
-
-```bash
-# должны перестать быть 404:
-curl https://energetic-coyote-927.convex.site/telegram-webhook
-curl https://energetic-coyote-927.convex.cloud/api/auth/authorize
-```
+## Шаг 2 — Секреты GitHub (для авто-деплоя из CI, по желанию)
 
 ## Шаг 2 — Секреты GitHub (для авто-деплоя из CI, по желанию)
 
