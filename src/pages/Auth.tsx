@@ -338,10 +338,14 @@ function Auth({
                   <form onSubmit={handleEmailSubmit} className="space-y-4">
                     <div className="relative">
                       <Mail className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      {/* aria-label вместо скрытого label: поле визуально
+                          подписывается плейсхолдером, но для скринридеров и
+                          axe-аудита нужна настоящая доступная метка. */}
                       <Input
                         name="email"
                         placeholder="name@example.com"
                         type="email"
+                        aria-label="Электронная почта"
                         className="h-11 pl-10"
                         disabled={isLoading}
                         required
