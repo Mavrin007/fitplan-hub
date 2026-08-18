@@ -147,7 +147,12 @@ describe("Meals", () => {
     });
     renderWithRouter(<Meals />);
 
-    expect(screen.getByText("Куриная грудка (гриль)")).toBeInTheDocument();
+    // KILO v1.2: «Куриная грудка (гриль)» встречается дважды — в дневнике и
+    // в панели «Недавние продукты» (быстрое повторение). Проверяем, что
+    // запись дня точно присутствует.
+    expect(
+      screen.getAllByText("Куриная грудка (гриль)").length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Белый рис")).toBeInTheDocument();
     // «500 ккал» дважды: бейдж карточки завтрака и строка самой записи.
     expect(screen.getAllByText("500 ккал").length).toBeGreaterThanOrEqual(2);
@@ -183,7 +188,7 @@ describe("Meals", () => {
 
     expect(screen.getByText(/Готово к копированию: 1 запись/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Скопировать в сегодня/ }));
+    await user.click(screen.getByRole("button", { name: /Скопировать выбранные/ }));
 
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
@@ -774,7 +779,7 @@ describe("Meals", () => {
       screen.getByText(/Записей за .+ нет — выберите другой день/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+      screen.getByRole("button", { name: /Скопировать выбранные/ }),
     ).toBeDisabled();
   });
 
@@ -791,7 +796,7 @@ describe("Meals", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+      screen.getByRole("button", { name: /Скопировать выбранные/ }),
     ).toBeDisabled();
     expect(screen.getByText("Выберите прошедший день.")).toBeInTheDocument();
   });
@@ -1105,7 +1110,7 @@ describe("Meals", () => {
     renderWithRouter(<Meals />);
 
     await user.click(
-      screen.getByRole("button", { name: /Скопировать в сегодня/ }),
+      screen.getByRole("button", { name: /Скопировать выбранные/ }),
     );
 
     expect(toast.error).toHaveBeenCalledWith("Не удалось скопировать записи");

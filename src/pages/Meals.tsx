@@ -255,10 +255,21 @@ export default function Meals() {
   const copyLog = useQuery(api.mealLog.getByDate, { date: copyFromDate });
   const yesterdayKey = toDateKey(addDays(new Date(), -1));
 
-  // При смене дня/загрузке записей отмечаем все по умолчанию.
-  useEffect(() => {
+  // При смене дня/загрузке записей отмечаем все по умолчанию. Делаем это во
+  // время рендера (React-паттерн «adjust state during render»), а не в
+  // эффекте: синхронный setState в эффекте даёт каскадный ре-рендер и
+  // отсекается правилом react-hooks/set-state-in-effect.
+  const [prevCopy, setPrevCopy] = useState<{
+    date: string;
+    snapshot: string;
+  }>({ date: "", snapshot: "" });
+  const copyLogKey = `${copyFromDate}:${(copyLog ?? [])
+    .map((e) => e._id)
+    .join(",")}`;
+  if (prevCopy.date !== copyFromDate || prevCopy.snapshot !== copyLogKey) {
+    setPrevCopy({ date: copyFromDate, snapshot: copyLogKey });
     setCopySelected(new Set((copyLog ?? []).map((e) => e._id)));
-  }, [copyFromDate, copyLog]);
+  }
 
   /** Недавние продукты: сегодняшний дневник + выбранный день (дедуп по имени).
    *  Быстрый повтор в один тап — не нужно искать заново. */
