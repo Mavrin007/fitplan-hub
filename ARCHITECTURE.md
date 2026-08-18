@@ -21,26 +21,45 @@ src/
 
 ## Feature folders (`src/features/`)
 
-**Конвенция:** новая фича, у которой есть и UI, и логика, и данные, кладётся
-в `src/features/<name>/`, а не размазывается по `components/` + `lib/`.
+**Конвенция:** фича, у которой есть и UI, и логика, и данные, живёт в
+`src/features/<name>/`, а не размазывается по `components/` + `lib/`.
 
-**Эталонный пример — `src/features/onboarding/`:**
-- `OnboardingWizard.tsx` — компонент-визард;
-- `onboarding.ts` — чистая логика (ключ localStorage, `shouldShowOnboarding`);
-- `OnboardingWizard.test.tsx` — тесты рядом.
+**Эталонные примеры (страницы, вынесенные из монолитов, v2.16):**
 
-Страницы (`pages/`) импортируют фичу как модуль:
-`import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard"`.
+- `src/features/meals/` — «Питание» (бывший `pages/Meals`, ~2300 строк):
+  - `MealsPage.tsx` — тонкая страница-композиция (~120 строк);
+  - `hooks/useMealDiary.ts` — состояние: запросы Convex, диалоги, поиск,
+    перенос, фото, план; все обработчики;
+  - `components/` — по одному экрану/блоку на файл: MealDayHeader,
+    MealSummary, MacroProgress, WaterCard, RecentFoodsChips, CopyDayCard,
+    WeeklyMenu, MealList + MealEntry, CustomFoodsCard, FoodSearch,
+    PhotoMealDialog, AddMealDialog, PlanPreviewDialog;
+  - `lib/` — чистая математика/форматтеры без React: mealCalculations,
+    mealFormatting, portionScaling (покрыты юнит-тестами);
+  - `types.ts` — общие типы фичи.
+- `src/features/workouts/` — «Тренировки» (бывший `pages/Workouts`, ~1000 строк):
+  - `WorkoutPage.tsx` + `WorkoutMode.tsx` (полноэкранный режим тренировки);
+  - `hooks/useWorkoutPlan.ts` (генерация/пересборка плана, недели цикла,
+    режим тренировки) и `hooks/useWorkoutStats.ts` (тоннаж/рекорды);
+  - `components/` — WorkoutPlanCard, WorkoutDayCard, WorkoutStats,
+    WorkoutHistory, LogDetailsDialog;
+  - `lib/` — workoutFormatting (арт, weekStart, сводка изменений) и
+    workoutStats (агрегаты тоннажа/рекордов, покрыты юнит-тестами).
+
+**Правило композиции:** страницы в `pages/` — тонкие заглушки-реэкспорты
+(`export { default } from "@/features/meals/MealsPage"`): роутер и тесты
+импортируют их как раньше, а код живёт в фиче.
 
 **Что остаётся вне features:** по-настоящему общий код — доменные библиотеки
 в `lib/` (их используют несколько фич сразу) и переиспользуемые UI-примитивы
 в `components/`.
 
 **Правило роста:** как только у новой фичи появляется 2+ файла, заводите
-`src/features/<name>/`. Существующие монолиты (`pages/Meals`, `pages/Workouts`)
-мигрируют по мере необходимости — приоритет у фич, которые растут быстрее
-всего. Крупный переезд сразу всех страниц не делаем: он не даёт пользователю
-функциональной ценности и ломает историю изменений.
+`src/features/<name>/`. Крупные страницы разбивайте при доработке связанной
+функциональности: каждый JSX-блок — в свой компонент, чистые вычисления —
+в `lib/` с тестами, состояние — в хуки. Оставшиеся монолиты (`pages/Overview`,
+`pages/Progress`, `pages/Profile`) мигрируют по мере необходимости — приоритет
+у фич, которые растут быстрее всего.
 
 ## Ролевая модель (SaaS-ready)
 

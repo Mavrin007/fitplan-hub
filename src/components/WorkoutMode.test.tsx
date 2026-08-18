@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
-import { WorkoutMode } from "./WorkoutMode";
+import { WorkoutMode } from "@/features/workouts/WorkoutMode";
 import type { WorkoutDay } from "@/lib/workoutLibrary";
 
 /** Один день плана: два упражнения, у одного — стартовый вес, у другого — нет. */
