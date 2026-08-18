@@ -624,14 +624,18 @@ function extractChatId(raw: unknown): number | null {
  * GET /telegram-status — диагностика интеграции без секретов:
  * задан ли токен (только префикс), принимает ли его Bot API (getMe),
  * зарегистрирован ли вебхук, заданы ли TELEGRAM_WEBHOOK_SECRET и
- * TELEGRAM_MINI_APP_URL. Полезно после деплоя/смены токена: ответ — JSON,
+ * TELEGRAM_MINI_APP_URL, и принимает ли Telegram origin для Login Widget
+ * (кнопка «Войти через Telegram»). Origin проверки — из query-параметра
+ * ?origin=https://…, по умолчанию канонический домен. Ответ — JSON,
  * который можно открыть в браузере или curl'ом.
  */
-export const telegramStatus = httpAction(async () => {
+export const telegramStatus = httpAction(async (_ctx, request) => {
+  const requestedOrigin = new URL(request.url).searchParams.get("origin");
   const status = await buildTelegramStatus({
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
     miniAppUrl: process.env.TELEGRAM_MINI_APP_URL,
+    loginWidgetOrigin: requestedOrigin ?? DEFAULT_MINI_APP_URL,
   });
   return new Response(JSON.stringify(status, null, 2), {
     headers: { "Content-Type": "application/json" },

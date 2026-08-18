@@ -97,21 +97,24 @@ curl https://energetic-coyote-927.convex.cloud/api/query \
 
 Кнопка использует официальный OAuth-флоу `oauth.telegram.org`. Telegram
 разрешает вход **только** с доменов, добавленных в настройке Login Widget
-бота. Проверка показала, что сейчас у бота **не добавлено ни одного домена**
-— `oauth.telegram.org` отвечает «Bot domain invalid» даже для прод-домена и
-`localhost`, поэтому кнопка молча не срабатывает (попап висит на странице
-Telegram, ничего не происходит; через 10 секунд приложение покажет подсказку).
+бота. Если домен не добавлен — `oauth.telegram.org` отвечает «Bot domain
+invalid» и кнопка молча не срабатывает (попап висит на странице Telegram;
+через 10 секунд приложение покажет подсказку, что добавить в BotFather).
 
-Что сделать в Telegram (один раз, от владельца бота):
+**Статус (проверено 2026-08-18): прод-домен `https://fitplan-hub.vercel.app`
+добавлен и принимается** — вход на проде работает. Если «Bot domain
+invalid» повторяется на проде, это кэш Telegram/старый попап: обновите
+страницу с очисткой кэша (Ctrl+Shift+R) и закройте старые окна.
+
+Для остальных окружений добавьте в Telegram (один раз, от владельца бота):
 
 1. Откройте @BotFather → `/mybots` → **FitplanKiloBot** → **Bot Settings** →
    **Login Widget**.
-2. В **Allowed URLs** добавьте минимум:
-   - `https://fitplan-hub.vercel.app` (прод);
+2. В **Allowed URLs** добавьте нужные домены:
    - `http://localhost:5173` (локальная разработка);
    - домен превью Freebuff (например `<project>.vly.sh`), если тестируете там.
-3. Готово — кнопка на `/auth` заработает без передеплоя (проверка домена —
-   на стороне Telegram).
+3. Готово — кнопка заработает без передеплоя (проверка домена — на стороне
+   Telegram).
 
 Проверка из консоли (должен быть ответ без «Bot domain invalid»):
 
@@ -166,13 +169,21 @@ curl "https://oauth.telegram.org/auth?bot_id=8659935112&origin=https%3A%2F%2Ffit
 
 ```bash
 curl https://energetic-coyote-927.convex.site/telegram-status
+# проверка любого домена для Login Widget:
+curl "https://energetic-coyote-927.convex.site/telegram-status?origin=https%3A%2F%2Ffitplan-hub.vercel.app"
 ```
 
 Поля: `ok` (токен принят Bot API), `token.prefix` (первые 5 символов —
 сверка), `getMe` (id/username бота), `webhook` (url, pending, lastError),
-`webhookSecretConfigured`, `miniAppUrlConfigured`. Роут объявлен в
-`src/convex/http.ts`, логика — `src/lib/telegram/status.ts` (покрыта
-тестами).
+`webhookSecretConfigured`, `miniAppUrlConfigured` и `loginWidget` —
+**проверка домена для кнопки «Войти через Telegram»** (v2.15): эндпоинт сам
+открывает `oauth.telegram.org/auth` с указанным `?origin=` (по умолчанию —
+канонический домен) и отвечает `{checked, origin, ok, error}`, где
+`error: "Bot domain invalid — добавьте этот домен в @BotFather → Bot Settings
+→ Login Widget (Allowed URLs)"` — если домен не добавлен. Так «Bot domain
+invalid» диагностируется изнутри, одной командой, до теста в браузере.
+Роут объявлен в `src/convex/http.ts`, логика — `src/lib/telegram/status.ts`
+(покрыта тестами).
 
 Если понадобится пересоздать вебхук (например, после смены токена):
 
