@@ -1,34 +1,977 @@
-/**
- * Страница «Питание» (/dashboard/meals) — тонкая композиция фичи
- * src/features/meals: вся логика в useMealDiary, JSX — в компонентах,
- * чистая математика — в lib/. Вынесена из src/pages/Meals.tsx.
- */
-
+import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
+import { useMutation, useQuery, useAction } from "convex/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTrack } from "@/hooks/use-track";
+import { usePremium } from "@/hooks/use-premium";
+import { PremiumDialog } from "@/components/premium-dialog";
+import type { PremiumFeature } from "@/lib/premium";
+import { motion } from "framer-motion";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { ChartCard, LegendChip } from "@/components/chart-card";
+import { Chip } from "@/components/ui/chip";
+import { MacroRing } from "@/components/macro-ring";
 import { PageAurora } from "@/components/page-aurora";
 import { PageLoading } from "@/components/page-loading";
 import { EmptyState } from "@/components/empty-state";
-import { PremiumDialog } from "@/components/premium-dialog";
-import { UtensilsCrossed } from "lucide-react";
-import { useMealDiary } from "./hooks/useMealDiary";
-import { progressPercent } from "./lib/mealCalculations";
-import { MealDayHeader } from "./components/MealDayHeader";
-import { MealSummary } from "./components/MealSummary";
-import { RecentFoodsChips } from "./components/RecentFoodsChips";
-import { CopyDayCard } from "./components/CopyDayCard";
-import { WeeklyMenu } from "./components/WeeklyMenu";
-import { MealList } from "./components/MealList";
-import { CustomFoodsCard } from "./components/CustomFoodsCard";
-import { AddMealDialog } from "./components/AddMealDialog";
-import { PlanPreviewDialog } from "./components/PlanPreviewDialog";
+import { DishScene } from "@/components/illustrations";
+import { Badge } from "@/components/ui/badge";
+import {
+  FOOD_LIBRARY,
+  formatAmount,
+  generateMealPlan,
+  generateWeeklyMealPlan,
+  type MealType,
+  type PlannedMeal,
+} from "@/lib/mealLibrary";
+import { GOAL_LABELS, MEAL_TYPE_LABELS, UNITS, WEEKDAY_SHORT } from "@/lib/i18n";
+import { computeTargets, waterGoal, type FitnessGoal, type Targets } from "@/lib/nutrition";
+import { addDays, pluralRecords, shortDate, toDateKey, todayKey } from "@/lib/dates";
+import { searchOpenFoodFacts, type CatalogProduct } from "@/lib/productSearch";
+import { liters } from "@/features/dashboard/today";
+import { cn, parseLocalNumber } from "@/lib/utils";
+import {
+  MEAL_ART,
+  MEAL_TYPES,
+  PROTEIN_BOOSTS,
+  DECIMAL_INPUT,
+  formatPrice,
+  fitTone,
+  kcalPerServing,
+  macrosForQuantity,
+  newIdempotencyKey,
+  portionLabel,
+  quantityStep,
+  quickQtyStep,
+} from "./lib/mealUtils";
+import {
+  buildPhotoReviewItems,
+  photoFileError,
+  readPhotoFile,
+  type PhotoReviewItem,
+} from "./lib/photo";
+import {
+  ArrowRight,
+  Camera,
+  Copy,
+  Droplets,
+  History,
+  Loader2,
+  Minus,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  UtensilsCrossed,
+} from "lucide-react";
+
+/** Строка «соответствие цели»: проценты по ккал/Б/Ж/У против целей из профиля
+ *  с цветовой индикацией — видно, насколько день близок к КБЖУ. */
+function MacroMatchRow({
+  value,
+  target,
+}: {
+  value: { calories: number; protein: number; carbs: number; fat: number };
+  target: Targets;
+}) {
+  const items: { label: string; v: number; t: number }[] = [
+    { label: UNITS.kcal, v: value.calories, t: target.calories },
+    { label: "Б", v: value.protein, t: target.protein },
+    { label: "Ж", v: value.fat, t: target.fat },
+    { label: "У", v: value.carbs, t: target.carbs },
+  ];
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
+      <span className="text-muted-foreground">К цели:</span>
+      {items.map(({ label, v, t }) => (
+        <span key={label} className={`num ${fitTone(Math.abs(v - t) / t)}`}>
+          {label} {Math.round((v / t) * 100)}%
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function MealsPage() {
-  const d = useMealDiary();
-  const targets = d.targets;
-  const profile = d.profile;
+  const profile = useQuery(api.profiles.getMyProfile);
+  const todayLog = useQuery(api.mealLog.getByDate, { date: todayKey() });
+  const foods = useQuery(api.foods.listMyFoods, {});
+  const water = useQuery(api.water.getByDate, { date: todayKey() });
+  const addWater = useMutation(api.water.addWater);
+  const addEntry = useMutation(api.mealLog.addEntry);
+  const addEntries = useMutation(api.mealLog.addEntries);
+  const updateEntry = useMutation(api.mealLog.updateEntry);
+  const deleteEntry = useMutation(api.mealLog.deleteEntry);
+  const addFood = useMutation(api.foods.addFood);
+  const deleteFood = useMutation(api.foods.deleteFood);
+  const analyzePhoto = useAction(api.photo.analyzeMealPhoto);
+  const track = useTrack();
+  const premium = usePremium();
+  // Paywall-заглушка: открывается на premium-фиче (сейчас — фото-анализ).
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallFeature, setPaywallFeature] = useState<PremiumFeature | undefined>();
 
-  if (d.loading) {
+  /** Открыть paywall для premium-фичи + зафиксировать событие. */
+  const openPaywall = (feature: PremiumFeature) => {
+    setPaywallFeature(feature);
+    setPaywallOpen(true);
+    track("premium_feature_clicked", { feature });
+    track("paywall_viewed", { feature });
+  };
+
+  // Add/edit entry dialog state
+  const [dialogMeal, setDialogMeal] = useState<MealType | null>(null);
+  // Редактируемая запись: null = диалог в режиме «добавить», иначе «изменить».
+  const [editingEntry, setEditingEntry] = useState<Doc<"mealLog"> | null>(null);
+  const [search, setSearch] = useState("");
+  const [selectedName, setSelectedName] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [customName, setCustomName] = useState("");
+  const [customCals, setCustomCals] = useState("");
+  const [customProtein, setCustomProtein] = useState("");
+  const [customCarbs, setCustomCarbs] = useState("");
+  const [customFat, setCustomFat] = useState("");
+
+  // New custom food state
+  const [newFood, setNewFood] = useState({
+    name: "",
+    amount: "100",
+    unit: "г",
+    calories: "",
+    protein: "",
+    carbs: "",
+    fat: "",
+  });
+
+  // Перенос записей из прошлого дня: выбранная дата + флаг копирования.
+  const [copyFromDate, setCopyFromDate] = useState(() =>
+    toDateKey(addDays(new Date(), -1)),
+  );
+  const [copying, setCopying] = useState(false);
+  // Снятые для копирования записи по дню: по умолчанию отмечены все, снятие
+  // хранится как «исключения» под датой — не нужно синхронизировать выбор
+  // эффектом при смене дня или загрузке записей.
+  const [copyDeselected, setCopyDeselected] = useState<
+    Record<string, Set<string>>
+  >({});
+  // Повтор ОДНОГО приёма из прошлого дня («Обед вчера → Повторить»): тип
+  // приёма + отмеченные записи (можно снять лишнее перед добавлением).
+  const [repeatMeal, setRepeatMeal] = useState<MealType | null>(null);
+  const [repeatSelected, setRepeatSelected] = useState<Set<string>>(new Set());
+  // Защита от двойного добавления: пока мутация летит, кнопки заблокированы.
+  const [adding, setAdding] = useState(false);
+  // Реф-флаг — жёстче state: второй клик успевает случиться ДО re-render,
+  // когда `adding` в замыкании обработчика ещё false. beginAdding/endAdding
+  // проверяют флаг синхронно, поэтому дубль невозможен даже при медленной сети.
+  const addingRef = useRef(false);
+
+  /** Захватить «блокировку записи»; false — уже выполняется другая мутация. */
+  const beginAdding = (): boolean => {
+    if (addingRef.current) return false;
+    addingRef.current = true;
+    setAdding(true);
+    return true;
+  };
+
+  /** Снять блокировку после завершения мутации. */
+  const endAdding = () => {
+    addingRef.current = false;
+    setAdding(false);
+  };
+  // Панель выбранного продукта — при выборе из внешнего каталога она
+  // находится над результатами: мягко подводим к ней скроллом.
+  const selectedPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const [showPlan, setShowPlan] = useState(false);
+
+  // Внешний каталог Open Food Facts: результаты поиска по запросу, состояние
+  // запроса и выбранный внешний продукт (макросы на 100 г, порция = 100 г).
+  const [offResults, setOffResults] = useState<CatalogProduct[] | null>(null);
+  const [searchingOff, setSearchingOff] = useState(false);
+  const [offError, setOffError] = useState<string | null>(null);
+  const [offSelected, setOffSelected] = useState<CatalogProduct | null>(null);
+
+  // Фото-трекинг: снимок тарелки → Gemini Vision распознаёт блюдо → ревью
+  // (оценка, а не точное измерение) → подтверждение пользователем.
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Распознанные пункты, ожидающие подтверждения (редактируемые).
+  const [photoReview, setPhotoReview] = useState<PhotoReviewItem[] | null>(null);
+
+  // Стиль недельного меню: по умолчанию — цель из профиля, можно переключить
+  // на другой (например «Похудение»/«Набор массы»), чтобы посмотреть меню.
+  const [menuGoal, setMenuGoal] = useState<FitnessGoal | null>(null);
+
+  const targets = profile ? computeTargets(profile) : null;
+  // Вода: норма ~33 мл на кг веса (как на главном экране), без профиля — 2 л.
+  const waterTarget = profile ? waterGoal(profile.weightKg) : 2000;
+  const waterMl = water?.amountMl ?? 0;
+
+  const byMeal = useMemo(() => {
+    const map: Record<MealType, NonNullable<typeof todayLog>> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+    for (const e of todayLog ?? []) map[e.mealType] = [...map[e.mealType], e];
+    return map;
+  }, [todayLog]);
+
+  const totals = useMemo(() => {
+    const entries = todayLog ?? [];
+    return {
+      calories: entries.reduce((s, e) => s + e.calories, 0),
+      protein: entries.reduce((s, e) => s + e.protein, 0),
+      carbs: entries.reduce((s, e) => s + e.carbs, 0),
+      fat: entries.reduce((s, e) => s + e.fat, 0),
+    };
+  }, [todayLog]);
+
+  /** «Что осталось после добавления» — короткая строка для тоста: калории и
+   *  белок против целей дня. Отвечает на вопрос «сколько осталось» в момент
+   *  записи, не заставляя возвращаться к сводке. */
+  const remainingHint = (added: {
+    calories: number;
+    protein: number;
+  }): string => {
+    if (!targets) return "";
+    const calLeft = Math.round(
+      targets.calories - totals.calories - added.calories,
+    );
+    const proteinLeft = Math.round(
+      targets.protein - totals.protein - added.protein,
+    );
+    const cal =
+      calLeft > 0
+        ? `осталось ${calLeft.toLocaleString("ru-RU")} ккал`
+        : calLeft === 0
+          ? "дневная норма ккал закрыта"
+          : `перебор ${Math.abs(calLeft).toLocaleString("ru-RU")} ккал`;
+    const prot =
+      proteinLeft > 0
+        ? `белка ещё ${proteinLeft} г`
+        : proteinLeft === 0
+          ? "белок набран"
+          : "";
+    return prot ? `${cal} · ${prot}` : cal;
+  };
+
+  const activeMenuGoal = menuGoal ?? (profile ? profile.fitnessGoal : "maintain");
+  // Цели под выбранную цель меню: те же параметры тела, но цель чипа.
+  const menuTargets = profile
+    ? computeTargets({ ...profile, fitnessGoal: activeMenuGoal })
+    : null;
+  // Дневной план строится под выбранную цель меню.
+  const plan = useMemo(() => {
+    if (!menuTargets) return null;
+    return generateMealPlan(todayKey(), activeMenuGoal, menuTargets);
+  }, [menuTargets, activeMenuGoal]);
+
+  const weeklyPlan = useMemo(() => {
+    if (!menuTargets) return null;
+    return generateWeeklyMealPlan(activeMenuGoal, menuTargets);
+  }, [menuTargets, activeMenuGoal]);
+
+  // Записи выбранного «прошлого» дня — для предпросмотра количества.
+  const copyLog = useQuery(api.mealLog.getByDate, { date: copyFromDate });
+  const yesterdayKey = toDateKey(addDays(new Date(), -1));
+
+  // Записи прошлого дня по приёмам — для быстрого повтора одного приёма.
+  const copyByMeal = useMemo(() => {
+    const map: Record<MealType, NonNullable<typeof copyLog>> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+    for (const e of copyLog ?? []) map[e.mealType] = [...map[e.mealType], e];
+    return map;
+  }, [copyLog]);
+
+  // Отмеченные для копирования записи: все записи выбранного дня минус
+  // снятые галочки (исключения хранятся под датой дня).
+  const copySelected = useMemo(() => {
+    const deselected = copyDeselected[copyFromDate] ?? new Set<string>();
+    const ids = (copyLog ?? [])
+      .map((e) => e._id)
+      .filter((id) => !deselected.has(id));
+    return new Set(ids);
+  }, [copyDeselected, copyFromDate, copyLog]);
+
+  /** Недавние продукты: сегодняшний дневник + выбранный день (дедуп по имени). */
+  const recentFoods = useMemo(() => {
+    const seen = new Set<string>();
+    const out: {
+      name: string;
+      mealType: MealType;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+      quantity: number;
+    }[] = [];
+    // Сегодняшние записи идут первыми (оба списка отсортированы по убыванию).
+    for (const e of [...(todayLog ?? []), ...(copyLog ?? [])]) {
+      if (seen.has(e.name)) continue;
+      seen.add(e.name);
+      out.push({
+        name: e.name,
+        mealType: e.mealType,
+        calories: e.calories,
+        protein: e.protein,
+        carbs: e.carbs,
+        fat: e.fat,
+        quantity: e.quantity,
+      });
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [todayLog, copyLog]);
+
+  /** «Недавнее» для страницы: только продукты из локальной библиотеки. */
+  const recentQuick = useMemo(() => {
+    const libraryNames = new Set(FOOD_LIBRARY.map((f) => f.name));
+    return recentFoods.filter((r) => libraryNames.has(r.name));
+  }, [recentFoods]);
+
+  /** Закрыть диалог добавления/редактирования и сбросить все поля. */
+  const closeDialog = () => {
+    setDialogMeal(null);
+    setEditingEntry(null);
+    setSearch("");
+    setSelectedName("");
+    setQuantity("1");
+    setCustomName("");
+    setCustomCals("");
+    setCustomProtein("");
+    setCustomCarbs("");
+    setCustomFat("");
+    setOffResults(null);
+    setSearchingOff(false);
+    setOffError(null);
+    setOffSelected(null);
+    setPhotoDataUrl(null);
+    setAnalyzingPhoto(false);
+    setPhotoError(null);
+    setPhotoReview(null);
+  };
+
+  /** Прочитать выбранный файл как data URL (превью + отправка на распознавание). */
+  const handlePhotoFile = async (file: File | undefined) => {
+    setPhotoError(null);
+    setPhotoReview(null);
+    if (!file) return;
+    // Фото-анализ — Premium-фича: показываем paywall-заглушку (оплата ещё
+    // не подключена), а не «тихо ломаем» сценарий.
+    if (!premium.canUse("photo_food_analysis")) {
+      openPaywall("photo_food_analysis");
+      return;
+    }
+    const err = photoFileError(file);
+    if (err) {
+      setPhotoError(err);
+      return;
+    }
+    try {
+      const dataUrl = await readPhotoFile(file);
+      setPhotoDataUrl(dataUrl);
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : "Не удалось прочитать файл.");
+    }
+  };
+
+  /** Изменить количество распознанного пункта (флоу ревью). */
+  const updateReviewQuantity = (key: string, delta: number) => {
+    setPhotoReview((prev) => {
+      if (!prev) return prev;
+      track("photo_analysis_edited", { items: prev.length });
+      return prev.map((item) => {
+        if (item.key !== key) return item;
+        const next = Math.max(1, Math.round((item.quantity + delta) * 10) / 10);
+        return { ...item, quantity: next };
+      });
+    });
+  };
+
+  /** Удалить распознанный пункт из ревью. */
+  const removeReviewItem = (key: string) => {
+    setPhotoReview((prev) => {
+      if (!prev) return prev;
+      track("photo_analysis_edited", { items: prev.length });
+      return prev.filter((item) => item.key !== key);
+    });
+  };
+
+  /** Распознать блюдо на фото: результат НЕ добавляется в дневник сразу —
+   *  показываем ревью (это оценка ИИ), пользователь подтверждает/правит. */
+  const handleAnalyzePhoto = async () => {
+    if (!dialogMeal || !photoDataUrl) return;
+    track("photo_analysis");
+    if (!beginAdding()) return;
+    setAnalyzingPhoto(true);
+    setPhotoError(null);
+    try {
+      const res = await analyzePhoto({ imageDataUrl: photoDataUrl });
+      const items = buildPhotoReviewItems(res.items);
+      if (items.length === 0) {
+        setPhotoError(
+          "Не удалось разобрать блюдо на фото — попробуйте ближе или добавьте вручную.",
+        );
+        setPhotoReview(null);
+        return;
+      }
+      setPhotoReview(items);
+    } catch (err) {
+      console.error("[Meals] Ошибка распознавания фото:", err);
+      setPhotoError(
+        err instanceof Error && /Слишком часто/.test(err.message)
+          ? "Слишком часто — подождите немного и попробуйте ещё раз."
+          : "Не удалось распознать фото — проверьте интернет и попробуйте ещё раз.",
+      );
+    } finally {
+      setAnalyzingPhoto(false);
+      endAdding();
+    }
+  };
+
+  /** Подтвердить распознанное: только после ревью пользователя запись
+   *  попадает в дневник с пометкой ai_estimate. */
+  const handleConfirmPhoto = async () => {
+    if (!dialogMeal || !photoReview || photoReview.length === 0) return;
+    if (!beginAdding()) return;
+    try {
+      await addEntries({
+        entries: photoReview.map((item) => ({
+          date: todayKey(),
+          mealType: dialogMeal,
+          name: item.name,
+          quantity: item.quantity,
+          calories: item.macros.calories,
+          protein: item.macros.protein,
+          carbs: item.macros.carbs,
+          fat: item.macros.fat,
+          nutritionSource: item.source,
+        })),
+        idempotencyKey: newIdempotencyKey("photo-confirm"),
+      });
+      toast.success(
+        `Распознано: ${photoReview.length} ${pluralRecords(photoReview.length)} — добавлено в дневник (оценка)`,
+      );
+      track("photo_analysis_confirmed", { items: photoReview.length });
+      track("meal_added", { count: photoReview.length, source: "photo" });
+      closeDialog();
+    } catch (err) {
+      console.error("[Meals] Ошибка сохранения распознанного фото:", err);
+      toast.error("Не удалось добавить распознанное — попробуйте ещё раз");
+    } finally {
+      endAdding();
+    }
+  };
+
+  /** Поиск в Open Food Facts: внешний каталог за пределами кураторской
+   *  библиотеки. Ошибка сети/пустой результат не ломают диалог. */
+  const handleOffSearch = async () => {
+    const q = search.trim();
+    if (q.length < 2) {
+      toast.error("Введите минимум 2 символа для поиска в каталоге");
+      return;
+    }
+    setSearchingOff(true);
+    setOffError(null);
+    setOffSelected(null);
+    try {
+      const res = await searchOpenFoodFacts(q);
+      setOffResults(res);
+      if (res.length === 0) setOffError("В каталоге ничего не нашлось — попробуйте короче.");
+    } catch {
+      setOffResults([]);
+      setOffError("Каталог недоступен — проверьте интернет и попробуйте ещё раз.");
+    } finally {
+      setSearchingOff(false);
+    }
+  };
+
+  // Выбрали продукт из OFF — панель «порция + добавить» над списком каталога;
+  // прокручиваем её в поле зрения, чтобы не искать глазами.
+  useEffect(() => {
+    if (offSelected) {
+      selectedPanelRef.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [offSelected]);
+
+  /** Открыть диалог с предзаполненными значениями записи для редактирования. */
+  const openEdit = (entry: Doc<"mealLog">) => {
+    setEditingEntry(entry);
+    setDialogMeal(entry.mealType);
+    setQuantity(String(entry.quantity ?? 1));
+    setCustomName(entry.name);
+    setCustomCals(String(entry.calories));
+    setCustomProtein(String(entry.protein));
+    setCustomCarbs(String(entry.carbs));
+    setCustomFat(String(entry.fat));
+    setSearch("");
+    setSelectedName("");
+  };
+
+  /** Отметить/снять запись в списке копирования (снятие — под датой дня). */
+  const toggleCopyEntry = (id: string) => {
+    setCopyDeselected((m) => {
+      const cur = m[copyFromDate] ?? new Set<string>();
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { ...m, [copyFromDate]: next };
+    });
+  };
+
+  /** Отметить/снять запись в диалоге повтора одного приёма. */
+  const toggleRepeatEntry = (id: string) => {
+    setRepeatSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** Скопировать записи в сегодняшний дневник (общая логика для «копировать
+   *  день» и «повторить приём»). Возвращает true при успехе. */
+  const copyEntriesToToday = async (
+    entries: NonNullable<typeof todayLog>,
+    sourceLabel: string,
+  ): Promise<boolean> => {
+    if (entries.length === 0) return false;
+    if (!beginAdding()) return false;
+    try {
+      await addEntries({
+        entries: entries.map((e) => ({
+          date: todayKey(),
+          mealType: e.mealType,
+          name: e.name,
+          quantity: e.quantity,
+          calories: e.calories,
+          protein: e.protein,
+          carbs: e.carbs,
+          fat: e.fat,
+          foodId: e.foodId,
+          nutritionSource: e.nutritionSource,
+        })),
+        idempotencyKey: newIdempotencyKey("copy-day"),
+      });
+      toast.success(`Скопировано записей: ${entries.length} из ${sourceLabel}`);
+      track("meal_added", { count: entries.length, source: "copy_day" });
+      return true;
+    } catch (err) {
+      console.error("[Meals] Ошибка копирования записей из прошлого дня:", err);
+      toast.error("Не удалось скопировать записи");
+      return false;
+    } finally {
+      endAdding();
+    }
+  };
+
+  /** Скопировать выбранные записи дня в сегодняшний дневник. */
+  const handleCopyDay = async () => {
+    if (!copyFromDate || copyFromDate === todayKey()) return;
+    const entries = (copyLog ?? []).filter((e) => copySelected.has(e._id));
+    if (entries.length === 0) {
+      toast.error("Выберите хотя бы одну запись");
+      return;
+    }
+    setCopying(true);
+    try {
+      await copyEntriesToToday(entries, shortDate(copyFromDate));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  /** Открыть диалог повтора одного приёма: записи приёма отмечены по
+   *  умолчанию, лишние можно снять перед добавлением. */
+  const openRepeatMeal = (mealType: MealType) => {
+    setRepeatMeal(mealType);
+    setRepeatSelected(new Set(copyByMeal[mealType].map((e) => e._id)));
+  };
+
+  /** Повторить отмеченные записи приёма из прошлого дня в сегодня. */
+  const handleRepeatMeal = async () => {
+    if (!repeatMeal) return;
+    const entries = copyByMeal[repeatMeal].filter((e) =>
+      repeatSelected.has(e._id),
+    );
+    if (entries.length === 0) {
+      toast.error("Выберите хотя бы одну запись");
+      return;
+    }
+    const ok = await copyEntriesToToday(
+      entries,
+      `${MEAL_TYPE_LABELS[repeatMeal].toLowerCase()} (${shortDate(copyFromDate)})`,
+    );
+    if (ok) setRepeatMeal(null);
+  };
+
+  /** Изменить порцию кнопками −/+ с округлением до шага. */
+  const stepQuantity = (dir: 1 | -1) => {
+    const cur = parseLocalNumber(quantity) ?? 1;
+    const step = quantityStep(selectedName, !!offSelected);
+    const next = Math.max(0.5, Math.round((cur + dir * step) * 10) / 10);
+    setQuantity(String(next));
+  };
+
+  /** Что добавится при текущем количестве: макросы выбранного продукта. */
+  const selectedPreview = (): { kcal: number; protein: number; carbs: number; fat: number } | null => {
+    const qtyNum = parseLocalNumber(quantity) ?? 0;
+    if (qtyNum <= 0 || !selectedName) return null;
+    const food =
+      FOOD_LIBRARY.find((f) => f.name === selectedName) ?? offSelected;
+    if (!food) return null;
+    return macrosForQuantity(food, qtyNum);
+  };
+
+  const handleAdd = async () => {
+    if (!dialogMeal || !selectedName) return;
+    const qty = parseLocalNumber(quantity);
+    if (qty === null || qty <= 0) {
+      toast.error("Порций: укажите число больше нуля, например 1,5.");
+      return;
+    }
+    // Локальная библиотека первая; внешний продукт из OFF — если не нашли.
+    const food =
+      FOOD_LIBRARY.find((f) => f.name === selectedName) ?? offSelected;
+    if (!food) {
+      toast.error("Выберите продукт из списка");
+      return;
+    }
+    const preview = macrosForQuantity(food, qty);
+    if (!beginAdding()) return;
+    try {
+      await addEntry({
+        date: todayKey(),
+        mealType: dialogMeal,
+        name: food.name,
+        quantity: Math.round(qty * 10) / 10,
+        calories: preview.kcal,
+        protein: preview.protein,
+        carbs: preview.carbs,
+        fat: preview.fat,
+        // Источник КБЖУ: библиотека — verified, каталог — open_food_facts.
+        nutritionSource: offSelected ? "open_food_facts" : "verified",
+        sourceId: offSelected?.barcode,
+        idempotencyKey: newIdempotencyKey("meal-add"),
+      });
+      toast.success(`${food.name} — добавлено`, {
+        description: remainingHint({
+          calories: preview.kcal,
+          protein: preview.protein,
+        }),
+      });
+      track("meal_added", {
+        calories: preview.kcal,
+        mealType: dialogMeal,
+        source: offSelected ? "catalog" : "library",
+      });
+      closeDialog();
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления продукта из библиотеки:", err);
+      toast.error("Не удалось добавить продукт");
+    } finally {
+      endAdding();
+    }
+  };
+
+  /** Быстрый повтор: добавить продукт из «Недавнего» одним тапом. */
+  const handleRecentAdd = async (r: {
+    name: string;
+    mealType: MealType;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    quantity: number;
+  }) => {
+    if (!dialogMeal) return;
+    if (!beginAdding()) return;
+    try {
+      await addEntry({
+        date: todayKey(),
+        mealType: dialogMeal,
+        name: r.name,
+        quantity: r.quantity,
+        calories: r.calories,
+        protein: r.protein,
+        carbs: r.carbs,
+        fat: r.fat,
+        idempotencyKey: newIdempotencyKey("meal-recent"),
+      });
+      toast.success(`${r.name} — добавлено`, {
+        description: remainingHint({ calories: r.calories, protein: r.protein }),
+      });
+      track("meal_added", { calories: r.calories, mealType: dialogMeal, source: "recent" });
+      closeDialog();
+    } catch (err) {
+      console.error("[Meals] Ошибка быстрого добавления из недавних:", err);
+      toast.error("Не удалось добавить продукт");
+    } finally {
+      endAdding();
+    }
+  };
+
+  const handleCustomAdd = async () => {
+    if (!dialogMeal || addingRef.current) return;
+    if (!customName.trim()) {
+      toast.error("Укажите название продукта");
+      return;
+    }
+    const cals = parseLocalNumber(customCals);
+    if (cals === null || cals <= 0) {
+      toast.error("Укажите калории числом, например 250");
+      return;
+    }
+    const p = parseLocalNumber(customProtein) ?? 0;
+    const c = parseLocalNumber(customCarbs) ?? 0;
+    const f = parseLocalNumber(customFat) ?? 0;
+    if (!beginAdding()) return;
+    try {
+      await addEntry({
+        date: todayKey(),
+        mealType: dialogMeal,
+        name: customName.trim(),
+        quantity: 1,
+        calories: cals,
+        protein: p,
+        carbs: c,
+        fat: f,
+        idempotencyKey: newIdempotencyKey("meal-custom"),
+      });
+      toast.success(`${customName.trim()} — добавлено`, {
+        description: remainingHint({ calories: cals, protein: p }),
+      });
+      track("meal_added", { calories: cals, mealType: dialogMeal, source: "custom" });
+      closeDialog();
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления своего продукта:", err);
+      toast.error("Не удалось добавить продукт");
+    } finally {
+      endAdding();
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingEntry || addingRef.current) return;
+    if (!customName.trim()) {
+      toast.error("Укажите название продукта");
+      return;
+    }
+    const cals = parseLocalNumber(customCals);
+    if (cals === null || cals <= 0) {
+      toast.error("Укажите калории числом, например 250");
+      return;
+    }
+    const qty = parseLocalNumber(quantity);
+    if (qty === null || qty <= 0) {
+      toast.error("Порций: укажите число больше нуля, например 1,5.");
+      return;
+    }
+    if (!beginAdding()) return;
+    try {
+      await updateEntry({
+        id: editingEntry._id,
+        mealType: dialogMeal ?? editingEntry.mealType,
+        name: customName.trim(),
+        quantity: Math.round(qty * 10) / 10,
+        calories: cals,
+        protein: parseLocalNumber(customProtein) ?? 0,
+        carbs: parseLocalNumber(customCarbs) ?? 0,
+        fat: parseLocalNumber(customFat) ?? 0,
+      });
+      toast.success("Запись обновлена");
+      closeDialog();
+    } catch (err) {
+      console.error(`[Meals] Ошибка обновления записи (id=${editingEntry._id}):`, err);
+      toast.error("Не удалось обновить запись");
+    } finally {
+      endAdding();
+    }
+  };
+
+  const handleAddAllPlan = async () => {
+    if (!plan) return;
+    if (!beginAdding()) return;
+    try {
+      await addEntries({
+        entries: plan.meals.flatMap((m) =>
+          m.foods.map((f) => ({
+            date: todayKey(),
+            mealType: m.mealType,
+            name: f.food.name,
+            quantity: Math.round((f.amountGrams / f.food.servingGrams) * 10) / 10,
+            calories: f.calories,
+            protein: f.protein,
+            carbs: f.carbs,
+            fat: f.fat,
+            nutritionSource: "verified",
+          })),
+        ),
+        idempotencyKey: newIdempotencyKey("plan-day"),
+      });
+      toast.success("План на день добавлен в дневник");
+      track("meal_added", { count: plan.meals.length, source: "plan" });
+      setShowPlan(false);
+    } catch (err) {
+      console.error("[Meals] Ошибка добавления плана на день в дневник:", err);
+      toast.error("Не удалось добавить план");
+    } finally {
+      endAdding();
+    }
+  };
+
+  /** Быстрая правка порции без открытия диалога: −/+ на строке записи,
+   *  КБЖУ пересчитываются пропорционально количеству. */
+  const handleQuickQty = async (entry: Doc<"mealLog">, dir: 1 | -1) => {
+    const cur = entry.quantity ?? 1;
+    const next = Math.max(
+      0.5,
+      Math.round((cur + dir * quickQtyStep(entry.name)) * 10) / 10,
+    );
+    if (next === cur) return;
+    if (!beginAdding()) return;
+    const ratio = next / cur;
+    try {
+      await updateEntry({
+        id: entry._id,
+        mealType: entry.mealType,
+        name: entry.name,
+        quantity: next,
+        calories: Math.round(entry.calories * ratio),
+        protein: Math.round(entry.protein * ratio * 10) / 10,
+        carbs: Math.round(entry.carbs * ratio * 10) / 10,
+        fat: Math.round(entry.fat * ratio * 10) / 10,
+      });
+    } catch (err) {
+      console.error(`[Meals] Ошибка быстрой правки порции (id=${entry._id}):`, err);
+      toast.error("Не удалось изменить порцию");
+    } finally {
+      endAdding();
+    }
+  };
+
+  /** Удалить запись из дневника с понятным фидбеком. */
+  const handleDeleteEntry = async (id: Doc<"mealLog">["_id"], name: string) => {
+    try {
+      await deleteEntry({ id });
+      toast.success(`${name} — удалено`);
+    } catch (err) {
+      console.error(`[Meals] Ошибка удаления записи (id=${id}):`, err);
+      toast.error("Не удалось удалить запись");
+    }
+  };
+
+  /** Удалить свой продукт из библиотеки с понятным фидбеком. */
+  const handleDeleteFood = async (id: Doc<"foods">["_id"], name: string) => {
+    try {
+      await deleteFood({ id });
+      toast.success(`${name} — удалено из моих продуктов`);
+    } catch (err) {
+      console.error(`[Meals] Ошибка удаления продукта (id=${id}):`, err);
+      toast.error("Не удалось удалить продукт");
+    }
+  };
+
+  /** Быстрая вода прямо со страницы питания — как на главном экране. */
+  const handleWater = async (delta: number) => {
+    const prev = waterMl;
+    try {
+      await addWater({
+        date: todayKey(),
+        amountMl: delta,
+        idempotencyKey: newIdempotencyKey("water"),
+      });
+      if (prev < waterTarget && prev + delta >= waterTarget) {
+        toast.success("Цель по воде достигнута! 🎉");
+      }
+    } catch (err) {
+      console.error(`[Meals] Ошибка обновления воды (delta=${delta}):`, err);
+      toast.error("Не удалось обновить воду");
+    }
+  };
+
+  /** Открыть диалог добавления с уже выбранным продуктом и порцией. */
+  const openQuickAdd = (name: string, qty: number, mealType: MealType = "snack") => {
+    setDialogMeal(mealType);
+    setEditingEntry(null);
+    setSearch(name);
+    setSelectedName(name);
+    setQuantity(String(qty));
+    setCustomName("");
+    setCustomCals("");
+    setCustomProtein("");
+    setCustomCarbs("");
+    setCustomFat("");
+    setOffResults(null);
+    setSearchingOff(false);
+    setOffError(null);
+    setOffSelected(null);
+    setPhotoDataUrl(null);
+    setAnalyzingPhoto(false);
+    setPhotoError(null);
+    setPhotoReview(null);
+  };
+
+  const handleSaveFood = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const amount = parseLocalNumber(newFood.amount) ?? 100;
+    const cals = parseLocalNumber(newFood.calories);
+    if (!newFood.name.trim() || cals === null || cals <= 0) {
+      toast.error("Укажите название и калории");
+      return;
+    }
+    try {
+      await addFood({
+        name: newFood.name.trim(),
+        amount,
+        unit: newFood.unit.trim() || "г",
+        calories: cals,
+        protein: parseLocalNumber(newFood.protein) ?? 0,
+        carbs: parseLocalNumber(newFood.carbs) ?? 0,
+        fat: parseLocalNumber(newFood.fat) ?? 0,
+      });
+      toast.success("Продукт сохранён");
+      setNewFood({
+        name: "",
+        amount: "100",
+        unit: "г",
+        calories: "",
+        protein: "",
+        carbs: "",
+        fat: "",
+      });
+    } catch (err) {
+      console.error("[Meals] Ошибка сохранения своего продукта:", err);
+      toast.error("Не удалось сохранить продукт");
+    }
+  };
+
+  const loading = profile === undefined || todayLog === undefined;
+
+  if (loading) {
     return <PageLoading />;
   }
 
@@ -53,107 +996,1398 @@ export default function MealsPage() {
     );
   }
 
-  const calPct = progressPercent(d.totals.calories, targets.calories);
-  const proteinLeft = Math.max(0, Math.round(targets.protein - d.totals.protein));
-  const waterPct = progressPercent(d.waterMl, d.waterTarget);
-  const planSummary = d.plan
-    ? `${d.plan.meals.length} приёмов · ${d.plan.calories.toLocaleString("ru-RU")} ккал предложено`
-    : "";
+  const calPct = Math.min(
+    100,
+    Math.round((totals.calories / targets.calories) * 100),
+  );
+  const calLeft = targets.calories - totals.calories;
+  const proteinLeft = Math.max(0, Math.round(targets.protein - totals.protein));
+  const waterPct = Math.min(100, Math.round((waterMl / waterTarget) * 100));
 
   return (
     <div className="relative isolate mx-auto max-w-4xl space-y-10">
       <PageAurora />
-      <MealDayHeader />
+      <header className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="label-overline text-muted-foreground">Питание</p>
+          <h1 className="m3-headline-large mt-2">Рацион за сегодня</h1>
+          <div
+            aria-hidden
+            className="mt-3 h-1 w-14 rounded-full bg-gradient-to-r from-brand to-brand-deep dark:from-brand-soft dark:to-brand"
+          />
+        </div>
+        <DishScene className="hidden h-24 w-32 shrink-0 sm:block" />
+      </header>
 
       {/* Totals summary — легенда + анимированные кольца макросов */}
-      <MealSummary
-        totals={d.totals}
-        targets={targets}
-        calPct={calPct}
-        waterMl={d.waterMl}
-        waterTarget={d.waterTarget}
-        waterPct={waterPct}
-        proteinLeft={proteinLeft}
-        planSummary={planSummary}
-        onWater={(delta) => void d.handleWater(delta)}
-        onOpenQuickAdd={d.openQuickAdd}
-        onShowPlan={() => d.setShowPlan(true)}
-      />
+      <ChartCard
+        title="Итоги дня"
+        subtitle="Потреблено против целей из профиля"
+        legend={
+          <>
+            <LegendChip color="var(--brand)" label="Калории" />
+            <LegendChip
+              color="var(--muted-foreground)"
+              dashed
+              label={`Цель ${targets.calories.toLocaleString("ru-RU")} ккал`}
+            />
+            <span className="hidden h-3 w-px bg-border sm:block" />
+            <LegendChip color="var(--foreground)" label="Белки" />
+            <LegendChip color="var(--muted-foreground)" label="Углеводы" />
+            <LegendChip color="var(--border)" label="Жиры" />
+          </>
+        }
+      >
+        <div className="grid gap-8 sm:grid-cols-2">
+          <div>
+            <p className="label-overline text-muted-foreground">Калории</p>
+            <p className="mt-2 text-3xl font-semibold num">
+              {totals.calories.toLocaleString("ru-RU")}
+              <span className="text-base text-muted-foreground">
+                {" "}
+                / {targets.calories.toLocaleString("ru-RU")}
+              </span>
+            </p>
+            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <motion.div
+                className="h-full rounded-full bg-brand"
+                initial={{ width: 0 }}
+                animate={{ width: `${calPct}%` }}
+                transition={{ duration: 0.9, ease: "easeOut", delay: 0.05 }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground num">
+              {calLeft > 0
+                ? `Осталось ${calLeft.toLocaleString("ru-RU")} ккал до цели`
+                : calLeft === 0
+                  ? "Цель достигнута — ровно в ноль"
+                  : `Превышено на ${Math.abs(calLeft).toLocaleString("ru-RU")} ккал`}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 items-center gap-2">
+            <MacroRing
+              label="Белки"
+              value={totals.protein}
+              target={targets.protein}
+              color="var(--macro-protein)"
+              delay={0.15}
+              center="percent"
+            />
+            <MacroRing
+              label="Углеводы"
+              value={totals.carbs}
+              target={targets.carbs}
+              color="var(--macro-carbs)"
+              delay={0.25}
+              center="percent"
+            />
+            <MacroRing
+              label="Жиры"
+              value={totals.fat}
+              target={targets.fat}
+              color="var(--macro-fat)"
+              delay={0.35}
+              center="percent"
+            />
+          </div>
+        </div>
 
-      {/* Недавние продукты — главный shortcut на странице */}
-      <RecentFoodsChips items={d.recentQuick} onOpenQuickAdd={d.openQuickAdd} />
+        {/* Вода + «что съесть, чтобы добрать белок» — действие без ухода
+            со страницы: ответ на «сколько осталось» тут же, рядом кнопки. */}
+        <div className="mt-6 grid gap-4 border-t pt-5 sm:grid-cols-2">
+          <div className="rounded-lg bg-surface-container-low p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="label-overline text-muted-foreground">Вода</p>
+              <p className="num text-sm font-medium">
+                {liters(waterMl)} / {liters(waterTarget)} л
+              </p>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <motion.div
+                className="h-full rounded-full bg-sky-500"
+                initial={{ width: 0 }}
+                animate={{ width: `${waterPct}%` }}
+                transition={{ duration: 0.7, ease: "easeOut", delay: 0.2 }}
+              />
+            </div>
+            <div className="mt-3 flex items-center gap-1.5">
+              <Button size="sm" variant="outline" onClick={() => handleWater(250)}>
+                <Droplets className="size-3.5" /> +250 мл
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleWater(500)}>
+                +500 мл
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-8"
+                onClick={() => handleWater(-250)}
+                disabled={waterMl === 0}
+                aria-label="Убрать 250 мл воды"
+              >
+                <Minus className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+
+          {proteinLeft > 0 && (
+            <div className="rounded-lg bg-surface-container-low p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="label-overline text-muted-foreground">Белок</p>
+                <p className="num text-sm font-medium">
+                  осталось {proteinLeft} г
+                </p>
+              </div>
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {PROTEIN_BOOSTS.map((b) => {
+                  const food = FOOD_LIBRARY.find((f) => f.name === b.name);
+                  if (!food) return null;
+                  const boostProtein = Math.round(
+                    food.protein * b.qty * (food.servingGrams / 100),
+                  );
+                  return (
+                    <button
+                      key={b.name}
+                      type="button"
+                      onClick={() => openQuickAdd(b.name, b.qty, "snack")}
+                      className="flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-brand hover:text-brand"
+                    >
+                      <span className="max-w-32 truncate">{b.name}</span>
+                      <span className="shrink-0 text-muted-foreground num">
+                        +{boostProtein} г белка
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+          <p className="text-xs text-muted-foreground">
+            {plan
+              ? `${plan.meals.length} приёмов · ${plan.calories.toLocaleString("ru-RU")} ккал предложено`
+              : ""}
+          </p>
+          <Button variant="outline" onClick={() => setShowPlan(true)}>
+            <Sparkles className="size-4" />
+            Сгенерировать план на день
+          </Button>
+        </div>
+      </ChartCard>
+
+      {/* Недавние продукты — главный shortcut на странице: один тап открывает
+          диалог с выбранной порцией, остаётся «Добавить». */}
+      {recentQuick.length > 0 && (
+        <section className="card-lift rounded-xl border bg-card p-4 shadow-elev-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
+              <History className="size-3.5" />
+              Недавнее
+            </p>
+            <span className="text-[11px] text-muted-foreground">
+              тап — откроет порцию
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {recentQuick.map((r) => (
+              <button
+                key={r.name}
+                type="button"
+                onClick={() => openQuickAdd(r.name, r.quantity, r.mealType)}
+                className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-brand hover:text-brand"
+              >
+                <span className="max-w-36 truncate">{`${r.name} ×${r.quantity}`}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Перенос записей из прошлого дня */}
-      <CopyDayCard
-        copyFromDate={d.copyFromDate}
-        yesterdayKey={d.yesterdayKey}
-        copyLog={d.copyLog}
-        copySelected={d.copySelected}
-        copyByMeal={d.copyByMeal}
-        adding={d.adding}
-        copying={d.copying}
-        repeatMeal={d.repeatMeal}
-        repeatSelected={d.repeatSelected}
-        onDateChange={d.setCopyFromDate}
-        onCopyDay={() => void d.handleCopyDay()}
-        onToggleCopyEntry={d.toggleCopyEntry}
-        onOpenRepeatMeal={d.openRepeatMeal}
-        onCloseRepeatMeal={() => d.setRepeatMeal(null)}
-        onToggleRepeatEntry={d.toggleRepeatEntry}
-        onRepeatMeal={() => void d.handleRepeatMeal()}
-      />
+      <section className="card-lift rounded-xl border bg-card p-5 shadow-elev-1">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="label-overline flex items-center gap-1.5 text-muted-foreground">
+              <Copy className="size-3.5" />
+              Перенос из прошлого дня
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Выберите день и скопируйте его записи в сегодняшний дневник.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="copy-date">День</Label>
+              <Input
+                id="copy-date"
+                type="date"
+                max={yesterdayKey}
+                value={copyFromDate}
+                onChange={(e) => setCopyFromDate(e.target.value)}
+                className="h-10 w-44"
+              />
+            </div>
+            <Button
+              variant="secondary"
+              className="h-10"
+              onClick={handleCopyDay}
+              disabled={copying || copySelected.size === 0}
+            >
+              {copying ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+              Скопировать выбранные ({copySelected.size})
+            </Button>
+          </div>
+        </div>
+
+        {/* Быстрый повтор одного приёма: «Обед вчера → Повторить». */}
+        {(copyLog ?? []).length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] font-medium text-muted-foreground">
+              Повторить приём:
+            </span>
+            {MEAL_TYPES.filter((mt) => copyByMeal[mt].length > 0).map((mt) => (
+              <button
+                key={mt}
+                type="button"
+                onClick={() => openRepeatMeal(mt)}
+                aria-label={`Повторить приём «${MEAL_TYPE_LABELS[mt]}» (${copyByMeal[mt].length} записей)`}
+                className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-brand hover:text-brand"
+              >
+                <span className="max-w-32 truncate">{MEAL_TYPE_LABELS[mt]}</span>
+                <span className="shrink-0 rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground num">
+                  {copyByMeal[mt].length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Записи дня с чекбоксами: снять лишнее до копирования. */}
+        {(copyLog ?? []).length > 0 && (
+          <ul className="mt-4 space-y-1.5">
+            {(copyLog ?? []).map((e) => (
+              <li
+                key={e._id}
+                className="flex items-center gap-2.5 rounded-md border bg-surface-container-low px-3 py-2"
+              >
+                <input
+                  type="checkbox"
+                  id={`copy-${e._id}`}
+                  checked={copySelected.has(e._id)}
+                  onChange={() => toggleCopyEntry(e._id)}
+                  className="size-4 shrink-0"
+                />
+                <label
+                  htmlFor={`copy-${e._id}`}
+                  className="min-w-0 flex-1 cursor-pointer text-sm"
+                >
+                  <span className="block truncate font-medium">{e.name}</span>
+                  <span className="block text-[10px] text-muted-foreground num">
+                    {MEAL_TYPE_LABELS[e.mealType]} · {e.calories} ккал
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          {copyFromDate === todayKey() || !copyFromDate
+            ? "Выберите прошедший день."
+            : (copyLog ?? []).length === 0
+              ? `Записей за ${shortDate(copyFromDate)} нет — выберите другой день.`
+              : `Готово к копированию: ${copyLog!.length} ${pluralRecords(copyLog!.length)} за ${shortDate(copyFromDate)}.`}
+        </p>
+      </section>
+
+      {/* Повтор одного приёма из прошлого дня */}
+      <Dialog
+        open={repeatMeal !== null}
+        onOpenChange={(o) => !o && setRepeatMeal(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Повторить{" "}
+              {repeatMeal ? MEAL_TYPE_LABELS[repeatMeal].toLowerCase() : ""} из{" "}
+              {shortDate(copyFromDate)}
+            </DialogTitle>
+            <DialogDescription>
+              Снимите лишнее — добавится только отмеченное.
+            </DialogDescription>
+          </DialogHeader>
+
+          {(repeatMeal ? copyByMeal[repeatMeal] : []).length > 0 && (
+            <ul className="space-y-1.5">
+              {(repeatMeal ? copyByMeal[repeatMeal] : []).map((e) => (
+                <li
+                  key={e._id}
+                  className="flex items-center gap-2.5 rounded-md border bg-surface-container-low px-3 py-2"
+                >
+                  <input
+                    type="checkbox"
+                    id={`repeat-${e._id}`}
+                    checked={repeatSelected.has(e._id)}
+                    onChange={() => toggleRepeatEntry(e._id)}
+                    className="size-4 shrink-0"
+                  />
+                  <label
+                    htmlFor={`repeat-${e._id}`}
+                    className="min-w-0 flex-1 cursor-pointer text-sm"
+                  >
+                    <span className="block truncate font-medium">{e.name}</span>
+                    <span className="block text-[10px] text-muted-foreground num">
+                      {e.calories} ккал · Б {e.protein}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <Button
+            className="w-full"
+            onClick={() => void handleRepeatMeal()}
+            disabled={adding || repeatSelected.size === 0}
+          >
+            {adding ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            Добавить в сегодня ({repeatSelected.size})
+          </Button>
+        </DialogContent>
+      </Dialog>
 
       {/* Недельное меню под цель */}
-      {d.weeklyPlan && targets && d.menuTargets && profile && (
-        <WeeklyMenu
-          weeklyPlan={d.weeklyPlan}
-          menuTargets={d.menuTargets}
-          activeMenuGoal={d.activeMenuGoal}
-          profile={profile}
-          onSelectGoal={d.setMenuGoal}
-        />
+      {weeklyPlan && targets && menuTargets && (
+        <section className="space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
+              <DishScene className="hidden size-14 shrink-0 sm:block" />
+              <div className="min-w-0">
+                <p className="label-overline text-muted-foreground">План на неделю</p>
+                <h2 className="m3-title-large mt-1">Недельное меню</h2>
+                <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                  7 разнообразных дней без повторов блюд. Порции и набор адаптированы
+                  под выбранную цель — например при похудении меньше круп и масла,
+                  при наборе массы больше углеводов и белка.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    "lose_weight",
+                    "gain_muscle",
+                    "maintain",
+                    "improve_endurance",
+                    "strength",
+                  ] as FitnessGoal[]
+                ).map((g) => (
+                  <Chip
+                    key={g}
+                    selected={activeMenuGoal === g}
+                    onClick={() => setMenuGoal(g)}
+                  >
+                    {GOAL_LABELS[g]}
+                  </Chip>
+                ))}
+              </div>
+              {profile && activeMenuGoal !== profile.fitnessGoal && (
+                <p className="w-full text-right text-[11px] text-muted-foreground">
+                  Предпросмотр под «{GOAL_LABELS[activeMenuGoal].toLowerCase()}» —
+                  цели профиля не меняются.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {weeklyPlan.days.map((day, dIdx) => {
+              const pct = Math.min(
+                100,
+                Math.round((day.calories / menuTargets.calories) * 100),
+              );
+              return (
+                <div
+                  key={day.dateKey}
+                  className="bg-noise card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1"
+                >
+                  <div className="flex items-center justify-between gap-2 border-b bg-gradient-to-r from-secondary-container/70 to-secondary-container/20 px-4 py-2.5">
+                    <span className="label-overline">
+                      {WEEKDAY_SHORT[day.weekday]}
+                      {dIdx === 0 && <span className="text-brand"> · сегодня</span>}
+                    </span>
+                    <span className="flex items-baseline gap-2">
+                      <span className="text-[10px] font-medium text-muted-foreground">
+                        {formatPrice(
+                          day.meals.reduce((s, m) => s + m.priceByn, 0),
+                        )}
+                      </span>
+                      <span className="text-xs font-semibold num">
+                        {day.calories.toLocaleString("ru-RU")} ккал
+                      </span>
+                    </span>
+                  </div>
+
+                  <ul className="divide-y divide-border/60">
+                    {day.meals.map((m, mi) => {
+                      const MealIcon = MEAL_ART[m.mealType].icon;
+                      return (
+                        <li
+                          key={`${day.dateKey}-${mi}-${m.mealType}-${m.name}`}
+                          className="flex items-start gap-2.5 px-4 py-2.5"
+                        >
+                          <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary-container/70 text-on-secondary-container">
+                            <MealIcon className="size-3" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                {MEAL_TYPE_LABELS[m.mealType]}
+                              </span>
+                              <span className="flex shrink-0 items-baseline gap-2">
+                                <span className="text-[10px] text-muted-foreground">
+                                  {formatPrice(m.priceByn)}
+                                </span>
+                                <span className="text-xs font-medium num">
+                                  {m.calories} ккал
+                                </span>
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm font-medium leading-snug">
+                              {m.name}
+                            </p>
+                            <p className="mt-1 flex gap-2.5 text-[10px] text-muted-foreground num">
+                              <span>Б {m.protein}</span>
+                              <span>У {m.carbs}</span>
+                              <span>Ж {m.fat}</span>
+                            </p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="border-t px-4 py-3">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <motion.div
+                        className="h-full rounded-full bg-gradient-to-r from-brand to-brand-deep"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{
+                          duration: 0.7,
+                          ease: "easeOut",
+                          delay: 0.08 * dIdx,
+                        }}
+                      />
+                    </div>
+                    <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
+                      <span>Б {day.protein}/{menuTargets.protein} г</span>
+                      <span>У {day.carbs}/{menuTargets.carbs} г</span>
+                      <span>Ж {day.fat}/{menuTargets.fat} г</span>
+                    </div>
+                    <MacroMatchRow value={day} target={menuTargets} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* Meal cards — M3 filled cards с placeholder-иллюстрациями */}
-      <MealList
-        byMeal={d.byMeal}
-        adding={d.adding}
-        onAdd={d.setDialogMeal}
-        onQuickQty={(entry, dir) => void d.handleQuickQty(entry, dir)}
-        onEdit={d.openEdit}
-        onDelete={(id, name) => void d.handleDeleteEntry(id, name)}
-      />
+      <section className="grid gap-4 sm:grid-cols-2">
+        {MEAL_TYPES.map((mt) => {
+          const entries = byMeal[mt];
+          const sectionCalories = entries.reduce((s, e) => s + e.calories, 0);
+          const art = MEAL_ART[mt];
+          const ArtIcon = art.icon;
+          return (
+            <div
+              key={mt}
+              className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1"
+            >
+              {/* Placeholder-иллюстрация */}
+              <div className="relative h-20 overflow-hidden bg-gradient-to-br from-secondary-container/80 to-primary-container/50">
+                <ArtIcon className="absolute -right-2 -bottom-3 size-24 rotate-[-8deg] text-on-primary-container/25" />
+                <div className="absolute inset-0 flex items-end justify-between p-3">
+                  <span className="label-overline text-on-secondary-container">
+                    {art.label}
+                  </span>
+                  <Badge
+                    variant={sectionCalories > 0 ? "default" : "outline"}
+                    className="gap-1"
+                  >
+                    <Sparkles className="size-3" />
+                    {sectionCalories} ккал
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="p-4">
+                {entries.length === 0 ? (
+                  <p className="py-3 text-center text-xs text-muted-foreground">
+                    Пока ничего не записано.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {entries.map((e) => (
+                      <li
+                        key={e._id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-surface-container-low px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                            <span className="truncate">{e.name}</span>
+                            {/* Оценка ИИ (фото/чат) — не точное измерение */}
+                            {e.nutritionSource === "ai_estimate" && (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 rounded-sm px-1 py-0 text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                              >
+                                оценка
+                              </Badge>
+                            )}
+                          </p>
+                          {(e.calories > 0 || e.protein > 0) && (
+                            <p className="mt-0.5 text-xs text-muted-foreground num">
+                              Б {e.protein} · У {e.carbs} · Ж {e.fat}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {/* Быстрая правка порции: −/+ без диалога, КБЖУ
+                              пересчитываются пропорционально. */}
+                          <div className="mr-1 flex items-center rounded-md border">
+                            <button
+                              type="button"
+                              disabled={adding || (e.quantity ?? 1) <= 0.5}
+                              onClick={() => void handleQuickQty(e, -1)}
+                              className="flex size-9 items-center justify-center rounded-l-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                              aria-label={`Уменьшить порцию ${e.name}`}
+                            >
+                              <Minus className="size-3.5" />
+                            </button>
+                            <span className="min-w-7 text-center text-xs font-medium num">
+                              ×{e.quantity ?? 1}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={adding}
+                              onClick={() => void handleQuickQty(e, 1)}
+                              className="flex size-9 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                              aria-label={`Увеличить порцию ${e.name}`}
+                            >
+                              <Plus className="size-3.5" />
+                            </button>
+                          </div>
+                          <span className="mr-1 text-xs font-medium num">
+                            {e.calories} ккал
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(e)}
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label="Редактировать запись"
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteEntry(e._id, e.name)}
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                            aria-label={`Удалить ${e.name}`}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={() => setDialogMeal(mt)}
+                >
+                  <Plus className="size-3.5" />
+                  Добавить в {art.label.toLowerCase()}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </section>
 
       <Separator />
 
       {/* Custom foods */}
-      <CustomFoodsCard
-        foods={d.foods}
-        newFood={d.newFood}
-        setNewFood={d.setNewFood}
-        onSubmit={d.handleSaveFood}
-        onWriteFood={d.writeFoodToDialog}
-        onDeleteFood={(id, name) => void d.handleDeleteFood(id, name)}
-      />
+      <section className="space-y-5">
+        <div>
+          <p className="label-overline text-muted-foreground">Мои продукты</p>
+          <h2 className="m3-title-large mt-1">
+            Свои продукты и блюда
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Сохраняйте продукты, которые едите часто, — запись займёт секунды.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleSaveFood}
+          className="card-lift grid gap-3 rounded-xl border bg-card p-5 shadow-elev-1 sm:grid-cols-6"
+        >
+          <div className="sm:col-span-2">
+            <Label htmlFor="nf-name">Название</Label>
+            <Input
+              id="nf-name"
+              placeholder="Например, мой протеиновый коктейль"
+              value={newFood.name}
+              onChange={(e) => setNewFood((f) => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label htmlFor="nf-amount">На</Label>
+            <Input
+              id="nf-amount"
+              type="text"
+              inputMode="decimal"
+              value={newFood.amount}
+              onChange={(e) =>
+                setNewFood((f) => ({ ...f, amount: DECIMAL_INPUT(e.target.value) }))
+              }
+            />
+          </div>
+          <div>
+            <Label htmlFor="nf-unit">Единица</Label>
+            <Input
+              id="nf-unit"
+              value={newFood.unit}
+              onChange={(e) => setNewFood((f) => ({ ...f, unit: e.target.value }))}
+            />
+          </div>
+          <div>
+            <Label htmlFor="nf-cal">{UNITS.kcal}</Label>
+            <Input
+              id="nf-cal"
+              type="text"
+              inputMode="decimal"
+              value={newFood.calories}
+              onChange={(e) =>
+                setNewFood((f) => ({ ...f, calories: DECIMAL_INPUT(e.target.value) }))
+              }
+            />
+          </div>
+          <div className="flex items-end">
+            <Button type="submit" className="w-full">
+              Сохранить
+            </Button>
+          </div>
+          <div className="grid grid-cols-3 gap-3 sm:col-span-6">
+            {(
+              [
+                ["protein", "Белки (г)"],
+                ["carbs", "Углеводы (г)"],
+                ["fat", "Жиры (г)"],
+              ] as const
+            ).map(([key, labelText]) => (
+              <div key={key}>
+                <Label htmlFor={`nf-${key}`}>{labelText}</Label>
+                <Input
+                  id={`nf-${key}`}
+                  type="text"
+                  inputMode="decimal"
+                  value={newFood[key]}
+                  onChange={(e) =>
+                    setNewFood((f) => ({ ...f, [key]: DECIMAL_INPUT(e.target.value) }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </form>
+
+        {(foods ?? []).length > 0 && (
+          <div className="card-lift overflow-hidden rounded-xl border bg-card shadow-elev-1">
+            <div className="divide-y">
+              {(foods ?? []).map((f) => (
+                <div
+                  key={f._id}
+                  className="flex items-center justify-between px-4 py-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{f.name}</p>
+                    <p className="text-xs text-muted-foreground num">
+                      {f.calories} ккал / {f.amount} {f.unit} · Б {f.protein} · У{" "}
+                      {f.carbs} · Ж {f.fat}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDialogMeal("snack");
+                        setCustomName(f.name);
+                        setCustomCals(String(f.calories));
+                        setCustomProtein(String(f.protein));
+                        setCustomCarbs(String(f.carbs));
+                        setCustomFat(String(f.fat));
+                      }}
+                      className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    >
+                      Записать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteFood(f._id, f.name)}
+                      className="text-muted-foreground transition-colors hover:text-destructive"
+                      aria-label={`Удалить ${f.name}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Add/edit entry dialog */}
-      <AddMealDialog diary={d} />
+      <Dialog
+        open={dialogMeal !== null}
+        onOpenChange={(o) => !o && closeDialog()}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingEntry
+                ? "Изменить запись"
+                : `Добавить в ${dialogMeal ? MEAL_TYPE_LABELS[dialogMeal].toLowerCase() : ""}`}
+            </DialogTitle>
+            <DialogDescription>
+              {editingEntry
+                ? "Измените значения — запись в дневнике обновится."
+                : "Выберите из библиотеки продуктов или добавьте вручную."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label>Приём пищи</Label>
+              <Select
+                value={dialogMeal ?? "breakfast"}
+                onValueChange={(v) => setDialogMeal(v as MealType)}
+              >
+                <SelectTrigger className="mt-1.5 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MEAL_TYPES.map((mt) => (
+                    <SelectItem key={mt} value={mt}>
+                      {MEAL_TYPE_LABELS[mt]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Быстрый повтор: недавние продукты в один тап */}
+            {!editingEntry && recentFoods.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Недавнее</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {recentFoods.map((r) => (
+                    <button
+                      key={r.name}
+                      type="button"
+                      disabled={adding}
+                      onClick={() => void handleRecentAdd(r)}
+                      className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors hover:border-brand hover:text-brand disabled:opacity-60"
+                    >
+                      <span className="max-w-40 truncate">{r.name}</span>
+                      <span className="shrink-0 text-muted-foreground num">
+                        +{r.calories} ккал
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Библиотека — только при добавлении */}
+            {!editingEntry && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="food-search">Поиск по библиотеке</Label>
+                  <Input
+                    id="food-search"
+                    placeholder="курица, рис, овсянка…"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setSelectedName("");
+                      setOffResults(null);
+                      setOffSelected(null);
+                      setOffError(null);
+                    }}
+                  />
+                  <div className="max-h-56 overflow-y-auto rounded-md border">
+                    {FOOD_LIBRARY.filter((f) =>
+                      f.name.toLowerCase().includes(search.toLowerCase()),
+                    )
+                      .slice(0, 30)
+                      .map((f) => {
+                        const active = selectedName === f.name;
+                        return (
+                          <button
+                            key={f.name}
+                            type="button"
+                            onClick={() => {
+                              setSelectedName(f.name);
+                              setOffSelected(null);
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
+                              active
+                                ? "bg-secondary font-medium"
+                                : "hover:bg-secondary/60",
+                            )}
+                          >
+                            <span>{f.name}</span>
+                            <span className="text-xs text-muted-foreground num">
+                              {kcalPerServing(f.calories, f.servingGrams)} ккал /{" "}
+                              {f.servingGrams}
+                              {f.unit === "г" ? " г" : ` ${f.unit}`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Выбранный продукт: порция + макросы + «Добавить» */}
+                {selectedName && !editingEntry && (
+                  <div
+                    ref={selectedPanelRef}
+                    className="space-y-2.5 rounded-lg border border-brand/30 bg-brand/5 p-3"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="min-w-0 truncate text-sm font-semibold">
+                        {selectedName}
+                      </p>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {offSelected
+                          ? "из каталога"
+                          : (() => {
+                              const qtyFood = FOOD_LIBRARY.find(
+                                (f) => f.name === selectedName,
+                              );
+                              return qtyFood
+                                ? `≈ ${kcalPerServing(
+                                    qtyFood.calories,
+                                    qtyFood.servingGrams,
+                                  )} ккал / порция`
+                                : "";
+                            })()}
+                      </span>
+                    </div>
+
+                    <div className="flex items-end gap-2">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Label htmlFor="qty">
+                          {offSelected ? (
+                            "Грамм (100 г — порция)"
+                          ) : (
+                            portionLabel(
+                              FOOD_LIBRARY.find((f) => f.name === selectedName),
+                              parseLocalNumber(quantity) ?? 0,
+                            )
+                          )}
+                        </Label>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => stepQuantity(-1)}
+                            disabled={adding}
+                            className="flex size-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                            aria-label="Уменьшить порцию"
+                          >
+                            <Minus className="size-4" />
+                          </button>
+                          <Input
+                            id="qty"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="1"
+                            className="h-10 flex-1 text-center"
+                            value={quantity}
+                            onChange={(e) =>
+                              setQuantity(DECIMAL_INPUT(e.target.value))
+                            }
+                          />
+                          <button
+                            type="button"
+                            onClick={() => stepQuantity(1)}
+                            disabled={adding}
+                            className="flex size-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+                            aria-label="Увеличить порцию"
+                          >
+                            <Plus className="size-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Что добавится при этой порции */}
+                      <div className="shrink-0 pb-1 text-right">
+                        {(() => {
+                          const prev = selectedPreview();
+                          if (!prev) return null;
+                          return (
+                            <>
+                              <p className="num text-sm font-semibold">
+                                ≈ {prev.kcal} ккал
+                              </p>
+                              <p className="num mt-0.5 text-[10px] text-muted-foreground">
+                                Б {prev.protein} · У {prev.carbs} · Ж{" "}
+                                {prev.fat}
+                              </p>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    <Button
+                      className="w-full"
+                      onClick={handleAdd}
+                      disabled={adding || !quantity}
+                    >
+                      {adding
+                        ? "Добавляем…"
+                        : `Добавить в ${
+                            dialogMeal
+                              ? MEAL_TYPE_LABELS[dialogMeal].toLowerCase()
+                              : "дневник"
+                          }`}
+                      <ArrowRight className="size-4" />
+                    </Button>
+                  </div>
+                )}
+
+                {/* Внешний каталог Open Food Facts */}
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    disabled={searchingOff || search.trim().length < 2}
+                    onClick={() => void handleOffSearch()}
+                  >
+                    {searchingOff ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Search className="size-3.5" />
+                    )}
+                    {searchingOff
+                      ? "Ищем в каталоге…"
+                      : "Искать в каталоге Open Food Facts"}
+                  </Button>
+
+                  {offError && (
+                    <p className="text-[11px] text-destructive">{offError}</p>
+                  )}
+
+                  {offResults && offResults.length > 0 && (
+                    <div className="max-h-44 overflow-y-auto rounded-md border">
+                      {offResults.map((p) => {
+                        const active = offSelected?.name === p.name;
+                        return (
+                          <button
+                            key={p.barcode ?? p.name}
+                            type="button"
+                            onClick={() => {
+                              setOffSelected(p);
+                              setSelectedName(p.name);
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors",
+                              active
+                                ? "bg-secondary font-medium"
+                                : "hover:bg-secondary/60",
+                            )}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate">{p.name}</span>
+                              {p.brands && (
+                                <span className="block truncate text-[10px] text-muted-foreground">
+                                  {p.brands}
+                                </span>
+                              )}
+                            </span>
+                            <span className="shrink-0 text-xs text-muted-foreground num">
+                              {p.calories} ккал / 100 г
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Фото тарелки: распознавание → ревью (оценка ИИ) → подтверждение */}
+            {!editingEntry && (
+              <div className="space-y-2 rounded-lg border border-dashed p-3">
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Или фото тарелки
+                </p>
+
+                {photoReview && photoReview.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                      <Sparkles className="size-3.5" />
+                      Распознано ИИ — проверьте и подтвердите. КБЖУ считаются
+                      оценкой, а не точным измерением.
+                    </p>
+                    <ul className="space-y-1.5">
+                      {photoReview.map((item) => (
+                        <li
+                          key={item.key}
+                          className="flex items-center justify-between gap-2 rounded-md border bg-surface-container-low px-2.5 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="flex items-center gap-1.5 truncate text-xs font-medium">
+                              <span className="truncate">{item.name}</span>
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 rounded-sm px-1 py-0 text-[9px] uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                              >
+                                оценка
+                              </Badge>
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-muted-foreground num">
+                              {item.macros.calories} ккал · Б {item.macros.protein} · У{" "}
+                              {item.macros.carbs} · Ж {item.macros.fat}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => updateReviewQuantity(item.key, -1)}
+                              disabled={item.quantity <= 1}
+                              className="flex size-7 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40"
+                              aria-label={`Уменьшить количество ${item.name}`}
+                            >
+                              <Minus className="size-3" />
+                            </button>
+                            <span className="min-w-6 text-center text-xs font-medium num">
+                              ×{item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateReviewQuantity(item.key, 1)}
+                              className="flex size-7 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
+                              aria-label={`Увеличить количество ${item.name}`}
+                            >
+                              <Plus className="size-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeReviewItem(item.key)}
+                              className="ml-1 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
+                              aria-label={`Удалить ${item.name}`}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        className="flex-1"
+                        disabled={adding}
+                        onClick={() => void handleConfirmPhoto()}
+                      >
+                        {adding ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="size-4" />
+                        )}
+                        Подтвердить и добавить ({photoReview.length})
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          track("photo_analysis_rejected", {
+                            items: photoReview.length,
+                          });
+                          setPhotoReview(null);
+                        }}
+                        aria-label="Отменить распознанное"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {photoDataUrl ? (
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={photoDataUrl}
+                          alt="Фото тарелки"
+                          className="size-16 shrink-0 rounded-lg object-cover"
+                        />
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <Button
+                            className="w-full"
+                            disabled={analyzingPhoto}
+                            onClick={() => void handleAnalyzePhoto()}
+                          >
+                            {analyzingPhoto ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="size-4" />
+                            )}
+                            {analyzingPhoto ? "Распознаём…" : "Распознать"}
+                          </Button>
+                          <label className="block cursor-pointer text-center text-[11px] text-muted-foreground underline-offset-4 hover:underline">
+                            Другое фото
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="sr-only"
+                              onChange={(e) => void handlePhotoFile(e.target.files?.[0])}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground transition-colors hover:border-brand hover:text-brand">
+                        <Camera className="size-4" />
+                        Выбрать фото тарелки
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="sr-only"
+                          onChange={(e) => void handlePhotoFile(e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
+                {photoError && (
+                  <p className="text-[11px] text-destructive">{photoError}</p>
+                )}
+                <p className="text-[10px] leading-relaxed text-muted-foreground/80">
+                  Фото используется только для распознавания блюда и расчёта КБЖУ —
+                  оно не сохраняется. Распознанное добавляется в дневник только
+                  после вашего подтверждения.
+                </p>
+              </div>
+            )}
+
+            {!editingEntry && (
+              <div className="flex items-center gap-3 py-1">
+                <Separator className="flex-1" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                  Или своё
+                </span>
+                <Separator className="flex-1" />
+              </div>
+            )}
+
+            {/* Свои значения — используется и для добавления, и для редактирования */}
+            <div className="space-y-3">
+              {editingEntry && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-qty">Порций</Label>
+                  <Input
+                    id="edit-qty"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(DECIMAL_INPUT(e.target.value))}
+                  />
+                </div>
+              )}
+              <Input
+                placeholder="Название продукта"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={UNITS.kcal}
+                  value={customCals}
+                  onChange={(e) => setCustomCals(DECIMAL_INPUT(e.target.value))}
+                />
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Белки, г"
+                  value={customProtein}
+                  onChange={(e) => setCustomProtein(DECIMAL_INPUT(e.target.value))}
+                />
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Углеводы, г"
+                  value={customCarbs}
+                  onChange={(e) => setCustomCarbs(DECIMAL_INPUT(e.target.value))}
+                />
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Жиры, г"
+                  value={customFat}
+                  onChange={(e) => setCustomFat(DECIMAL_INPUT(e.target.value))}
+                />
+              </div>
+              {editingEntry ? (
+                <Button
+                  className="w-full"
+                  disabled={adding || !customName.trim() || !customCals}
+                  onClick={handleSaveEdit}
+                >
+                  {adding ? "Сохранение…" : "Сохранить изменения"}
+                </Button>
+              ) : (
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  disabled={adding || !customName.trim() || !customCals}
+                  onClick={handleCustomAdd}
+                >
+                  {adding ? "Добавляем…" : "Добавить своё"}
+                </Button>
+              )}
+            </div>
+
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Plan preview dialog */}
-      <PlanPreviewDialog
-        open={d.showPlan}
-        onOpenChange={d.setShowPlan}
-        plan={d.plan}
-        menuTargets={d.menuTargets}
-        activeMenuGoal={d.activeMenuGoal}
-        onAddAllPlan={() => void d.handleAddAllPlan()}
-      />
+      <Dialog open={showPlan} onOpenChange={setShowPlan}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <div className="flex items-start gap-3">
+              <DishScene className="hidden size-12 shrink-0 sm:block" />
+              <div className="min-w-0">
+                <DialogTitle>Предложенный план на сегодня</DialogTitle>
+                <DialogDescription>
+                  Меню под цель «{GOAL_LABELS[activeMenuGoal].toLowerCase()}» —
+                  {menuTargets ? menuTargets.calories.toLocaleString("ru-RU") : ""} ккал. Блюда совпадают с первым
+                  днём недельного меню. После добавления всё можно отредактировать.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {plan && menuTargets && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {plan.meals.map((m: PlannedMeal, mi) => (
+                  <div
+                    key={`${mi}-${m.mealType}-${m.name}`}
+                    className="rounded-xl border bg-card p-4 shadow-elev-1"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide">
+                        {MEAL_TYPE_LABELS[m.mealType]}
+                      </p>
+                      <p className="text-xs font-medium num">{m.calories} ккал</p>
+                    </div>
+                    <p className="mt-1 text-sm font-medium leading-snug">{m.name}</p>
+                    <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground num">
+                      <span>Б {m.protein}</span>
+                      <span>У {m.carbs}</span>
+                      <span>Ж {m.fat}</span>
+                    </div>
+                    <ul className="mt-3 space-y-1.5">
+                      {m.foods.map((f) => (
+                        <li key={f.food.name} className="flex justify-between gap-2 text-xs">
+                          <span className="text-muted-foreground">
+                            {f.food.name}
+                          </span>
+                          <span className="text-right num">
+                            {formatAmount(f.food, f.amountGrams)}
+                            <span className="ml-1.5 text-muted-foreground">
+                              {f.calories} ккал
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+
+              {/* Итог + прогресс к цели */}
+              <div className="rounded-xl border bg-card p-4 shadow-elev-1">
+                <div className="flex items-baseline justify-between">
+                  <span className="label-overline text-muted-foreground">Итого</span>
+                  <span className="text-lg font-semibold num">
+                    {plan.calories.toLocaleString("ru-RU")}
+                    <span className="text-sm text-muted-foreground">
+                      {" "}
+                      / {menuTargets.calories.toLocaleString("ru-RU")} ккал
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <motion.div
+                    className="h-full rounded-full bg-brand"
+                    initial={{ width: 0 }}
+                    animate={{
+                      width: `${Math.min(100, Math.round((plan.calories / menuTargets.calories) * 100))}%`,
+                    }}
+                    transition={{ duration: 0.7, ease: "easeOut", delay: 0.1 }}
+                  />
+                </div>
+                <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground num">
+                  <span>Б {plan.protein}/{menuTargets.protein} г</span>
+                  <span>У {plan.carbs}/{menuTargets.carbs} г</span>
+                  <span>Ж {plan.fat}/{menuTargets.fat} г</span>
+                </div>
+                <MacroMatchRow value={plan} target={menuTargets} />
+              </div>
+
+              <Button className="w-full" onClick={handleAddAllPlan}>
+                <Sparkles className="size-4" />
+                Добавить всё в дневник
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Paywall-заглушка для Premium-фич (сейчас — фото-анализ еды). */}
       <PremiumDialog
-        open={d.paywallOpen}
-        onOpenChange={d.setPaywallOpen}
-        feature={d.paywallFeature}
+        open={paywallOpen}
+        onOpenChange={setPaywallOpen}
+        feature={paywallFeature}
       />
     </div>
   );

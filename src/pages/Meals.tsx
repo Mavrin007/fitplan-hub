@@ -1,6 +1,6 @@
 /**
- * Страница «Питание» — тонкая заглушка: реализация переехала в
- * src/features/meals (MealsPage.tsx). Импорты (роутер, тесты) не меняются.
+ * Тонкая страница-обёртка: реализация в src/features/meals/MealsPage.tsx.
+ * Оставлена для совместимости роутера (main.tsx) и тестов, импортирующих
+ * страницу из src/pages.
  */
-
 export { default } from "@/features/meals/MealsPage";

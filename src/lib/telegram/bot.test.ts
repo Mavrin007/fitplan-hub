@@ -32,7 +32,7 @@ function makeDeps(overrides: Partial<BotDeps> = {}): FakeDeps {
     linkByCode: vi.fn(
       async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }),
     ),
-    getLinkCodeInfo: vi.fn(async () => ({ name: "Иван" })),
+    unlinkByTelegram: vi.fn(async () => ({ linked: true })),
     getDaySummary: vi.fn(async () => ({
       calories: 1320,
       caloriesTarget: 2145,
@@ -203,81 +203,18 @@ describe("/start и привязка", () => {
     expect(sendText(ops)).toContain("/link ABC123");
   });
 
-  it("/link с кодом просит подтверждение и не привязывает сразу", async () => {
+  it("/link с кодом вызывает linkByCode и показывает успех", async () => {
     const linkByCode = vi.fn(async () => ({ ok: true }));
     const deps = makeDeps({ linkByCode });
     const ops = await handleUpdate(msg("/link AbC123"), deps);
-    const text = sendText(ops);
-    expect(text).toContain("Вы привязываете Telegram");
-    expect(text).toContain("Иван");
-    expect(text).toContain("Подтвердите");
-    // Привязка ещё НЕ выполнена — только после подтверждения.
-    expect(linkByCode).not.toHaveBeenCalled();
-    const op = sendOp(ops);
-    const buttons = op.op === "sendMessage" ? op.buttons : undefined;
-    expect(buttons?.[0]?.[0]?.callback_data).toBe("link_confirm");
-    expect(buttons?.[1]?.[0]?.callback_data).toBe("link_cancel");
-    // Состояние ожидает подтверждения с кодом и автором запроса.
-    expect(deps.state.get(1)).toEqual({
-      kind: "link_confirm",
-      code: "ABC123",
-      tgUserId: 1,
-    });
-  });
-
-  it("подтверждение вызывает linkByCode и показывает успех", async () => {
-    const linkByCode = vi.fn(async () => ({ ok: true }));
-    const deps = makeDeps({ linkByCode });
-    await handleUpdate(msg("/link AbC123"), deps);
-    const ops = await handleUpdate(callback("link_confirm"), deps);
     expect(linkByCode).toHaveBeenCalledWith(
       "ABC123",
       expect.objectContaining({ id: 1, chatId: 1 }),
     );
     expect(sendText(ops)).toContain("Аккаунт привязан");
-    // После подтверждения состояние очищено — код одноразовый.
-    expect(deps.state.get(1)).toBeUndefined();
   });
 
-  it("отмена не привязывает и очищает состояние", async () => {
-    const linkByCode = vi.fn(async () => ({ ok: true }));
-    const deps = makeDeps({ linkByCode });
-    await handleUpdate(msg("/link AbC123"), deps);
-    const ops = await handleUpdate(callback("link_cancel"), deps);
-    expect(linkByCode).not.toHaveBeenCalled();
-    expect(sendText(ops)).toContain("Привязка отменена");
-    expect(deps.state.get(1)).toBeUndefined();
-  });
-
-  it("подтвердить может только автор запроса", async () => {
-    const linkByCode = vi.fn(async () => ({ ok: true }));
-    const deps = makeDeps({ linkByCode });
-    await handleUpdate(msg("/link AbC123", 1), deps);
-    // Другой пользователь (id 2) нажимает «Да» — отказ.
-    const ops = await handleUpdate(callback("link_confirm", 2), deps);
-    expect(linkByCode).not.toHaveBeenCalled();
-    expect(ops).toHaveLength(1);
-    const answer = ops[0].op === "answerCallback" ? ops[0] : null;
-    expect(answer?.text).toContain("не ваш запрос");
-  });
-
-  it("подтверждение без ожидающего запроса отвечает отказом", async () => {
-    const deps = makeDeps();
-    const ops = await handleUpdate(callback("link_confirm"), deps);
-    const answer = ops.find((o) => o.op === "answerCallback");
-    expect(answer && answer.op === "answerCallback" && answer.text).toContain(
-      "Запрос на привязку не найден",
-    );
-  });
-
-  it("/link с неизвестным кодом сообщает об ошибке до подтверждения", async () => {
-    const deps = makeDeps({ getLinkCodeInfo: vi.fn(async () => null) });
-    const ops = await handleUpdate(msg("/link XXXX"), deps);
-    expect(sendText(ops)).toContain("Код не найден или истёк");
-    expect(deps.state.get(1)).toBeUndefined();
-  });
-
-  it("/link с неверным кодом показывает ошибку из deps при подтверждении", async () => {
+  it("/link с неверным кодом показывает ошибку из deps", async () => {
     const deps = makeDeps({
       linkByCode: vi.fn(
         async (): Promise<{ ok: boolean; error?: string }> => ({
@@ -286,10 +223,8 @@ describe("/start и привязка", () => {
         }),
       ),
     });
-    await handleUpdate(msg("/link ABC123"), deps);
-    const ops = await handleUpdate(callback("link_confirm"), deps);
+    const ops = await handleUpdate(msg("/link XXXX"), deps);
     expect(sendText(ops)).toBe("Код истёк");
-    expect(deps.state.get(1)).toBeUndefined();
   });
 });
 

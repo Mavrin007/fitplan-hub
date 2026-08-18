@@ -156,6 +156,15 @@ export const weightEntryFieldsValidator = v.object({
 });
 export type WeightEntryFields = Infer<typeof weightEntryFieldsValidator>;
 
+// Откуда взяты КБЖУ записи дневника. AI-распознавание и свободные оценки НЕ
+// считаются точным измерением — UI показывает такие записи как оценку.
+export const nutritionSourceValidator = v.union(
+  v.literal("verified"), // кураторская библиотека / свой продукт пользователя
+  v.literal("open_food_facts"), // внешний каталог по штрихкоду/названию
+  v.literal("internal"), // расчёт приложения по проверенным данным
+  v.literal("ai_estimate"), // оценка ИИ (фото/чат) — показывать как приблизительную
+);
+
 // One row per logged meal / food for a given day.
 export const mealLogEntryFieldsValidator = v.object({
   userId: v.id("users"),
@@ -168,6 +177,11 @@ export const mealLogEntryFieldsValidator = v.object({
   protein: v.number(),
   carbs: v.number(),
   fat: v.number(),
+  // Откуда взяты КБЖУ (мягкая миграция: старые записи без поля считаются
+  // «verified» — до введения источников весь дневник писался из библиотеки).
+  nutritionSource: v.optional(nutritionSourceValidator),
+  // Ссылка на источник: barcode OFF, foodId, внутренний id продукта.
+  sourceId: v.optional(v.string()),
   createdAt: v.number(),
 });
 export type MealLogEntryFields = Infer<typeof mealLogEntryFieldsValidator>;
@@ -182,6 +196,11 @@ export const foodsFieldsValidator = v.object({
   protein: v.number(), // per `amount`
   carbs: v.number(), // per `amount`
   fat: v.number(), // per `amount`
+  // Метаданные внешнего источника (Open Food Facts и т.п.) — мягкая миграция:
+  // свои продукты, созданные до введения метаданных, живут без этих полей.
+  source: v.optional(v.union(v.literal("open_food_facts"), v.literal("manual"))),
+  barcode: v.optional(v.string()), // штрихкод из OFF
+  lastSyncedAt: v.optional(v.number()), // когда синхронизировали с каталогом
   createdAt: v.number(),
 });
 export type FoodFields = Infer<typeof foodsFieldsValidator>;
@@ -275,27 +294,9 @@ const schema = defineSchema(
       firstName: v.optional(v.string()),
       chatId: v.optional(v.number()), // последний чат с ботом (для будущей рассылки)
       linkedAt: v.number(),
-      // Последняя активность (бот / вход через Telegram) — для раздела
-      // «Активные сессии» в профиле. Мягкая миграция: старые строки без
-      // поля читаются нормально (schemaValidation: false).
-      lastActiveAt: v.optional(v.number()),
     })
       .index("by_telegram", ["telegramUserId"])
       .index("by_user", ["userId"]),
-
-    // Защита от повторной доставки апдейтов Telegram (webhook replay): одна
-    // строка на update_id. Telegram гарантирует доставку, но не «ровно один
-    // раз» — при сетевых сбоях он может переслать тот же апдейт. Мутация
-    // processBotUpdate проверяет update_id по индексу до обработки и,
-    // если уже встречала, пропускает апдейт: повторный вебхук не выполнит
-    // мутацию дважды. Строки старше суток подчищаются при обработке новых
-    // апдейтов (by_processedAt).
-    telegramSeenUpdates: defineTable({
-      updateId: v.number(),
-      processedAt: v.number(),
-    })
-      .index("by_updateId", ["updateId"])
-      .index("by_processedAt", ["processedAt"]),
 
     // Одноразовые коды привязки Telegram: пользователь получает код в
     // приложении (Профиль → Telegram) и отправляет его боту (/link <код>).
@@ -394,6 +395,16 @@ const schema = defineSchema(
       updateId: v.number(),
       processedAt: v.number(),
     }).index("by_update_id", ["updateId"]),
+
+    // Идемпотентность критических мутаций (еда/вода/тренировки/команды
+    // ассистента): одна строка на (userId, idempotencyKey). Повторный запрос
+    // с тем же ключом не создаёт дубликат. Строки старше 7 дней удаляются
+    // при следующем обращении (idempotency.ts).
+    idempotencyKeys: defineTable({
+      key: v.string(),
+      userId: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_user_key", ["userId", "key"]),
   },
   {
     schemaValidation: false,

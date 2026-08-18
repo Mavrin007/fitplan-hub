@@ -51,7 +51,7 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { ROLES } from "./schema";
 import { assertRange } from "./validation";
@@ -145,21 +145,7 @@ export const myLink = query({
       username: doc.username ?? null,
       firstName: doc.firstName ?? null,
       linkedAt: doc.linkedAt,
-      lastActiveAt: doc.lastActiveAt ?? null,
     };
-  },
-});
-
-/** Internal: обновить lastActiveAt привязанного аккаунта (вызывается из
- *  провайдера входа через Telegram — «последняя активность» сессии). */
-export const touchLastActive = internalMutation({
-  args: { telegramUserId: v.number() },
-  handler: async (ctx, { telegramUserId }) => {
-    const doc = await ctx.db
-      .query("telegramAccounts")
-      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
-      .first();
-    if (doc) await ctx.db.patch(doc._id, { lastActiveAt: Date.now() });
   },
 });
 
@@ -173,7 +159,44 @@ export const unlink = mutation({
       .query("telegramAccounts")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .first();
-    if (doc) await ctx.db.delete(doc._id);
+    if (doc) {
+      await ctx.db.delete(doc._id);
+      // Заодно чистим состояние диалога бота этого чата.
+      const chatId = doc.chatId;
+      if (typeof chatId === "number") {
+        const state = await ctx.db
+          .query("telegramStates")
+          .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+          .first();
+        if (state) await ctx.db.delete(state._id);
+      }
+    }
+  },
+});
+
+/**
+ * Internal: отвязка по telegramUserId — вызывается ботом по команде /unlink
+ * (у бота нет пользовательской сессии, поэтому доступ строго по telegram id,
+ * а не по userId из payload).
+ */
+export const unlinkByTelegram = internalMutation({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const doc = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    if (!doc) return { linked: false };
+    await ctx.db.delete(doc._id);
+    const chatId = doc.chatId;
+    if (typeof chatId === "number") {
+      const state = await ctx.db
+        .query("telegramStates")
+        .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+        .first();
+      if (state) await ctx.db.delete(state._id);
+    }
+    return { linked: true };
   },
 });
 
@@ -224,7 +247,6 @@ export const linkByCode = mutation({
         username: args.username,
         firstName: args.firstName,
         chatId: args.chatId,
-        lastActiveAt: Date.now(),
       });
       return { linked: true, username: args.username ?? null };
     }
@@ -235,7 +257,6 @@ export const linkByCode = mutation({
       firstName: args.firstName,
       chatId: args.chatId,
       linkedAt: Date.now(),
-      lastActiveAt: Date.now(),
     });
     return { linked: true, username: args.username ?? null };
   },
@@ -286,7 +307,6 @@ export const createAccountFromTelegram = internalMutation({
       username,
       firstName,
       linkedAt: Date.now(),
-      lastActiveAt: Date.now(),
     });
     return userId;
   },
@@ -308,20 +328,7 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
         .query("telegramAccounts")
         .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
         .first();
-      if (!doc) return null;
-      // «Последняя активность» — каждое обращение к боту двигает метку.
-      await ctx.db.patch(doc._id, { lastActiveAt: Date.now() });
-      return { userId: doc.userId };
-    },
-
-    async getLinkCodeInfo(code) {
-      const codeDoc = await ctx.db
-        .query("linkCodes")
-        .withIndex("by_code", (q) => q.eq("code", code))
-        .first();
-      if (!codeDoc || codeDoc.expiresAt < Date.now()) return null;
-      const user = await ctx.db.get(codeDoc.userId);
-      return { name: (user as { name?: string } | null)?.name ?? null };
+      return doc ? { userId: doc.userId } : null;
     },
 
     async linkByCode(code, meta: TgUser & { chatId?: number }) {
@@ -336,6 +343,18 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
         return { ok: true };
       } catch (e) {
         return { ok: false, error: errorText(e) };
+      }
+    },
+
+    async unlinkByTelegram(telegramUserId) {
+      try {
+        const res = await ctx.runMutation(
+          internal.telegram.unlinkByTelegram,
+          { telegramUserId },
+        );
+        return { linked: res.linked };
+      } catch {
+        return { linked: false };
       }
     },
 
@@ -604,40 +623,42 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
  * поэтому вся логика (чтения/записи + диспетчер бота) выполняется внутри
  * мутации, а наружу возвращается сериализуемый план операций Bot API.
  */
-/** Суточное окно, в течение которого Telegram может повторить апдейт. */
-const SEEN_UPDATE_TTL_MS = 24 * 60 * 60 * 1000;
-
 export const processBotUpdate = mutation({
   args: { update: v.any() },
   handler: async (ctx, { update }) => {
     const normalized = normalizeUpdate(update);
     if (!normalized) return [];
-
-    // Replay protection: Telegram гарантирует доставку, но не «ровно один раз»
-    // (при сетевых сбоях он может переслать тот же апдейт). Проверяем
-    // update_id по индексу ДО обработки и, если уже встречали, пропускаем —
-    // мутация не выполнится дважды (mealLog/water/привязка не задвоятся).
-    const seen = await ctx.db
-      .query("telegramSeenUpdates")
-      .withIndex("by_updateId", (q) => q.eq("updateId", normalized.updateId))
+    // Replay protection: Telegram может повторно доставить один и тот же
+    // update (ретрай вебхука, сетевой таймаут). Если update_id уже
+    // обработан — не выполняем повторно, иначе /meal или /water задвоит
+    // запись. Записи старее 30 дней чистим, чтобы таблица не росла.
+    const existing = await ctx.db
+      .query("telegramProcessedUpdates")
+      .withIndex("by_update_id", (q) => q.eq("updateId", normalized.updateId))
       .first();
-    if (seen) return [];
-    await ctx.db.insert("telegramSeenUpdates", {
+    if (existing) return [];
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const stale = await ctx.db
+      .query("telegramProcessedUpdates")
+      .filter((q) => q.lt(q.field("processedAt"), cutoff))
+      .take(50);
+    for (const row of stale) await ctx.db.delete(row._id);
+    // Протухшие состояния диалога (старше 2 часов) чистим при обращении —
+    // незавершённый поиск еды не живёт вечно в БД.
+    const staleCutoff = Date.now() - 2 * 60 * 60 * 1000;
+    const staleStates = await ctx.db
+      .query("telegramStates")
+      .filter((q) => q.lt(q.field("updatedAt"), staleCutoff))
+      .take(20);
+    for (const row of staleStates) await ctx.db.delete(row._id);
+
+    const deps = makeBotDeps(ctx);
+    const ops = await dispatchBotUpdate(normalized, deps);
+    await ctx.db.insert("telegramProcessedUpdates", {
       updateId: normalized.updateId,
       processedAt: Date.now(),
     });
-    // Изредка подчищаем старые метки (окно повторов уже закрыто).
-    if (normalized.updateId % 64 === 0) {
-      const cutoff = Date.now() - SEEN_UPDATE_TTL_MS;
-      const old = await ctx.db
-        .query("telegramSeenUpdates")
-        .withIndex("by_processedAt", (q) => q.lt("processedAt", cutoff))
-        .collect();
-      for (const doc of old) await ctx.db.delete(doc._id);
-    }
-
-    const deps = makeBotDeps(ctx);
-    return dispatchBotUpdate(normalized, deps);
+    return ops;
   },
 });
 
