@@ -3,7 +3,7 @@
  * линии цели, столбцов и тултипа по наведению — в jsdom через
  * @testing-library/react.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SVGAreaChart, SVGBarChart } from "./charts";
@@ -112,5 +112,81 @@ describe("SVGBarChart", () => {
     await user.pointer({ target: hitZone, coords: { x: box.left + 1, y: box.top + 1 } });
 
     expect(screen.getByText(/1 200 кг/)).toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* prefers-reduced-motion: fade-появление графиков                      */
+/* ------------------------------------------------------------------ */
+
+describe("графики · prefers-reduced-motion", () => {
+  /** Стаб matchMedia: matches=true для prefers-reduced-motion, иначе false. */
+  function stubPrefersReducedMotion() {
+    vi.stubGlobal(
+      "matchMedia",
+      ((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(() => false),
+      })) as unknown as typeof window.matchMedia,
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("SVGAreaChart при reduced-motion рендерится сразу видимым (opacity 1, без fade)", () => {
+    stubPrefersReducedMotion();
+    const { container } = render(
+      <SVGAreaChart
+        data={[
+          { date: "1 авг", weight: 80 },
+          { date: "2 авг", weight: 79 },
+        ]}
+        xKey="date"
+        yKey="weight"
+        height={200}
+      />,
+    );
+    const svg = container.querySelector("svg") as SVGElement | null;
+    expect(svg).not.toBeNull();
+    // opacity 1 сразу — без таймера 120 мс и без перехода.
+    expect(svg!.style.opacity).toBe("1");
+  });
+
+  it("SVGBarChart при reduced-motion рендерится сразу видимым (opacity 1, без fade)", () => {
+    stubPrefersReducedMotion();
+    const { container } = render(
+      <SVGBarChart
+        data={[{ label: "Н-1", ккал: 300 }]}
+        xKey="label"
+        series={[{ key: "ккал", name: "ккал", fill: "#22c55e" }]}
+        height={200}
+      />,
+    );
+    const svg = container.querySelector("svg") as SVGElement | null;
+    expect(svg).not.toBeNull();
+    expect(svg!.style.opacity).toBe("1");
+  });
+
+  it("без reduced-motion график стартует с opacity 0 (fade-появление)", () => {
+    // Контроль: в обычном режиме useFadeIn ждёт animationBegin (120 мс),
+    // поэтому сразу после рендера svg прозрачен.
+    const { container } = render(
+      <SVGAreaChart
+        data={[{ date: "1 авг", weight: 80 }]}
+        xKey="date"
+        yKey="weight"
+        height={200}
+      />,
+    );
+    const svg = container.querySelector("svg") as SVGElement | null;
+    expect(svg!.style.opacity).toBe("0");
   });
 });

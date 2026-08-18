@@ -2,7 +2,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { animate, motion } from "framer-motion";
+import { animate, motion, useReducedMotion } from "framer-motion";
 import { WATER_ML_PER_KG, computeTargets, waterGoal } from "@/lib/nutrition";
 import {
   todayKey,
@@ -90,20 +90,28 @@ function CountUp({
   className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  // prefers-reduced-motion: докрутка числа — неинформативное движение,
+  // при включённой настройке значение появляется сразу без анимации.
+  const reduced = useReducedMotion();
 
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
+    const render = (v: number) => {
+      node.textContent = Math.round(v).toLocaleString("ru-RU");
+    };
+    if (reduced) {
+      render(value);
+      return;
+    }
     const from = Number(node.textContent?.replace(/\s/g, "") || 0);
     const controls = animate(from, value, {
       duration: 0.8,
       ease: "easeOut",
-      onUpdate: (v) => {
-        node.textContent = Math.round(v).toLocaleString("ru-RU");
-      },
+      onUpdate: render,
     });
     return () => controls.stop();
-  }, [value]);
+  }, [value, reduced]);
 
   return (
     <span ref={ref} className={className}>
