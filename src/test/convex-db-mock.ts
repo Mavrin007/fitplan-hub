@@ -100,6 +100,7 @@ const DEFAULT_TABLES = [
   "telegramAccounts", // привязки Telegram (telegram.ts)
   "linkCodes", // одноразовые коды привязки Telegram
   "telegramStates", // состояние диалога бота
+  "telegramProcessedUpdates", // replay protection вебхука (telegram.ts)
 ];
 
 export function makeConvexDb(

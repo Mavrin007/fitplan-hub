@@ -5,7 +5,7 @@
 This project uses the following tech stack:
 - Vite
 - Typescript
-- React Router v7 (all imports from `react-router` instead of `react-router-dom`)
+- React Router v8 (all imports from `react-router` instead of `react-router-dom`)
 - React 19 (for frontend components)
 - Tailwind v4 (for styling)
 - Shadcn UI (for UI components library)

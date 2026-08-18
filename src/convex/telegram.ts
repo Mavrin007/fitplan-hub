@@ -579,8 +579,28 @@ export const processBotUpdate = mutation({
   handler: async (ctx, { update }) => {
     const normalized = normalizeUpdate(update);
     if (!normalized) return [];
+    // Replay protection: Telegram может повторно доставить один и тот же
+    // update (ретрай вебхука, сетевой таймаут). Если update_id уже
+    // обработан — не выполняем повторно, иначе /meal или /water задвоит
+    // запись. Записи старее 30 дней чистим, чтобы таблица не росла.
+    const existing = await ctx.db
+      .query("telegramProcessedUpdates")
+      .withIndex("by_update_id", (q) => q.eq("updateId", normalized.updateId))
+      .first();
+    if (existing) return [];
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const stale = await ctx.db
+      .query("telegramProcessedUpdates")
+      .filter((q) => q.lt(q.field("processedAt"), cutoff))
+      .take(50);
+    for (const row of stale) await ctx.db.delete(row._id);
     const deps = makeBotDeps(ctx);
-    return dispatchBotUpdate(normalized, deps);
+    const ops = await dispatchBotUpdate(normalized, deps);
+    await ctx.db.insert("telegramProcessedUpdates", {
+      updateId: normalized.updateId,
+      processedAt: Date.now(),
+    });
+    return ops;
   },
 });
 
