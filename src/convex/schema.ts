@@ -275,9 +275,27 @@ const schema = defineSchema(
       firstName: v.optional(v.string()),
       chatId: v.optional(v.number()), // последний чат с ботом (для будущей рассылки)
       linkedAt: v.number(),
+      // Последняя активность (бот / вход через Telegram) — для раздела
+      // «Активные сессии» в профиле. Мягкая миграция: старые строки без
+      // поля читаются нормально (schemaValidation: false).
+      lastActiveAt: v.optional(v.number()),
     })
       .index("by_telegram", ["telegramUserId"])
       .index("by_user", ["userId"]),
+
+    // Защита от повторной доставки апдейтов Telegram (webhook replay): одна
+    // строка на update_id. Telegram гарантирует доставку, но не «ровно один
+    // раз» — при сетевых сбоях он может переслать тот же апдейт. Мутация
+    // processBotUpdate проверяет update_id по индексу до обработки и,
+    // если уже встречала, пропускает апдейт: повторный вебхук не выполнит
+    // мутацию дважды. Строки старше суток подчищаются при обработке новых
+    // апдейтов (by_processedAt).
+    telegramSeenUpdates: defineTable({
+      updateId: v.number(),
+      processedAt: v.number(),
+    })
+      .index("by_updateId", ["updateId"])
+      .index("by_processedAt", ["processedAt"]),
 
     // Одноразовые коды привязки Telegram: пользователь получает код в
     // приложении (Профиль → Telegram) и отправляет его боту (/link <код>).

@@ -47,7 +47,12 @@ import {
   LIMITATION_LABELS,
   TRAINING_STYLE_LABELS,
 } from "@/lib/i18n";
-import { todayKey, shortDate } from "@/lib/dates";
+import {
+  todayKey,
+  shortDate,
+  formatTimestampDate,
+  formatTimestampDateTime,
+} from "@/lib/dates";
 import {
   TELEGRAM_BOT_USERNAME,
   telegramMiniAppUrl,
@@ -1335,15 +1340,27 @@ export default function Profile() {
                 </span>
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleTelegramUnlink}
-              >
-                Отвязать
-              </Button>
+            <dl className="grid gap-1 text-xs text-muted-foreground">
+              <div className="flex gap-2">
+                <dt className="w-36 shrink-0">Подключён:</dt>
+                <dd className="num">{formatTimestampDate(myLink.linkedAt)}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-36 shrink-0">Последняя активность:</dt>
+                <dd className="num">
+                  {myLink.lastActiveAt
+                    ? formatTimestampDateTime(myLink.lastActiveAt)
+                    : "—"}
+                </dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap items-center gap-2">
+              <ConfirmDelete
+                label="Отвязать"
+                confirmLabel="Точно отвязать?"
+                busy={telegramBusy}
+                onConfirm={() => void handleTelegramUnlink()}
+              />
               <Button asChild variant="secondary" size="sm">
                 <a
                   href={telegramMiniAppUrl()}

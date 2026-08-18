@@ -83,6 +83,10 @@ export const telegramLogin = ConvexCredentials({
       telegramUserId: verified.id,
     })) as { userId: string } | null;
     if (existing) {
+      // «Последняя активность» сессии — обновляем (без отдельного запроса).
+      await ctx.runMutation(internal.telegram.touchLastActive, {
+        telegramUserId: verified.id,
+      });
       return { userId: existing.userId as GenericId<"users"> };
     }
 

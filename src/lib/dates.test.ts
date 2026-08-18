@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   addDays,
+  formatTimestampDate,
+  formatTimestampDateTime,
   lastNDays,
   pluralDays,
   pluralMonths,
@@ -101,6 +103,19 @@ describe("prettyDate / shortDate", () => {
   it("shortDate: краткий русский формат", () => {
     expect(shortDate("2026-01-05")).toBe("5 янв.");
     expect(shortDate("2026-12-31")).toBe("31 дек.");
+  });
+});
+
+describe("formatTimestamp (для сессий Telegram в профиле)", () => {
+  it("formatTimestampDate: дата без времени", () => {
+    expect(formatTimestampDate(new Date(2026, 7, 18, 0, 0).getTime())).toBe(
+      "18 авг. 2026 г.",
+    );
+  });
+
+  it("formatTimestampDateTime: дата и время", () => {
+    const ts = new Date(2026, 7, 18, 14, 5).getTime();
+    expect(formatTimestampDateTime(ts)).toBe("18 авг. 2026 г., 14:05");
   });
 });
 

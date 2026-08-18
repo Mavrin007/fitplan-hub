@@ -145,7 +145,21 @@ export const myLink = query({
       username: doc.username ?? null,
       firstName: doc.firstName ?? null,
       linkedAt: doc.linkedAt,
+      lastActiveAt: doc.lastActiveAt ?? null,
     };
+  },
+});
+
+/** Internal: обновить lastActiveAt привязанного аккаунта (вызывается из
+ *  провайдера входа через Telegram — «последняя активность» сессии). */
+export const touchLastActive = internalMutation({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const doc = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    if (doc) await ctx.db.patch(doc._id, { lastActiveAt: Date.now() });
   },
 });
 
@@ -210,6 +224,7 @@ export const linkByCode = mutation({
         username: args.username,
         firstName: args.firstName,
         chatId: args.chatId,
+        lastActiveAt: Date.now(),
       });
       return { linked: true, username: args.username ?? null };
     }
@@ -220,6 +235,7 @@ export const linkByCode = mutation({
       firstName: args.firstName,
       chatId: args.chatId,
       linkedAt: Date.now(),
+      lastActiveAt: Date.now(),
     });
     return { linked: true, username: args.username ?? null };
   },
@@ -270,6 +286,7 @@ export const createAccountFromTelegram = internalMutation({
       username,
       firstName,
       linkedAt: Date.now(),
+      lastActiveAt: Date.now(),
     });
     return userId;
   },
@@ -291,7 +308,20 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
         .query("telegramAccounts")
         .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
         .first();
-      return doc ? { userId: doc.userId } : null;
+      if (!doc) return null;
+      // «Последняя активность» — каждое обращение к боту двигает метку.
+      await ctx.db.patch(doc._id, { lastActiveAt: Date.now() });
+      return { userId: doc.userId };
+    },
+
+    async getLinkCodeInfo(code) {
+      const codeDoc = await ctx.db
+        .query("linkCodes")
+        .withIndex("by_code", (q) => q.eq("code", code))
+        .first();
+      if (!codeDoc || codeDoc.expiresAt < Date.now()) return null;
+      const user = await ctx.db.get(codeDoc.userId);
+      return { name: (user as { name?: string } | null)?.name ?? null };
     },
 
     async linkByCode(code, meta: TgUser & { chatId?: number }) {
@@ -574,11 +604,38 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
  * поэтому вся логика (чтения/записи + диспетчер бота) выполняется внутри
  * мутации, а наружу возвращается сериализуемый план операций Bot API.
  */
+/** Суточное окно, в течение которого Telegram может повторить апдейт. */
+const SEEN_UPDATE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export const processBotUpdate = mutation({
   args: { update: v.any() },
   handler: async (ctx, { update }) => {
     const normalized = normalizeUpdate(update);
     if (!normalized) return [];
+
+    // Replay protection: Telegram гарантирует доставку, но не «ровно один раз»
+    // (при сетевых сбоях он может переслать тот же апдейт). Проверяем
+    // update_id по индексу ДО обработки и, если уже встречали, пропускаем —
+    // мутация не выполнится дважды (mealLog/water/привязка не задвоятся).
+    const seen = await ctx.db
+      .query("telegramSeenUpdates")
+      .withIndex("by_updateId", (q) => q.eq("updateId", normalized.updateId))
+      .first();
+    if (seen) return [];
+    await ctx.db.insert("telegramSeenUpdates", {
+      updateId: normalized.updateId,
+      processedAt: Date.now(),
+    });
+    // Изредка подчищаем старые метки (окно повторов уже закрыто).
+    if (normalized.updateId % 64 === 0) {
+      const cutoff = Date.now() - SEEN_UPDATE_TTL_MS;
+      const old = await ctx.db
+        .query("telegramSeenUpdates")
+        .withIndex("by_processedAt", (q) => q.lt("processedAt", cutoff))
+        .collect();
+      for (const doc of old) await ctx.db.delete(doc._id);
+    }
+
     const deps = makeBotDeps(ctx);
     return dispatchBotUpdate(normalized, deps);
   },

@@ -70,3 +70,23 @@ export function pluralMonths(n: number): string {
 export function pluralRecords(n: number): string {
   return plural(n, "запись", "записи", "записей");
 }
+
+/** Timestamp (ms) → «18 авг 2026» (ru-RU). Для «подключён/создан». */
+export function formatTimestampDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Timestamp (ms) → «18 авг 2026, 14:05» (ru-RU). Для «последняя активность». */
+export function formatTimestampDateTime(ts: number): string {
+  return new Date(ts).toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

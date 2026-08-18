@@ -519,35 +519,46 @@ describe("Profile", () => {
       expect(screen.getByText(/действует 10 мин/)).toBeInTheDocument();
     });
 
-    it("с привязкой показывает имя и кнопку отвязки", async () => {
+    it("с привязкой показывает имя, сессию и кнопку отвязки", async () => {
       setupFilled();
       setQuery(api.telegram.myLink, undefined, {
         username: "tester",
         firstName: null,
-        linkedAt: Date.now(),
+        linkedAt: new Date(2026, 7, 18).getTime(),
+        lastActiveAt: new Date(2026, 7, 18, 14, 5).getTime(),
       });
 
       renderWithRouter(<Profile />);
       expect(await screen.findByText("@tester")).toBeInTheDocument();
+      expect(screen.getByText("Подключён:")).toBeInTheDocument();
+      expect(screen.getByText("Последняя активность:")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Отвязать" }),
       ).toBeInTheDocument();
       expect(screen.queryByText("Получить код привязки")).not.toBeInTheDocument();
     });
 
-    it("отвязка вызывает мутацию unlink", async () => {
+    it("отвязка требует подтверждения и вызывает мутацию unlink", async () => {
       const user = userEvent.setup();
       setupFilled();
       setQuery(api.telegram.myLink, undefined, {
         username: "tester",
         firstName: null,
         linkedAt: Date.now(),
+        lastActiveAt: Date.now(),
       });
       setMutation(api.telegram.unlink, async () => {});
 
       renderWithRouter(<Profile />);
+      const unlink = await screen.findByRole("button", { name: "Отвязать" });
+      // Первый клик только «взводит» кнопку (подтверждение).
+      await user.click(unlink);
+      expect(
+        convexMock.mutationCalls.some((c) => c.path === "telegram.unlink"),
+      ).toBe(false);
+      // Второй клик подтверждает.
       await user.click(
-        await screen.findByRole("button", { name: "Отвязать" }),
+        await screen.findByRole("button", { name: "Точно отвязать?" }),
       );
       await waitFor(() => {
         expect(

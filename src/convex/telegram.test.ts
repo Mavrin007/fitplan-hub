@@ -55,6 +55,7 @@ const runMyLink = (
       username: string | null;
       firstName: string | null;
       linkedAt: number;
+      lastActiveAt: number | null;
     } | null>;
   }
 )._handler;
@@ -104,7 +105,10 @@ const runCreateAccountFromTelegram = (
 
 /** ctx processBotUpdate: db + runMutation (для linkByCode из deps). */
 type BotCtx = Ctx & {
-  runMutation: () => Promise<never>;
+  runMutation: (
+    _api: unknown,
+    _args?: unknown,
+  ) => Promise<unknown>;
 };
 
 const runProcessBotUpdate = (
@@ -135,6 +139,7 @@ function seedTelegram(db: ConvexDbMock, userId = "u1", telegramUserId = 111): vo
     userId,
     username: "tester",
     linkedAt: 1,
+    lastActiveAt: 100,
   });
 }
 
@@ -236,11 +241,28 @@ describe("myLink / unlink", () => {
     await expect(runMyLink({ db }, {})).resolves.toBeNull();
   });
 
-  it("возвращает данные привязки", async () => {
+  it("возвращает данные привязки и активность", async () => {
     const { db } = makeConvexDb();
     seedTelegram(db, "user-1", 111);
     const res = await runMyLink({ db }, {});
-    expect(res).toMatchObject({ username: "tester" });
+    expect(res).toMatchObject({
+      username: "tester",
+      linkedAt: 1,
+      lastActiveAt: 100,
+    });
+  });
+
+  it("lastActiveAt отсутствует у старых привязок (мягкая миграция)", async () => {
+    const { db } = makeConvexDb();
+    db.insert("telegramAccounts", {
+      telegramUserId: 222,
+      userId: "user-1",
+      username: "old",
+      linkedAt: 1,
+    });
+    const res = await runMyLink({ db }, {});
+    expect(res).toMatchObject({ username: "old" });
+    expect(res?.lastActiveAt).toBeNull();
   });
 
   it("unlink удаляет привязку", async () => {
@@ -280,6 +302,7 @@ describe("linkByCode", () => {
       username: "vasya",
       chatId: 5,
     });
+    expect(typeof store.telegramAccounts[0].lastActiveAt).toBe("number");
     expect(store.linkCodes).toHaveLength(0);
   });
 
@@ -340,6 +363,152 @@ describe("processBotUpdate (end-to-end через БД)", () => {
   it("игнорирует мусорные апдейты", async () => {
     const { db } = makeConvexDb();
     await expect(runProcessBotUpdate(ctxOf(db), { update: { foo: 1 } })).resolves.toEqual([]);
+  });
+
+  it("replay protection: повторный апдейт с тем же update_id не выполняется", async () => {
+    const { db, store } = makeConvexDb();
+    seedProfile(db);
+    seedTelegram(db);
+    const update = {
+      update_id: 42,
+      message: {
+        message_id: 10,
+        chat: { id: 5 },
+        from: { id: 111, username: "tester" },
+        text: "творог",
+      },
+    };
+    const first = await runProcessBotUpdate(ctxOf(db), { update });
+    expect(sendTextOf(first)).toContain("Творог");
+    expect(store.telegramSeenUpdates).toHaveLength(1);
+    // Повторная доставка того же update_id (Telegram ретраит при сбоях) —
+    // мутация не выполняется второй раз.
+    const second = await runProcessBotUpdate(ctxOf(db), { update });
+    expect(second).toEqual([]);
+    expect(store.telegramSeenUpdates).toHaveLength(1);
+  });
+
+  it("/link: спрашивает подтверждение и привязывает только после него", async () => {
+    const { db, store } = makeConvexDb();
+    // Аккаунт, к которому ведёт код, + пользователь с именем для подтверждения.
+    db.insert("users", { name: "Иван", role: "user", isAnonymous: false });
+    const userRow = store.users[0];
+    db.insert("linkCodes", {
+      userId: userRow._id as string,
+      code: "ABC123",
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+    });
+
+    // Шаг 1: /link ABC123 → сообщение-подтверждение, привязки ещё нет.
+    const ask = await runProcessBotUpdate(ctxOf(db), {
+      update: {
+        update_id: 10,
+        message: {
+          message_id: 1,
+          chat: { id: 5 },
+          from: { id: 111, username: "tester" },
+          text: "/link ABC123",
+        },
+      },
+    });
+    const askText = sendTextOf(ask);
+    expect(askText).toContain("Вы привязываете Telegram");
+    expect(askText).toContain("Иван");
+    expect(store.telegramAccounts).toHaveLength(0);
+    expect(store.telegramStates[0]).toMatchObject({
+      chatId: 5,
+      state: { kind: "link_confirm", code: "ABC123", tgUserId: 111 },
+    });
+
+    // Шаг 2: кнопка «Да» → привязка выполняется через linkByCode.
+    const runLink = (
+      linkByCode as unknown as {
+        _handler: (
+          ctx: Ctx,
+          args: {
+            code: string;
+            telegramUserId: number;
+            username?: string;
+            firstName?: string;
+            chatId?: number;
+          },
+        ) => Promise<{ linked: boolean; username: string | null }>;
+      }
+    )._handler;
+    const linkCtx: BotCtx = {
+      db,
+      runMutation: async (_api: unknown, args: unknown) =>
+        runLink(
+          { db },
+          args as {
+            code: string;
+            telegramUserId: number;
+            username?: string;
+            firstName?: string;
+            chatId?: number;
+          },
+        ),
+    };
+    const confirm = await runProcessBotUpdate(linkCtx, {
+      update: {
+        update_id: 11,
+        callback_query: {
+          id: "q1",
+          from: { id: 111, username: "tester" },
+          data: "link_confirm",
+          message: { message_id: 1, chat: { id: 5 } },
+        },
+      },
+    });
+    expect(sendTextOf(confirm)).toContain("Аккаунт привязан");
+    expect(store.telegramAccounts).toHaveLength(1);
+    expect(store.telegramAccounts[0]).toMatchObject({
+      userId: userRow._id as string,
+      telegramUserId: 111,
+      username: "tester",
+    });
+    expect(typeof store.telegramAccounts[0].lastActiveAt).toBe("number");
+    expect(store.linkCodes).toHaveLength(0); // код одноразовый — израсходован
+    expect(store.telegramStates).toHaveLength(0);
+  });
+
+  it("/link: отмена не привязывает", async () => {
+    const { db, store } = makeConvexDb();
+    db.insert("users", { name: "Иван", role: "user", isAnonymous: false });
+    const userRow = store.users[0];
+    db.insert("linkCodes", {
+      userId: userRow._id as string,
+      code: "ABC123",
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+    });
+    await runProcessBotUpdate(ctxOf(db), {
+      update: {
+        update_id: 10,
+        message: {
+          message_id: 1,
+          chat: { id: 5 },
+          from: { id: 111, username: "tester" },
+          text: "/link ABC123",
+        },
+      },
+    });
+    const cancel = await runProcessBotUpdate(ctxOf(db), {
+      update: {
+        update_id: 11,
+        callback_query: {
+          id: "q1",
+          from: { id: 111, username: "tester" },
+          data: "link_cancel",
+          message: { message_id: 1, chat: { id: 5 } },
+        },
+      },
+    });
+    expect(sendTextOf(cancel)).toContain("Привязка отменена");
+    expect(store.telegramAccounts).toHaveLength(0);
+    expect(store.linkCodes).toHaveLength(1); // код не израсходован
+    expect(store.telegramStates).toHaveLength(0);
   });
 
   it("/day собирает итог из mealLog, профиля и воды", async () => {
