@@ -59,6 +59,13 @@ function makeAuthEnv() {
     JWT_STORAGE_KEY: randomBytes(32).toString("base64"),
     // SITE_URL — requireEnv: callback-база auth-редиректов = URL локального деплоя.
     SITE_URL: BACKEND_URL,
+    // VLY_CONVEX_AUTH_ISSUER — читается auth.config.ts (customJwt-провайдер
+    // freebuff). CLI/локальный бэкенд проверяет auth-config env-переменные по
+    // хранилищу деплоя (не process.env): без неё свежий локальный деплой
+    // падает на пуше ещё до `env set` («used in auth config file but its value
+    // was not set»). Для e2e эмиттер freebuff не нужен (гостевой вход +
+    // dev-OTP), поэтому достаточно заглушки.
+    VLY_CONVEX_AUTH_ISSUER: "https://freebuff.com",
     // dev-перехват OTP-кодов (convex/emailOtp.ts): без него код ушёл бы в
     // реальный VLY-шлюз, который на раннере не настроен.
     VLY_EMAIL_DEV_CAPTURE: "1",

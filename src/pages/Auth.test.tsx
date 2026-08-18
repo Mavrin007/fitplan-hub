@@ -82,6 +82,60 @@ describe("Auth", () => {
     authMocks.signIn.mockClear();
     authMocks.signOut.mockClear();
     setupSignIn();
+    // Между тестами — без Telegram-окружения (автовход Mini App не должен
+    // стрелять в тестах email-флоу).
+    delete window.Telegram;
+    vi.restoreAllMocks();
+  });
+
+  it("автовход из Telegram Mini App: signIn с webapp initData (create: true)", async () => {
+    const initData =
+      "auth_date=1700000000&query_id=AAHdF6IQ&user=%7B%22id%22%3A5%2C%22first_name%22%3A%22%D0%90%D0%BD%D1%8F%22%7D&hash=abc";
+    window.Telegram = {
+      WebApp: { initData, initDataUnsafe: {} },
+    } as unknown as NonNullable<typeof window.Telegram>;
+
+    renderWithRouter(<Auth />);
+
+    // Автовход без формы: signIn вызван с подписанным initData и правом
+    // создать аккаунт (Mini App открыт из бота — явное действие).
+    await waitFor(() => {
+      expect(authMocks.signIn).toHaveBeenCalledWith("telegram", {
+        source: "webapp",
+        initData,
+        create: true,
+      });
+    });
+  });
+
+  it("«Войти через Telegram»: попап отдал результат → signIn с source=widget", async () => {
+    const user = userEvent.setup();
+    const widgetUser = {
+      id: 12345,
+      first_name: "Иван",
+      username: "ivan_test",
+      auth_date: 1700000000,
+      hash: "abc123",
+    };
+    // Фейковый попап oauth.telegram.org: hash проставляем, как если бы
+    // Telegram подтвердил и редиректнул на наш return_to.
+    const popup = { location: { hash: "" }, closed: false, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+
+    renderWithRouter(<Auth />);
+    await user.click(
+      screen.getByRole("button", { name: "Войти через Telegram" }),
+    );
+    popup.location.hash = `#tgAuthResult=${encodeURIComponent(
+      JSON.stringify(widgetUser),
+    )}`;
+
+    await waitFor(() => {
+      expect(authMocks.signIn).toHaveBeenCalledWith("telegram", {
+        source: "widget",
+        ...widgetUser,
+      });
+    });
   });
 
   it("dev-блок показывает обратный отсчёт истечения кода", async () => {

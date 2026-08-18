@@ -1,0 +1,212 @@
+# 🚀 Запуск продакшена (чек-лист)
+
+Всё в коде готово: сборка, тесты, линт проходят; CI на GitHub уже умеет
+деплоить в Convex и Vercel автоматически (джоба `deploy` в
+`.github/workflows/ci.yml`) — при каждом пуше в `main`, если заданы секреты.
+
+Ниже — только то, что требует ваших аккаунтов. Один раз настраивается, дальше
+деплой идёт сам по каждому коммиту в `main`.
+
+---
+
+## Текущий статус (проверено 2026-08-17, обновлено после деплоя)
+
+| Компонент | Статус | Ссылка / детали |
+| --- | --- | --- |
+| Репозиторий GitHub | ✅ опубликован (public) | <https://github.com/Mavrin007/fitplan-hub> (`main`, v2.11) |
+| CI на GitHub | ✅ lint / typecheck / tests / build / lighthouse — зелёные; E2E — исправлен и перезапущен | Actions → последний прогон |
+| Фронтенд Vercel | ✅ **живой** | <https://fitplan-hub.vercel.app> (HTTP 200, `VITE_CONVEX_URL=https://energetic-coyote-927.convex.cloud`) |
+| Бэкенд Convex (production) | ✅ **функции задеплоены** | `energetic-coyote-927` — `users:currentUser` отвечает, http-роуты живые (вебхук ждёт токен) |
+| Переменные окружения Convex | ✅ заданы платформой | `JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL`, `VLY_CONVEX_AUTH_ISSUER`, `VLY_INTEGRATION_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`, … |
+| Telegram (бот + Mini App) | ✅ **готов** | бот **@FitplanKiloBot**, вебхук + команды + кнопка Mini App зарегистрированы |
+| Секреты GitHub (авто-деплой) | ⚠️ опционально | джоба `deploy` в CI запускается; без секретов — шаги skipped |
+| Google OAuth | ⏳ опционально | README → «Enabling Google OAuth» |
+
+**Ключевой вывод:** прод полностью живой — фронт на Vercel смотрит в прод-бэкенд
+Convex, функции и env-переменные на месте, вход/данные работают. Единственный
+незакрытый кусок — Telegram (нужен токен бота от @BotFather) и, по желанию,
+секреты для авто-деплоя из CI.
+
+---
+
+## Шаг 1 — Бэкенд Convex ✅ (сделано 2026-08-17)
+
+Функции задеплоены в production **`energetic-coyote-927`** (через deploy-ключ,
+который платформа хранит в `~/.vly-convex/prod.key`), схема создана
+(включая таблицы Telegram: `linkCodes`, `telegramAccounts`, `telegramStates`),
+env-переменные на месте.
+
+Проверка:
+
+```bash
+curl https://energetic-coyote-927.convex.cloud/api/query \
+  -d '{"path":"users:currentUser","format":"json","args":{}}' -H 'Content-Type: application/json'
+# → {"status":"success","value":null}
+```
+
+При следующем изменении функций деплой так же делается из проекта:
+`CONVEX_DEPLOY_KEY=$(cat ~/.vly-convex/prod.key) npx convex deploy`.
+
+## Шаг 2 — Секреты GitHub (для авто-деплоя из CI, по желанию)
+
+## Шаг 2 — Секреты GitHub (для авто-деплоя из CI, по желанию)
+
+**GitHub → ваш репозиторий → Settings → Secrets and variables → Actions → New repository secret:**
+
+| Секрет | Откуда взять |
+| --- | --- |
+| `VERCEL_TOKEN` | https://vercel.com/account/settings/tokens → Create Token |
+| `VERCEL_ORG_ID` | из `.vercel/project.json`: `team_Ozqdb3sPJrXCKbegDdn6iKMS` |
+| `VERCEL_PROJECT_ID` | из `.vercel/project.json`: `prj_InGaQMdY0UV7uEoWzhqu1v7FElZg` |
+| `CONVEX_DEPLOY_TOKEN` | Convex Dashboard → Project → Settings → Deploy Keys → Create key (с правом deploy) |
+
+## Шаг 3 — Переменные окружения Convex (Dashboard → Project → Settings → Environment Variables)
+
+Скопируйте из текущего проекта значения и добавьте новые:
+
+- `VLY_CONVEX_AUTH_ISSUER` = `https://freebuff.com`
+- `JWT_PRIVATE_KEY`, `JWT_STORAGE_KEY`, `JWKS` — те же, что работают сейчас
+- `SITE_URL` = `https://fitplan-hub.vercel.app` (ваш прод-домен)
+- `VLY_INTEGRATION_KEY` — ключ VLY (email-коды + fallback ассистента; взять из
+  Keys/API keys платформы)
+- `GEMINI_API_KEY` — опционально (ИИ-ассистент)
+- `TELEGRAM_BOT_TOKEN` — из Шага 5
+- `TELEGRAM_WEBHOOK_SECRET` — любая строка (см. Шаг 5)
+- `TELEGRAM_MINI_APP_URL` = `https://fitplan-hub.vercel.app`
+
+## Шаг 4 — Переменные Vercel (Dashboard → Project → Settings → Environment Variables)
+
+- `VITE_CONVEX_URL` = `https://energetic-coyote-927.convex.cloud` — **уже задано**
+  при деплое (проверьте, если деплоили с другим URL). После изменения — передеплой
+  (CI или `vercel deploy --prod`).
+
+## Шаг 5 — Telegram: бот + Mini App ✅ (сделано 2026-08-17, диагноз 2026-08-17)
+
+- Бот: **https://t.me/FitplanKiloBot** (id 8659935112, «Kilo»)
+- Mini App: **https://t.me/FitplanKiloBot/app** (кнопка «Открыть КИЛО» → https://fitplan-hub.vercel.app)
+- Вебхук: `https://energetic-coyote-927.convex.site/telegram-webhook` (secret_token задан, проверен: без секрета 401, с секретом 200)
+- Команды: `/day`, `/meal`, `/water`, `/recent`, `/today`, `/menu`, `/link`, `/help`
+- Env в Convex prod: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_MINI_APP_URL`
+- **Вход через Telegram** (сделано 2026-08-17): заметная кнопка «Войти через
+  Telegram» на `/auth` (кастомная кнопка поверх официального popup-флоу
+  oauth.telegram.org, подпись проверяется на сервере по `TELEGRAM_BOT_TOKEN`)
+  + автовход в Mini App (initData). Новый Telegram сразу получает аккаунт
+  КИЛО; уже привязанный — входит в свой.
+
+### Вход через Telegram на /auth — обязательная настройка домена (проверено 2026-08-17)
+
+Кнопка использует официальный OAuth-флоу `oauth.telegram.org`. Telegram
+разрешает вход **только** с доменов, добавленных в настройке Login Widget
+бота. Если домен не добавлен — `oauth.telegram.org` отвечает «Bot domain
+invalid» и кнопка молча не срабатывает (попап висит на странице Telegram;
+через 10 секунд приложение покажет подсказку, что добавить в BotFather).
+
+**Статус (проверено 2026-08-18): прод-домен `https://fitplan-hub.vercel.app`
+добавлен и принимается** — вход на проде работает. Если «Bot domain
+invalid» повторяется на проде, это кэш Telegram/старый попап: обновите
+страницу с очисткой кэша (Ctrl+Shift+R) и закройте старые окна.
+
+Для остальных окружений добавьте в Telegram (один раз, от владельца бота):
+
+1. Откройте @BotFather → `/mybots` → **FitplanKiloBot** → **Bot Settings** →
+   **Login Widget**.
+2. В **Allowed URLs** добавьте нужные домены:
+   - `http://localhost:5173` (локальная разработка);
+   - домен превью Freebuff (например `<project>.vly.sh`), если тестируете там.
+3. Готово — кнопка заработает без передеплоя (проверка домена — на стороне
+   Telegram).
+
+Проверка из консоли (должен быть ответ без «Bot domain invalid»):
+
+```bash
+curl "https://oauth.telegram.org/auth?bot_id=8659935112&origin=https%3A%2F%2Ffitplan-hub.vercel.app&embed=1&return_to=https%3A%2F%2Ffitplan-hub.vercel.app%2Fauth"
+```
+
+Дополнительные причины «кнопка не работает»:
+
+1. **Стаб telegram-web-app.js (починено в v2.14)** — официальный скрипт
+   создаёт стаб-объект `window.Telegram.WebApp` и в обычном браузере
+   (`initData=""`, `platform="unknown"`). Раньше детект Mini App смотрел
+   только на наличие объекта, поэтому кнопка (и старый виджет) не рендерилась
+   на вебе вообще. Теперь `isTelegramWebApp()` требует подписанный `initData`
+   (или `TelegramWebviewProxy` / реальную платформу) — в обычном браузере
+   кнопка видна.
+2. Всплывающие окна заблокированы браузером — кнопка тогда открывает вкладку
+   и входит там.
+3. Сайт без HTTPS — Telegram разрешает только HTTPS-домены, кроме `localhost`.
+
+### Проверка входа в браузере (пост-деплой)
+
+`node scripts/telegram-login-check.mjs` открывает `/auth` в headless-chromium,
+кликает кнопку, ловит попап oauth.telegram.org и убеждается, что Telegram
+отдал страницу авторизации (а не «Bot domain invalid»), а в консоли нет
+ошибок. Скриншот — в `test-results/tg-login-auth.png`.
+
+### Диагностика «бот молчит на /start» (проверено 2026-08-17)
+
+Снаружи всё зелёное: токен валиден (`getMe` → FitplanKiloBot, id 8659935112),
+вебхук зарегистрирован, `pending_update_count=0`, ошибок доставки нет.
+Полный конвейер (вебхук → обработка → sendMessage) проверен на dev-деплое
+с рабочим токеном: имитация `/start` возвращает HTTP 200. Значит, если бот
+не отвечает в проде, причина почти всегда одна из двух:
+
+1. **В Convex prod (energetic-coyote-927) стоит старый TELEGRAM_BOT_TOKEN**
+   (токен перевыпущен в BotFather после настройки). Входящие апдейты приходят
+   в любом случае, а исходящие `sendMessage` молча падают с 401 — вебхук
+   отвечает 200, Telegram ошибок не показывает (pending=0). Проверьте в
+   Convex Dashboard → Project **energetic-coyote-927** → Settings →
+   Environment Variables, что `TELEGRAM_BOT_TOKEN` равен актуальному токену
+   от @BotFather (актуальный рабочий: `8659935112:AAEO…`, сверка по
+   префиксу `86599` через `GET /telegram-status`). После обновления
+   переменной передеплойте функции (`npx convex deploy`) и нажмите `/start`
+   ещё раз.
+2. **Пользователь тестировал до регистрации вебхука** — просто нажать
+   `/start` ещё раз.
+
+### Эндпоинт диагностики `GET /telegram-status`
+
+Деплой с этим эндпоинтом отвечает JSON без секретов:
+
+```bash
+curl https://energetic-coyote-927.convex.site/telegram-status
+# проверка любого домена для Login Widget:
+curl "https://energetic-coyote-927.convex.site/telegram-status?origin=https%3A%2F%2Ffitplan-hub.vercel.app"
+```
+
+Поля: `ok` (токен принят Bot API), `token.prefix` (первые 5 символов —
+сверка), `getMe` (id/username бота), `webhook` (url, pending, lastError),
+`webhookSecretConfigured`, `miniAppUrlConfigured` и `loginWidget` —
+**проверка домена для кнопки «Войти через Telegram»** (v2.15): эндпоинт сам
+открывает `oauth.telegram.org/auth` с указанным `?origin=` (по умолчанию —
+канонический домен) и отвечает `{checked, origin, ok, error}`, где
+`error: "Bot domain invalid — добавьте этот домен в @BotFather → Bot Settings
+→ Login Widget (Allowed URLs)"` — если домен не добавлен. Так «Bot domain
+invalid» диагностируется изнутри, одной командой, до теста в браузере.
+Роут объявлен в `src/convex/http.ts`, логика — `src/lib/telegram/status.ts`
+(покрыта тестами).
+
+Если понадобится пересоздать вебхук (например, после смены токена):
+
+```bash
+TELEGRAM_BOT_TOKEN=<токен> \
+TELEGRAM_WEBHOOK_URL=https://energetic-coyote-927.convex.site/telegram-webhook \
+TELEGRAM_WEBHOOK_SECRET=<строка> \
+npm run telegram:setup
+```
+
+## Шаг 6 — Авто-деплой из CI (когда секреты из Шага 2 заданы)
+
+Джоба `deploy` сработает автоматически при следующем пуше в `main`
+(или PR-мерже). Прогресс: **GitHub → Actions → Deploy to Vercel (production)**.
+
+Она делает: `convex deploy` → `vercel build` → `vercel deploy --prod` →
+смоук-тест URL. Ссылки: бот `https://t.me/<бот>`, Mini App `https://t.me/<бот>/app`.
+
+## Проверка после деплоя
+
+- [ ] Открыть сайт — лендинг и вход работают
+- [ ] Войти по email (код приходит) — авторизация жива
+- [ ] Бот: `/start`, `/link <код>`, `/day` — отвечает
+- [ ] Mini App: `https://t.me/<бот>/app` — приложение открывается в Telegram и
+      вход выполняется автоматически (кнопка «Войти через Telegram» на `/auth`
+      работает и в обычном браузере)

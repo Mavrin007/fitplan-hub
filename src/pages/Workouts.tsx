@@ -362,7 +362,10 @@ export default function Workouts() {
   const currentWeek = weeks ? weeks[safeWeekIdx] : null;
   const visibleDays = currentWeek ? currentWeek.days : (plan?.days ?? []);
 
-  /** Сохранение результата из режима тренировки (с оценкой усилия). */
+  /** Сохранение результата из режима тренировки (с оценкой усилия).
+   *  Возвращает успех — WorkoutMode по нему решает, показывать ли сводку
+   *  и стирать ли черновик (иначе при ошибке сети черновик терялся бы,
+   *  а пользователь видел бы «Тренировка завершена» без сохранения). */
   const handleSaveTraining = async (
     exercises: {
       name: string;
@@ -373,8 +376,8 @@ export default function Workouts() {
       setDetails?: { weightKg: number; reps: number; rpe?: number }[];
     }[],
     effort: Effort,
-  ) => {
-    if (!trainingDay) return;
+  ): Promise<boolean> => {
+    if (!trainingDay) return false;
     setSavingLog(true);
     try {
       await logWorkout({
@@ -390,9 +393,11 @@ export default function Workouts() {
         exercises: exercises.length,
         sets: exercises.reduce((s, e) => s + e.sets, 0),
       });
+      return true;
     } catch (err) {
       console.error("[Workouts] Ошибка сохранения тренировки:", err);
       toast.error("Не удалось записать тренировку");
+      return false;
     } finally {
       setSavingLog(false);
     }
@@ -910,6 +915,10 @@ export default function Workouts() {
               ...(e.setDetails ? { setDetails: e.setDetails } : {}),
             })),
           }))}
+          // Инвентарь — для фильтра замен упражнения («Заменить на: …»).
+          equipment={
+            profile ? normalizeEquipment(profile.equipment) : undefined
+          }
           saving={savingLog}
           onClose={() => setTrainingDay(null)}
           onSave={handleSaveTraining}

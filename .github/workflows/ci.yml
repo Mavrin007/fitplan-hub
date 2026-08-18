@@ -164,7 +164,7 @@ jobs:
   e2e:
     name: E2E (critical path · axe · mobile)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -185,21 +185,58 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # E2E требует локального Convex-бэкенда с auth-окружением (JWT_PRIVATE_KEY,
-      # JWKS, SITE_URL) и dev-перехватом OTP (VLY_EMAIL_DEV_CAPTURE=1). Свежий
-      # `convex dev` на раннере создаёт пустой деплой — без этих переменных
-      # @convex-dev/auth падает (requireEnv), /auth не рендерится, и все тесты
-      # уходят в таймаут по h1. Поднимаем бэкенд в фоне и ставим env скриптом
-      # scripts/e2e-setup-convex.mjs (JWT-ключи генерируются на лету — в
-      # репозиторий и GitHub-секреты ничего не кладётся). Playwright затем
-      # переиспользует уже поднятый бэкенд (reuseExistingServer: true).
+      # JWKS, SITE_URL, VLY_CONVEX_AUTH_ISSUER) и dev-перехватом OTP
+      # (VLY_EMAIL_DEV_CAPTURE=1). Локальный бэкенд проверяет auth.config.ts по
+      # env-хранилищу ДЕПЛОЯ (не process.env): свежий деплой без переменных
+      # падает на пуше («used in auth config file but its value was not set»),
+      # @convex-dev/auth падает в рантайме (requireEnv), /auth не рендерится,
+      # и все тесты уходят в таймаут по h1. Поэтому порядок такой:
+      #   1) первый `dev --once` падает на env-проверке (ожидаемо — `|| true`),
+      #      но создаёт состояние локального деплоя (.env.local + хранилище);
+      #   2) e2e-setup ставит env (JWT-ключи генерируются на лету — в
+      #      репозиторий и GitHub-секреты ничего не кладётся);
+      #   3) повторный `dev --once` — env-проверка проходит, функции залиты
+      #      БЛОКИРУЮЩЕ (--once: залил и вышел), иначе клиент получает
+      #      «Could not find public function» и падает в ErrorBoundary.
+      # Playwright затем переиспользует бэкенд (reuseExistingServer: true).
       - name: Prepare local Convex backend (auth env)
         run: |
-          npx convex dev --typecheck disable > /tmp/convex-e2e.log 2>&1 &
+          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e.log 2>&1 || true
           node scripts/e2e-setup-convex.mjs
-          tail -2 /tmp/convex-e2e.log
+          CONVEX_DEV_DEPLOYMENT=local npx convex dev --typecheck disable --once > /tmp/convex-e2e2.log 2>&1
+          tail -5 /tmp/convex-e2e2.log
+
+      - name: Upload convex-e2e log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: convex-e2e-log
+          path: /tmp/convex-e2e.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: E2E (critical path · axe · mobile)
+        env:
+          # Локальный режим: Playwright поднимает/ждёт Convex на :3210 и даёт
+          # vite VITE_CONVEX_URL=http://127.0.0.1:3210. Без него (cloud-режим)
+          # в CI нет .env.local, приложение стартует без бэкенда, и все тесты
+          # падают (страницы 404, кнопок нет, таймауты).
+          E2E_CONVEX: local
         run: npx playwright test
+
+      # HTML-отчёт и трейсы загружаются даже при упавших тестах (if: always()) —
+      # иначе детали ошибок живут только в логах раннера, а HTML-отчёт пропадает
+      # вместе с ним, и диагностика превращается в гадание.
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn
+          retention-days: 7
 
   # Деплой в продакшен: только push в основную ветку main, только после
   # зелёной проверки, и только если в репозитории настроены Vercel-секреты

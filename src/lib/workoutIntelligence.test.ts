@@ -197,14 +197,84 @@ describe("recommendLoad", () => {
   });
 
   describe("тренажёр/блок: шаг 2.5 кг", () => {
-    it("жим ногами 80 кг @ RPE 7 → 82.5 кг", () => {
+    it("двойная прогрессия: повторы в середине диапазона → вес сохраняем, +1 повтор", () => {
       const rec = recommendLoad({
         name: "Жим ногами",
         planReps: "10-15",
         last: { weightKg: 80, reps: 12, rpe: 7 },
       });
+      // 12 < 15 — «сначала повторы, потом вес»: тот же вес, цель 13–15.
+      expect(rec.kind).toBe("keep");
+      expect(rec.weightKg).toBe(80);
+      expect(rec.repsMin).toBe(13);
+      expect(rec.repsMax).toBe(15);
+      expect(rec.stepLabel).toBe("сохрани вес");
+      expect(rec.reasoning).toContain("добираем повторы");
+    });
+
+    it("повторы на верхней планке диапазона → следующий вес по оборудованию", () => {
+      const rec = recommendLoad({
+        name: "Жим ногами",
+        planReps: "10-15",
+        last: { weightKg: 80, reps: 15, rpe: 7 },
+      });
       expect(rec.kind).toBe("up");
       expect(rec.weightKg).toBe(82.5);
+      expect(rec.repsMin).toBe(10);
+      expect(rec.repsMax).toBe(15);
+    });
+  });
+
+  describe("двойная прогрессия: повторы → вес", () => {
+    it("RPE 8: 70 × 8 @8 → 70 × 9–10 (добираем повторы на том же весе)", () => {
+      const rec = recommendLoad({
+        name: "Приседания со штангой",
+        planReps: "8-10",
+        last: { weightKg: 70, reps: 8, rpe: 8 },
+      });
+      expect(rec.kind).toBe("keep");
+      expect(rec.weightKg).toBe(70);
+      expect(rec.repsMin).toBe(9);
+      expect(rec.repsMax).toBe(10);
+      expect(rec.reasoning).toContain("добираем повторы");
+    });
+
+    it("RPE 7 в середине диапазона: 70 × 9 @7 (8-12) → 70 × 10–12", () => {
+      const rec = recommendLoad({
+        name: "Приседания со штангой",
+        planReps: "8-12",
+        last: { weightKg: 70, reps: 9, rpe: 7 },
+      });
+      expect(rec.kind).toBe("keep");
+      expect(rec.weightKg).toBe(70);
+      expect(rec.repsMin).toBe(10);
+      expect(rec.repsMax).toBe(12);
+    });
+
+    it("упражнение не получилось: 70 × 7 @10 (план 8-10) → повторяем 70 × 8–10, не штрафуем", () => {
+      const rec = recommendLoad({
+        name: "Приседания со штангой",
+        planReps: "8-10",
+        last: { weightKg: 70, reps: 7, rpe: 10 },
+      });
+      expect(rec.kind).toBe("keep");
+      expect(rec.weightKg).toBe(70);
+      // Цель — диапазон плана, а не «70 × 7»: подход повторяется без штрафа.
+      expect(rec.repsMin).toBe(8);
+      expect(rec.repsMax).toBe(10);
+      expect(rec.reasoning).toContain("повторяем результат");
+    });
+
+    it("RPE 9 на плане «8»: 80 × 8 @9 → 80 × 8 (цель — фактический результат)", () => {
+      const rec = recommendLoad({
+        name: "Приседания со штангой",
+        planReps: "8",
+        last: { weightKg: 80, reps: 8, rpe: 9 },
+      });
+      expect(rec.kind).toBe("keep");
+      expect(rec.weightKg).toBe(80);
+      expect(rec.repsMin).toBe(8);
+      expect(rec.repsMax).toBe(8);
     });
   });
 

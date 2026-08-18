@@ -29,6 +29,7 @@ import {
   type MealLogUpdateArgs,
 } from "@/test/fixtures";
 import { addDays, toDateKey, todayKey } from "@/lib/dates";
+import { computeTargets } from "@/lib/nutrition";
 import {
   generateMealPlan,
   generateWeeklyMealPlan,
@@ -147,13 +148,9 @@ describe("Meals", () => {
     });
     renderWithRouter(<Meals />);
 
-    // KILO v1.2: «Куриная грудка (гриль)» встречается дважды — в дневнике и
-    // в панели «Недавние продукты» (быстрое повторение). Проверяем, что
-    // запись дня точно присутствует.
-    expect(
-      screen.getAllByText("Куриная грудка (гриль)").length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Белый рис")).toBeInTheDocument();
+    // Имена могут встречаться дважды: строка записи + чип «Недавнего».
+    expect(screen.getAllByText("Куриная грудка (гриль)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Белый рис").length).toBeGreaterThanOrEqual(1);
     // «500 ккал» дважды: бейдж карточки завтрака и строка самой записи.
     expect(screen.getAllByText("500 ккал").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Б 40 · У 0 · Ж 10")).toBeInTheDocument();
@@ -213,6 +210,97 @@ describe("Meals", () => {
     );
   });
 
+  it("повтор одного приёма: «Повторить обед» копирует только записи обеда (сняли лишнее)", async () => {
+    const user = userEvent.setup();
+    const yesterday = toDateKey(addDays(new Date(), -1));
+    setupMeals();
+    setQuery(
+      api.mealLog.getByDate,
+      { date: yesterday },
+      [
+        {
+          _id: "y1",
+          userId: "u1",
+          createdAt: 0,
+          date: yesterday,
+          mealType: "lunch",
+          name: "Куриная грудка (гриль)",
+          quantity: 1,
+          calories: 500,
+          protein: 40,
+          carbs: 0,
+          fat: 10,
+        },
+        {
+          _id: "y2",
+          userId: "u1",
+          createdAt: 0,
+          date: yesterday,
+          mealType: "lunch",
+          name: "Белый рис",
+          quantity: 2,
+          calories: 300,
+          protein: 6,
+          carbs: 56,
+          fat: 1,
+        },
+        {
+          _id: "y3",
+          userId: "u1",
+          createdAt: 0,
+          date: yesterday,
+          mealType: "dinner",
+          name: "Лосось (запечённый)",
+          quantity: 1,
+          calories: 400,
+          protein: 20,
+          carbs: 0,
+          fat: 13,
+        },
+      ] satisfies MealEntry[],
+    );
+    renderWithRouter(<Meals />);
+
+    // Чип «Повторить приём» открывает диалог именно с записями обеда
+    // (ужин в диалоге отсутствует — это повтор одного приёма, не дня).
+    await user.click(
+      screen.getByRole("button", {
+        name: "Повторить приём «Обед» (2 записей)",
+      }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Белый рис")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Лосось (запечённый)"),
+    ).not.toBeInTheDocument();
+
+    // Снимаем рис — добавится только курица (не слепое копирование).
+    await user.click(within(dialog).getByLabelText(/Белый рис/));
+    await user.click(
+      within(dialog).getByRole("button", { name: "Добавить в сегодня (1)" }),
+    );
+
+    const addEntriesCall = convexMock.mutationCalls.find(
+      (c) => c.path === "mealLog.addEntries",
+    );
+    expect(addEntriesCall).toBeDefined();
+    const copied = (
+      addEntriesCall!.args[0] as {
+        entries: { name: string; date: string; mealType: string }[];
+      }
+    ).entries;
+    expect(copied).toEqual([
+      expect.objectContaining({
+        date: todayKey(),
+        mealType: "lunch",
+        name: "Куриная грудка (гриль)",
+      }),
+    ]);
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining("Скопировано записей: 1"),
+    );
+  });
+
   it("добавляет продукт из библиотеки через диалог", async () => {
     const user = userEvent.setup();
     setupMeals();
@@ -246,7 +334,13 @@ describe("Meals", () => {
         ],
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith("Куриная грудка (гриль) — добавлено");
+    // Фидбек после добавления: тост отвечает, сколько осталось до цели.
+    expect(toast.success).toHaveBeenCalledWith(
+      "Куриная грудка (гриль) — добавлено",
+      expect.objectContaining({
+        description: expect.stringContaining("осталось"),
+      }),
+    );
   });
 
   // Под полной нагрузкой coverage-прогона (все файлы параллельно) тест
@@ -389,6 +483,9 @@ describe("Meals", () => {
       );
       expect(toast.success).toHaveBeenCalledWith(
         "Кокосовое молоко — добавлено",
+        expect.objectContaining({
+          description: expect.stringContaining("осталось"),
+        }),
       );
       // URL запроса содержит поисковый термин.
       const fetchUrl = (fetchMock.mock.calls as unknown as [unknown][])[0][0];
@@ -606,6 +703,39 @@ describe("Meals", () => {
     expect(toast.success).toHaveBeenCalledWith("План на день добавлен в дневник");
   });
 
+  it("переключение цели меню пересчитывает цели КБЖУ под выбранную цель, а не цель профиля", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    renderWithRouter(<Meals />);
+
+    // Профиль — «Похудение»: меню по умолчанию строится под СВОЮ цель, а не
+    // под цель профиля — именно она считается «эталонной» для подгонки порций
+    // и строки «К цели» в каждом дне.
+    expect(vi.mocked(generateWeeklyMealPlan)).toHaveBeenCalledWith(
+      "lose_weight",
+      computeTargets({ ...profile, fitnessGoal: "lose_weight" }),
+    );
+
+    // Переключаем на «Набор массы» — цели меню пересчитываются под набор
+    // (больше ккал/углеводов/белка). Раньше меню всех целей подгонялось под
+    // цели ПРОФИЛЯ, из-за чего «Похудение»/«Поддержание»/«Набор» почти не
+    // отличались, а строка «К цели» сравнивала день с чужой целью.
+    await user.click(screen.getByRole("button", { name: "Набор мышечной массы" }));
+    expect(vi.mocked(generateWeeklyMealPlan)).toHaveBeenCalledWith(
+      "gain_muscle",
+      computeTargets({ ...profile, fitnessGoal: "gain_muscle" }),
+    );
+    expect(vi.mocked(generateMealPlan)).toHaveBeenCalledWith(
+      todayKey(),
+      "gain_muscle",
+      computeTargets({ ...profile, fitnessGoal: "gain_muscle" }),
+    );
+
+    // Строка «К цели» в дне меню теперь сравнивает с целями выбранной цели:
+    // при наборе массы дневная калорийность ≈ цели набора, а не цели профиля.
+    expect(screen.getByText(/5 приёмов/)).toBeInTheDocument();
+  });
+
   // Бывший источник duplicate-key: ключ недельного меню — `${mealType}-${name}`,
   // поэтому два snack в один день с ОДИНАКОВЫМ названием давали бы дубликат
   // React-ключа. Тест подменяет generateWeeklyMealPlan фиксированным планом
@@ -758,6 +888,57 @@ describe("Meals", () => {
     expect(toast.success).toHaveBeenCalledWith("Запись обновлена");
   });
 
+  it("быстрая правка порции: −/+ на строке пересчитывает КБЖУ без диалога", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      today: [
+        {
+          _id: "e1",
+          userId: "u1",
+          createdAt: 0,
+          date: todayKey(),
+          mealType: "breakfast",
+          name: "Яйца",
+          quantity: 1,
+          calories: 155,
+          protein: 13,
+          carbs: 1.1,
+          fat: 11,
+        },
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    // Диалог не открывается — порция меняется прямо на строке (Яйца — штучный
+    // продукт: шаг 1 шт, КБЖУ пересчитываются пропорционально).
+    await user.click(screen.getByRole("button", { name: "Увеличить порцию Яйца" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.updateEntry",
+        args: [
+          expect.objectContaining({
+            id: "e1",
+            name: "Яйца",
+            quantity: 2,
+            calories: 310,
+            protein: 26,
+            carbs: 2.2,
+            fat: 22,
+          } satisfies Partial<MealLogUpdateArgs>),
+        ],
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Уменьшить порцию Яйца" }));
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.updateEntry",
+        args: [expect.objectContaining({ id: "e1", quantity: 0.5 })],
+      }),
+    );
+  });
+
   it("показывает скелетон, пока профиль и дневник загружаются", () => {
     // Ни одного setQuery — профиль и дневник в состоянии undefined (загрузка).
     const { container } = renderWithRouter(<Meals />);
@@ -885,7 +1066,12 @@ describe("Meals", () => {
         ],
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith("Творог 5% — добавлено");
+    expect(toast.success).toHaveBeenCalledWith(
+      "Творог 5% — добавлено",
+      expect.objectContaining({
+        description: expect.stringContaining("осталось"),
+      }),
+    );
   });
 
   it("своё блюдо: нулевые калории блокируются", async () => {
@@ -1312,5 +1498,81 @@ describe("Meals", () => {
         args: [{ date: todayKey(), amountMl: 500 }],
       }),
     );
+  });
+
+  it("недавнее на странице: тап по продукту открывает диалог с его порцией", async () => {
+    const user = userEvent.setup();
+    setupMeals({
+      today: [
+        {
+          _id: "e1",
+          userId: "u1",
+          createdAt: 0,
+          date: todayKey(),
+          mealType: "breakfast",
+          name: "Куриная грудка (гриль)",
+          quantity: 1.5,
+          calories: 372,
+          protein: 69.8,
+          carbs: 0,
+          fat: 8.1,
+        } satisfies MealEntry,
+      ],
+    });
+    renderWithRouter(<Meals />);
+
+    // «Недавнее» — главный shortcut на странице: имя с последней порцией.
+    await user.click(
+      screen.getByRole("button", { name: /Куриная грудка \(гриль\) ×1\.5/ }),
+    );
+    const dialog = screen.getByRole("dialog");
+
+    // Порция уже предзаполнена последним количеством (1.5 × 150 г = 225 г).
+    expect(
+      within(dialog).getByLabelText(/Порций \(≈ 225 г\)/),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /Добавить в завтрак/ }),
+    );
+
+    expect(convexMock.mutationCalls).toContainEqual(
+      expect.objectContaining({
+        path: "mealLog.addEntry",
+        args: [
+          expect.objectContaining(
+            {
+              date: todayKey(),
+              mealType: "breakfast",
+              name: "Куриная грудка (гриль)",
+              quantity: 1.5,
+            } satisfies Partial<MealLogArgs>,
+          ),
+        ],
+      }),
+    );
+  });
+
+  it("защита от двойного добавления: повторный клик по плану не дублирует записи", async () => {
+    const user = userEvent.setup();
+    setupMeals();
+    // Мутация «висит» (медленная сеть): ответ не пришёл, когда происходит
+    // второй клик — реф-флаг блокирует повторный вызов ещё до re-render.
+    setMutation(api.mealLog.addEntries, () => new Promise(() => {}));
+    renderWithRouter(<Meals />);
+
+    await user.click(
+      screen.getByRole("button", { name: /Сгенерировать план на день/ }),
+    );
+    const addBtn = within(screen.getByRole("dialog")).getByRole("button", {
+      name: /Добавить всё в дневник/,
+    });
+
+    await user.click(addBtn);
+    await user.click(addBtn);
+
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "mealLog.addEntries"),
+    ).toHaveLength(1);
   });
 });

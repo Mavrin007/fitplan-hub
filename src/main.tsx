@@ -10,6 +10,7 @@ import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { MotionConfig } from "framer-motion";
 import { StrictMode, useEffect, lazy, Suspense } from "react";
+import { initTelegramWebApp } from "./lib/telegram/webApp";
 
 // AssistantChat и VlyToolbar не входят в первый экран (плавающие оверлеи):
 // грузим их лениво после первичной отрисовки — это убирает из стартового
@@ -58,7 +59,16 @@ if (sentryEnabled) {
   });
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// Без VITE_CONVEX_URL (CI-сборки без env, битая конфигурация деплоя) модуль
+// не должен падать: new ConvexReactClient(undefined) бросает при создании и
+// страница остаётся пустой. Показываем публичные страницы без бэкенда
+// вместо белого экрана; всё остальное дерево — только при настроенном URL.
+const convexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
+const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
+
+// Telegram Mini App: как можно раньше подтверждаем показ и разворачиваем
+// WebView на весь экран. Вне Telegram — no-op (см. lib/telegram/webApp.ts).
+initTelegramWebApp();
 
 // PWA: сервис-воркер регистрируем только в прод-сборке. В dev он ломал бы
 // HMR (кэширование навигаций и /assets), поэтому офлайн-оболочка включена
@@ -108,39 +118,56 @@ createRoot(document.getElementById("root")!).render(
           <VlyToolbar />
         </Suspense>
       </ToolbarErrorBoundary>
-      <ConvexAuthProvider client={convex}>
+      {/* Полное приложение (auth, дашборд, ассистент) — только когда задан
+          URL бэкенда. */}
+      {convex ? (
+        <>
+          <ConvexAuthProvider client={convex}>
+            <BrowserRouter>
+              <RouteSyncer />
+              <Suspense fallback={<RouteLoading />}>
+                <Routes>
+                  <Route path="/" element={<Landing />} />                  <Route path="/auth"
+                    element={<AuthPage redirectAfterAuth="/dashboard" />}
+                  />
+                  <Route path="/privacy" element={<Privacy />} />
+                  <Route path="/terms" element={<Terms />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <RequireAuth>
+                        <Dashboard />
+                      </RequireAuth>
+                    }
+                  >
+                    <Route index element={<Overview />} />
+                    <Route path="meals" element={<Meals />} />
+                    <Route path="workouts" element={<Workouts />} />
+                    <Route path="progress" element={<Progress />} />
+                    <Route path="profile" element={<Profile />} />
+                  </Route>
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+              <Suspense fallback={null}>
+                <AssistantChat />
+              </Suspense>
+            </BrowserRouter>
+            <Toaster />
+          </ConvexAuthProvider>
+        </>
+      ) : (
+        /* Публичные страницы без бэкенда: лендинг и статика рендерятся,
+           а не белый экран (например, в CI-сборке без VITE_CONVEX_URL). */
         <BrowserRouter>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />              <Route path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              <Route path="/privacy" element={<Privacy />} />
-              <Route path="/terms" element={<Terms />} />
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth>
-                    <Dashboard />
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<Overview />} />
-                <Route path="meals" element={<Meals />} />
-                <Route path="workouts" element={<Workouts />} />
-                <Route path="progress" element={<Progress />} />
-                <Route path="profile" element={<Profile />} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-          <Suspense fallback={null}>
-            <AssistantChat />
-          </Suspense>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
         </BrowserRouter>
-        <Toaster />
-      </ConvexAuthProvider>
+      )}
       </RootErrorBoundary>
     </MotionConfig>
   </StrictMode>,
