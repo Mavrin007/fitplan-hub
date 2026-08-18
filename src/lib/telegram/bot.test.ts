@@ -32,6 +32,7 @@ function makeDeps(overrides: Partial<BotDeps> = {}): FakeDeps {
     linkByCode: vi.fn(
       async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }),
     ),
+    unlinkByTelegram: vi.fn(async () => ({ linked: true })),
     getDaySummary: vi.fn(async () => ({
       calories: 1320,
       caloriesTarget: 2145,

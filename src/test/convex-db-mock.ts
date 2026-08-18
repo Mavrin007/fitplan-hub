@@ -101,6 +101,7 @@ const DEFAULT_TABLES = [
   "linkCodes", // одноразовые коды привязки Telegram
   "telegramStates", // состояние диалога бота
   "telegramProcessedUpdates", // replay protection вебхука (telegram.ts)
+  "idempotencyKeys", // идемпотентность записи (idempotency.ts)
 ];
 
 export function makeConvexDb(

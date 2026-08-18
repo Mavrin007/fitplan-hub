@@ -103,6 +103,7 @@ export interface BotDeps {
     code: string,
     meta: TgUser & { chatId?: number },
   ): Promise<{ ok: boolean; error?: string }>;
+  unlinkByTelegram(telegramUserId: number): Promise<{ linked: boolean }>;
   getDaySummary(userId: string): Promise<DaySummary | null>;
   searchFoods(query: string, limit?: number): Promise<SearchFood[]>;
   getRecentFoods(userId: string, limit?: number): Promise<RecentFood[]>;
@@ -324,6 +325,8 @@ async function handleCommand(
       ];
     case "link":
       return linkMessage(chatId, from, arg, deps);
+    case "unlink":
+      return unlinkMessage(chatId, from, deps);
     case "day":
       return dayMessage(chatId, from, deps);
     case "water":
@@ -404,6 +407,7 @@ function helpText(): string {
     "/today — план тренировки на сегодня\n" +
     "/menu — кнопки\n" +
     "/link &lt;код&gt; — привязать аккаунт\n" +
+    "/unlink — отвязать аккаунт\n" +
     "/help — эта справка"
   );
 }
@@ -441,6 +445,33 @@ async function linkMessage(
         "· писать названия еды — например: <i>курица 150</i>\n" +
         "· или пользоваться кнопками ниже",
       buttons: menuButtons(deps.webAppUrl),
+    },
+  ];
+}
+
+async function unlinkMessage(
+  chatId: number,
+  from: TgUser,
+  deps: BotDeps,
+): Promise<BotOp[]> {
+  const result = await deps.unlinkByTelegram(from.id);
+  if (!result.linked) {
+    return [
+      {
+        op: "sendMessage",
+        chatId,
+        text: "Аккаунт не привязан — отвязать нечего. Для привязки: приложение → Профиль → Telegram → /link &lt;код&gt;.",
+      },
+    ];
+  }
+  return [
+    {
+      op: "sendMessage",
+      chatId,
+      text:
+        "✅ Telegram отвязан от аккаунта КИЛО.\n\n" +
+        "Войдите в приложение и снова привяжите, когда захотите продолжить: " +
+        "Профиль → Telegram → «Получить код» → /link &lt;код&gt;.",
     },
   ];
 }

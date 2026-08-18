@@ -35,7 +35,10 @@ progress charts and CSV export.
   macros from the open barcode database (no API key; 8 s timeout, offline-safe
   — the dialog keeps working with the local library).
 - **Photo meal tracking** (`src/convex/photo.ts`) — snap a plate, Gemini Vision
-  recognizes the dish and returns per-item KBJU which lands straight in the
+  recognizes the dishes and returns names + quantities only (**no KBJU from the
+  model**): macros are computed by the app and every result is marked
+  `ai_estimate` — an estimate, not a measurement. The user reviews the result
+  (change product/quantity, remove items) and only then confirms it into the
   diary (5 analyses/hour rate limit; JPEG/PNG/WebP ≤ 2.5 MB; requires
   `GEMINI_API_KEY`, model tunable via `GEMINI_PHOTO_MODEL`).
 - **Explained goal projection** (`src/lib/projection.ts`) — linear regression on
@@ -198,6 +201,32 @@ is required for it to answer:
 
 - `GEMINI_API_KEY` — primary provider (Google Gemini, no extra gateway needed)
 - `VLY_INTEGRATION_KEY` — fallback: routes through the VLY gateway (`gpt-4o-mini`)
+
+The **same `VLY_INTEGRATION_KEY` also powers production email OTP delivery**: the
+auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code through
+`vly.email.send` (no API keys in the source). `VLY_APP_NAME` (optional) is used as
+the sender name in the letter. A verified sender domain is required in the VLY
+dashboard (`vly.email.verifyDomain` / `listDomains`) for letters to be delivered.
+
+#### Command architecture (`src/convex/assistant/`)
+
+The model never writes to the database directly — it emits **typed commands**
+(`logMeal` / `logWorkout` / `logWeight` / `logWater`) that go through strict
+runtime validation (`commands.ts`): types, ranges, lengths, enums, array limits.
+**KBJU fields (calories/protein/carbs/fat) are forbidden in commands** — macros
+are computed server-side from verified sources (curated library, the user's own
+foods) or explicit deterministic estimation (`nutrition.ts`), so the model can
+never make nutrition values authoritative. Invalid or impossible output is
+rejected without touching the database and surfaces a safe error to the user.
+
+Prompt injection protection is built into the system prompt (`prompt.ts`):
+user-generated text (food names, notes, profile fields, chat history) is placed
+only inside `USER_DATA` sections explicitly marked as untrusted data, never as
+instructions. The model gets a compact summary (profile, day totals, plan,
+≤20 own foods) instead of the whole database. Critical logging mutations
+(meals, water, workouts, assistant commands, Telegram) are **idempotent** via
+`idempotencyKey` (`src/convex/idempotency.ts`): a retried request never creates
+a duplicate entry.
 
 The **same `VLY_INTEGRATION_KEY` also powers production email OTP delivery**: the
 auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code through

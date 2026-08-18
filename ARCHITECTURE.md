@@ -37,10 +37,17 @@ src/
 в `components/`.
 
 **Правило роста:** как только у новой фичи появляется 2+ файла, заводите
-`src/features/<name>/`. Существующие монолиты (`pages/Meals`, `pages/Workouts`)
-мигрируют по мере необходимости — приоритет у фич, которые растут быстрее
-всего. Крупный переезд сразу всех страниц не делаем: он не даёт пользователю
-функциональной ценности и ломает историю изменений.
+`src/features/<name>/`.
+
+**Уже мигрировали:**
+- `src/features/meals/` — `MealsPage.tsx` + `lib/` (mealUtils, photo-review);
+  страница `pages/Meals.tsx` — тонкая обёртка;
+- `src/features/workouts/` — `WorkoutsPage.tsx` + `lib/workoutUtils.ts`;
+- `src/features/assistant/` (бэкенд-модули, живут в `src/convex/assistant/`,
+  см. ниже).
+
+Бизнес-логика живёт в `lib/` фичи (чистые функции, покрытые тестами),
+страница остаётся тонкой.
 
 ## Ролевая модель (SaaS-ready)
 
@@ -82,6 +89,37 @@ src/
   + мокнутый `getAuthUserId` — без Convex-рантайма.
 - Компонентные тесты страниц — через `@/test/convex-react-mock`.
 - Пороги покрытия: строки ≥ 80 %, ветви ≥ 75 % (`npm run test:coverage`).
+
+## AI-ассистент: команды, а не запись из «сырого» ответа
+
+`src/convex/assistant/` — модули без UI, тестируются без Convex-рантайма:
+
+- `commands.ts` — typed command model (`logMeal`/`logWorkout`/`logWeight`/
+  `logWater`) + строгая runtime-валидация: типы, диапазоны, длины, enums,
+  границы массивов, неизвестные поля. Поля КБЖУ в команде ЗАПРЕЩЕНЫ
+  (`forbidden_field`) — модель не может сделать макросы authoritative.
+- `nutrition.ts` — серверное разрешение продуктов (кураторская библиотека →
+  свои продукты → детерминированная оценка) и расчёт КБЖУ: `verified` /
+  `open_food_facts` / `internal` / `ai_estimate` + `isEstimate` для UI.
+- `prompt.ts` — сборка системного промпта: SYSTEM INSTRUCTIONS и USER_DATA
+  разделены; пользовательский текст всегда внутри `USER_DATA` с пометкой
+  «недоверенные данные» (защита от prompt injection). Модель получает
+  компактную сводку, а не всю БД.
+- `types.ts` — структурные типы документов (совместимы с `Doc<...>`).
+
+Путь записи: `USER → LLM → INTENT/COMMAND → STRICT VALIDATION → DOMAIN
+SERVICE → BUSINESS RULES → DATABASE MUTATION`. Невалидный ответ модели не
+изменяет БД и возвращает пользователю понятную ошибку.
+
+## Идемпотентность и ошибки
+
+- `src/convex/idempotency.ts` — `idempotencyKey` (userId+key, TTL 7 дней) для
+  критических мутаций записи (еда/вода/вес/тренировки, фото, Telegram):
+  повтор запроса не создаёт дубликат; при сбое тела ключ откатывается, чтобы
+  честный ретрай прошёл. Таблица `idempotencyKeys` в схеме.
+- `src/convex/errors.ts` — единая таксономия ошибок (`AUTH_REQUIRED`,
+  `RATE_LIMITED`, `VALIDATION_FAILED`, `FOOD_NOT_FOUND`, `AI_INVALID_OUTPUT`,
+  `DUPLICATE_REQUEST`, …) — ConvexError с кодом вместо произвольных строк.
 
 ## Безопасность
 

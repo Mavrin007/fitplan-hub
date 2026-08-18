@@ -1,9 +1,16 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
-import { mealTypeValidator } from "./schema";
+import { mealTypeValidator, nutritionSourceValidator } from "./schema";
 import { assertDate, assertMaxItems, assertRange, assertText } from "./validation";
+import {
+  duplicateError,
+  markIdempotencyDone,
+  releaseIdempotencyKey,
+  tryConsumeIdempotencyKey,
+} from "./idempotency";
+import { ErrorCode, appError } from "./errors";
 
 /** Санитарные лимиты на одну запись дневника (защита от мусора). */
 const MAX_ENTRY_ITEMS = 50;
@@ -13,8 +20,8 @@ const MAX_CALORIES = 20000;
 const MAX_MACRO_G = 2000;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): ConvexError<{ message: string }> {
-  return new ConvexError({ message: "Сессия истекла — войдите заново." });
+function authError(): never {
+  return appError(ErrorCode.AUTH_REQUIRED, "Сессия истекла — войдите заново.");
 }
 
 /** Проверяет общие поля записи дневника. */
@@ -35,6 +42,22 @@ function validateEntry(args: {
   assertRange(args.carbs, 0, MAX_MACRO_G, "Углеводы (г)");
   assertRange(args.fat, 0, MAX_MACRO_G, "Жиры (г)");
 }
+
+/** Общая схема аргумента записи (одна запись из addEntry/addEntries). */
+const entryArgsValidator = v.object({
+  date: v.string(),
+  mealType: mealTypeValidator,
+  name: v.string(),
+  quantity: v.number(),
+  calories: v.number(),
+  protein: v.number(),
+  carbs: v.number(),
+  fat: v.number(),
+  foodId: v.optional(v.id("foods")),
+  // Откуда взяты КБЖУ: передаётся приложением (не клиентом произвольно).
+  nutritionSource: v.optional(nutritionSourceValidator),
+  sourceId: v.optional(v.string()),
+});
 
 export const getByDate = query({
   args: { date: v.string() },
@@ -124,50 +147,64 @@ export const addEntry = mutation({
     carbs: v.number(),
     fat: v.number(),
     foodId: v.optional(v.id("foods")),
+    nutritionSource: v.optional(nutritionSourceValidator),
+    sourceId: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
-    validateEntry(args);
-    await consumeRateLimit(ctx, `${userId}:mealEntry`, RATE_LIMITS.mealEntry);
-    return await ctx.db.insert("mealLog", {
-      ...args,
-      userId,
-      createdAt: Date.now(),
-    });
+    const { idempotencyKey, ...entry } = args;
+
+    const fresh = await tryConsumeIdempotencyKey(ctx, userId, idempotencyKey);
+    if (!fresh) throw duplicateError();
+
+    try {
+      validateEntry(entry);
+      await consumeRateLimit(ctx, `${userId}:mealEntry`, RATE_LIMITS.mealEntry);
+      const id = await ctx.db.insert("mealLog", {
+        ...entry,
+        userId,
+        createdAt: Date.now(),
+      });
+      await markIdempotencyDone(ctx, userId, idempotencyKey);
+      return id;
+    } catch (err) {
+      await releaseIdempotencyKey(ctx, userId, idempotencyKey);
+      throw err;
+    }
   },
 });
 
 export const addEntries = mutation({
   args: {
-    entries: v.array(
-      v.object({
-        date: v.string(),
-        mealType: mealTypeValidator,
-        name: v.string(),
-        quantity: v.number(),
-        calories: v.number(),
-        protein: v.number(),
-        carbs: v.number(),
-        fat: v.number(),
-        foodId: v.optional(v.id("foods")),
-      }),
-    ),
+    entries: v.array(entryArgsValidator),
+    idempotencyKey: v.optional(v.string()),
   },
-  handler: async (ctx, { entries }) => {
+  handler: async (ctx, { entries, idempotencyKey }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
-    assertMaxItems(entries, MAX_ENTRY_ITEMS, "Записи дневника");
-    await consumeRateLimit(ctx, `${userId}:mealBulk`, RATE_LIMITS.mealBulk);
-    for (const entry of entries) {
-      validateEntry(entry);
-    }
-    for (const entry of entries) {
-      await ctx.db.insert("mealLog", {
-        ...entry,
-        userId,
-        createdAt: Date.now(),
-      });
+
+    const fresh = await tryConsumeIdempotencyKey(ctx, userId, idempotencyKey);
+    if (!fresh) throw duplicateError();
+
+    try {
+      assertMaxItems(entries, MAX_ENTRY_ITEMS, "Записи дневника");
+      await consumeRateLimit(ctx, `${userId}:mealBulk`, RATE_LIMITS.mealBulk);
+      for (const entry of entries) {
+        validateEntry(entry);
+      }
+      for (const entry of entries) {
+        await ctx.db.insert("mealLog", {
+          ...entry,
+          userId,
+          createdAt: Date.now(),
+        });
+      }
+      await markIdempotencyDone(ctx, userId, idempotencyKey);
+    } catch (err) {
+      await releaseIdempotencyKey(ctx, userId, idempotencyKey);
+      throw err;
     }
   },
 });
@@ -183,13 +220,27 @@ export const updateEntry = mutation({
     protein: v.number(),
     carbs: v.number(),
     fat: v.number(),
+    // Источник КБЖУ пересчитывается приложением при редактировании порции —
+    // клиент не может «повысить» произвольную запись до verified.
+    nutritionSource: v.optional(nutritionSourceValidator),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
     const entry = await ctx.db.get(args.id);
-    if (!entry || entry.userId !== userId) {
-      throw new ConvexError({ message: "Запись не найдена или уже удалена." });
+    if (!entry) {
+      throw appError(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        "Запись не найдена или уже удалена.",
+      );
+    }
+    // Чужая запись отвечает так же, как несуществующая: не раскрываем
+    // существование записи другого пользователя (защита от перебора id).
+    if (entry.userId !== userId) {
+      throw appError(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        "Запись не найдена или уже удалена.",
+      );
     }
 
     validateEntry({
@@ -210,6 +261,7 @@ export const updateEntry = mutation({
       protein: args.protein,
       carbs: args.carbs,
       fat: args.fat,
+      ...(args.nutritionSource ? { nutritionSource: args.nutritionSource } : {}),
     });
   },
 });
@@ -220,8 +272,17 @@ export const deleteEntry = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
     const entry = await ctx.db.get(id);
-    if (!entry || entry.userId !== userId) {
-      throw new ConvexError({ message: "Запись не найдена или уже удалена." });
+    if (!entry) {
+      throw appError(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        "Запись не найдена или уже удалена.",
+      );
+    }
+    if (entry.userId !== userId) {
+      throw appError(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        "Запись не найдена или уже удалена.",
+      );
     }
     await ctx.db.delete(id);
   },

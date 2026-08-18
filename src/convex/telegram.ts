@@ -51,7 +51,7 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { ROLES } from "./schema";
 import { assertRange } from "./validation";
@@ -159,7 +159,44 @@ export const unlink = mutation({
       .query("telegramAccounts")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .first();
-    if (doc) await ctx.db.delete(doc._id);
+    if (doc) {
+      await ctx.db.delete(doc._id);
+      // Заодно чистим состояние диалога бота этого чата.
+      const chatId = doc.chatId;
+      if (typeof chatId === "number") {
+        const state = await ctx.db
+          .query("telegramStates")
+          .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+          .first();
+        if (state) await ctx.db.delete(state._id);
+      }
+    }
+  },
+});
+
+/**
+ * Internal: отвязка по telegramUserId — вызывается ботом по команде /unlink
+ * (у бота нет пользовательской сессии, поэтому доступ строго по telegram id,
+ * а не по userId из payload).
+ */
+export const unlinkByTelegram = internalMutation({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const doc = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    if (!doc) return { linked: false };
+    await ctx.db.delete(doc._id);
+    const chatId = doc.chatId;
+    if (typeof chatId === "number") {
+      const state = await ctx.db
+        .query("telegramStates")
+        .withIndex("by_chat", (q) => q.eq("chatId", chatId))
+        .first();
+      if (state) await ctx.db.delete(state._id);
+    }
+    return { linked: true };
   },
 });
 
@@ -306,6 +343,18 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
         return { ok: true };
       } catch (e) {
         return { ok: false, error: errorText(e) };
+      }
+    },
+
+    async unlinkByTelegram(telegramUserId) {
+      try {
+        const res = await ctx.runMutation(
+          internal.telegram.unlinkByTelegram,
+          { telegramUserId },
+        );
+        return { linked: res.linked };
+      } catch {
+        return { linked: false };
       }
     },
 
@@ -594,6 +643,15 @@ export const processBotUpdate = mutation({
       .filter((q) => q.lt(q.field("processedAt"), cutoff))
       .take(50);
     for (const row of stale) await ctx.db.delete(row._id);
+    // Протухшие состояния диалога (старше 2 часов) чистим при обращении —
+    // незавершённый поиск еды не живёт вечно в БД.
+    const staleCutoff = Date.now() - 2 * 60 * 60 * 1000;
+    const staleStates = await ctx.db
+      .query("telegramStates")
+      .filter((q) => q.lt(q.field("updatedAt"), staleCutoff))
+      .take(20);
+    for (const row of staleStates) await ctx.db.delete(row._id);
+
     const deps = makeBotDeps(ctx);
     const ops = await dispatchBotUpdate(normalized, deps);
     await ctx.db.insert("telegramProcessedUpdates", {

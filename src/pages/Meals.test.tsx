@@ -191,7 +191,7 @@ describe("Meals", () => {
       expect.objectContaining({
         path: "mealLog.addEntries",
         args: [
-          {
+          expect.objectContaining({
             entries: expect.arrayContaining([
               expect.objectContaining(
                 {
@@ -201,7 +201,7 @@ describe("Meals", () => {
                 } satisfies Partial<MealLogArgs>,
               ),
             ]),
-          },
+          }),
         ],
       }),
     );
@@ -320,8 +320,9 @@ describe("Meals", () => {
         path: "mealLog.addEntry",
         // Литерал проверяется MealLogArgs из схемы — дрейф полей дневника
         // (смена типа, новое обязательное поле) ломает компиляцию.
+        // objectContaining: страница добавляет idempotencyKey/nutritionSource.
         args: [
-          {
+          expect.objectContaining({
             date: todayKey(),
             mealType: "breakfast",
             name: "Куриная грудка (гриль)",
@@ -330,7 +331,7 @@ describe("Meals", () => {
             protein: 46.5,
             carbs: 0,
             fat: 5.4,
-          } satisfies MealLogArgs,
+          } satisfies MealLogArgs),
         ],
       }),
     );
@@ -531,15 +532,17 @@ describe("Meals", () => {
     }
   });
 
-  it("фото тарелки: распознавание добавляет блюда в дневник", async () => {
+  it("фото тарелки: распознавание добавляет блюда в дневник после ревью", async () => {
     const user = userEvent.setup();
-    // Мок action: Gemini Vision «распознал» два продукта.
+    // Мок action: Gemini Vision «распознал» два продукта. Модель не передаёт
+    // КБЖУ — только имя и количество; макросы считает приложение, результат
+    // помечается ai_estimate.
     setAction(api.photo.analyzeMealPhoto, async () => ({
       items: [
-        { name: "Овсянка", quantity: 250, calories: 340, protein: 12, carbs: 50, fat: 7 },
-        { name: "Яблоко", quantity: 1, calories: 90, protein: 0, carbs: 20, fat: 0 },
+        { name: "Овсянка", quantity: 250, source: "ai_estimate" },
+        { name: "Яблоко", quantity: 1, source: "ai_estimate" },
       ],
-      raw: "<<<LOG>>>...",
+      raw: "",
     }));
     setupMeals();
     renderWithRouter(<Meals />);
@@ -553,9 +556,24 @@ describe("Meals", () => {
     await user.upload(input, file);
     // FileReader читает асинхронно — кнопка появляется после загрузки файла.
     await user.click(
-      await within(dialog).findByRole("button", { name: /Распознать и добавить/ }),
+      await within(dialog).findByRole("button", { name: /Распознать/ }),
     );
 
+    // Ревью: результат не попадает в дневник без подтверждения.
+    expect(
+      await within(dialog).findByText(/Распознано ИИ — проверьте и подтвердите/),
+    ).toBeInTheDocument();
+    expect(
+      convexMock.mutationCalls.filter((c) => c.path === "mealLog.addEntries"),
+    ).toHaveLength(0);
+
+    // Подтверждаем — только теперь запись уходит с пометкой оценки.
+    await user.click(
+      within(dialog).getByRole("button", { name: /Подтвердить и добавить \(2\)/ }),
+    );
+
+    // Овсянка разрешена в библиотеке («Овсянка (сухая)»: 389 ккал/100 г × 250 г
+    // = 973 ккал), но факт распознавания по фото помечает запись ai_estimate.
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
         path: "mealLog.addEntries",
@@ -565,10 +583,17 @@ describe("Meals", () => {
               expect.objectContaining({
                 date: todayKey(),
                 mealType: "breakfast",
-                name: "Овсянка",
-                calories: 340,
+                name: "Овсянка (сухая)",
+                quantity: 250,
+                calories: 973,
+                nutritionSource: "ai_estimate",
               }),
-              expect.objectContaining({ name: "Яблоко", calories: 90 }),
+              expect.objectContaining({
+                name: "Яблоко",
+                quantity: 1,
+                calories: 94,
+                nutritionSource: "ai_estimate",
+              }),
             ]),
           }),
         ],
@@ -590,7 +615,7 @@ describe("Meals", () => {
     const file = new File(["x"], "plate.png", { type: "image/png" });
     await user.upload(within(dialog).getByLabelText(/Выбрать фото тарелки/), file);
     await user.click(
-      await within(dialog).findByRole("button", { name: /Распознать и добавить/ }),
+      await within(dialog).findByRole("button", { name: /Распознать/ }),
     );
 
     expect(
@@ -1053,7 +1078,7 @@ describe("Meals", () => {
       expect.objectContaining({
         path: "mealLog.addEntry",
         args: [
-          {
+          expect.objectContaining({
             date: todayKey(),
             mealType: "lunch",
             name: "Творог 5%",
@@ -1062,7 +1087,7 @@ describe("Meals", () => {
             protein: 18,
             carbs: 6,
             fat: 9,
-          } satisfies MealLogArgs,
+          } satisfies MealLogArgs),
         ],
       }),
     );
@@ -1489,13 +1514,13 @@ describe("Meals", () => {
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
         path: "water.addWater",
-        args: [{ date: todayKey(), amountMl: 250 }],
+        args: [expect.objectContaining({ date: todayKey(), amountMl: 250 })],
       }),
     );
     expect(convexMock.mutationCalls).toContainEqual(
       expect.objectContaining({
         path: "water.addWater",
-        args: [{ date: todayKey(), amountMl: 500 }],
+        args: [expect.objectContaining({ date: todayKey(), amountMl: 500 })],
       }),
     );
   });

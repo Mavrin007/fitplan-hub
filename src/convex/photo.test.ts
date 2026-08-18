@@ -3,10 +3,9 @@
  * Convex-рантайма: замоканы auth, internal.rateLimit.consumeRateLimitAction
  * (через ctx.runMutation) и глобальный fetch (Gemini Vision).
  *
- * Проверяем: неавторизованный путь, отсутствие GEMINI_API_KEY, невалидный
- * data URL / не изображение / слишком большой файл, payload с inlineData,
- * парсинг items из JSON-блока, пустое распознавание, ошибки провайдера,
- * списание лимита до вызова провайдера.
+ * Контракт новой архитектуры: модель НЕ передаёт КБЖУ (это нарушение границы
+ * — forbidden_field, команда отклоняется). Результат распознавания — оценка
+ * (source: "ai_estimate"); питательная ценность вычисляется приложением.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,14 +27,13 @@ type PhotoCtx = { runMutation: ReturnType<typeof vi.fn> };
 const runPhoto = (
   analyzeMealPhoto as unknown as {
     _handler: (ctx: PhotoCtx, args: { imageDataUrl: string }) => Promise<{
-      items: { name: string; quantity: number; calories: number; protein: number; carbs: number; fat: number }[];
+      items: { name: string; quantity: number; source: "ai_estimate" }[];
       raw: string;
     }>;
   }
 )._handler;
 
 function makeCtx(): PhotoCtx {
-  // runMutation исполняет внутренние мутации (vi.fn) — как в assistant.test.
   const runMutation = vi.fn(async (fn: unknown, args: unknown) =>
     typeof fn === "function" ? (fn as (a: unknown) => unknown)(args) : undefined,
   );
@@ -114,7 +112,7 @@ describe("analyzeMealPhoto — успешный путь", () => {
   it("лимит списывается до вызова провайдера, payload содержит inlineData", async () => {
     vi.stubEnv("GEMINI_API_KEY", "key");
     geminiOk(
-      "<<<LOG>>>\n{\"action\":\"logMeal\",\"items\":[{\"name\":\"Овсянка\",\"quantity\":250,\"calories\":340,\"protein\":12,\"carbs\":50,\"fat\":7}]}\n<<<END>>>",
+      "<<<LOG>>>\n{\"action\":\"logMeal\",\"items\":[{\"name\":\"Овсянка\",\"quantity\":250}]}\n<<<END>>>",
     );
 
     const ctx = makeCtx();
@@ -147,11 +145,13 @@ describe("analyzeMealPhoto — успешный путь", () => {
       data: DATA_URL.split(",")[1],
     });
 
-    // Парсинг items из JSON-блока.
+    // Парсинг items: только имя и количество, результат — оценка.
     expect(res.items).toEqual([
-      { name: "Овсянка", quantity: 250, calories: 340, protein: 12, carbs: 50, fat: 7 },
+      { name: "Овсянка", quantity: 250, source: "ai_estimate" },
     ]);
-    expect(res.raw).toContain("logMeal");
+    // raw — текст модели без командного блока (санкционированный вывод),
+    // команда наружу не утекает.
+    expect(res.raw).not.toContain("logMeal");
   });
 
   it("пустое распознавание (items: []) → пустой массив без ошибки", async () => {
@@ -170,20 +170,23 @@ describe("analyzeMealPhoto — успешный путь", () => {
     expect(res.items).toEqual([]);
   });
 
-  it("значения из модели клампятся в безопасные диапазоны", async () => {
+  it("модель не может передать КБЖУ: forbidden_field отклоняет команду", async () => {
     vi.stubEnv("GEMINI_API_KEY", "key");
     geminiOk(
-      "<<<LOG>>>\n{\"action\":\"logMeal\",\"items\":[{\"name\":\"Суп\",\"quantity\":99999,\"calories\":-5,\"protein\":\"10\"}]}\n<<<END>>>",
+      "<<<LOG>>>\n{\"action\":\"logMeal\",\"items\":[{\"name\":\"Овсянка\",\"quantity\":250,\"calories\":340,\"protein\":12}]}\n<<<END>>>",
+    );
+    await expect(
+      runPhoto(makeCtx(), { imageDataUrl: DATA_URL }),
+    ).rejects.toThrow(/запрещённые поля/);
+  });
+
+  it("нереалистичное количество (вне диапазона) → пустой массив без записи", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "key");
+    geminiOk(
+      "<<<LOG>>>\n{\"action\":\"logMeal\",\"items\":[{\"name\":\"Суп\",\"quantity\":99999}]}\n<<<END>>>",
     );
     const res = await runPhoto(makeCtx(), { imageDataUrl: DATA_URL });
-    expect(res.items[0]).toEqual({
-      name: "Суп",
-      quantity: 5000, // clampNum(99999, 1, 5000, 1)
-      calories: 0, // отрицательные → 0
-      protein: 10, // строки принимаются
-      carbs: 0,
-      fat: 0,
-    });
+    expect(res.items).toEqual([]);
   });
 });
 
