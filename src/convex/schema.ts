@@ -294,6 +294,7 @@ const schema = defineSchema(
       firstName: v.optional(v.string()),
       chatId: v.optional(v.number()), // последний чат с ботом (для будущей рассылки)
       linkedAt: v.number(),
+      lastActiveAt: v.optional(v.number()), // время последнего входа через Telegram (мягкая миграция)
     })
       .index("by_telegram", ["telegramUserId"])
       .index("by_user", ["userId"]),

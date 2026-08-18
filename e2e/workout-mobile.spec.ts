@@ -88,7 +88,27 @@ test("мобильный Workout Player: 320–430px без overflow, touch-це
 
     // 3) Отмечаем подход → счётчик в шапке обновился.
     await set1.click();
-    await expect(page.getByText(/1 из \d+ подходов/)).toBeVisible();
+    // Ждём обновления aria-label кнопки (подход отмечен) — надёжнее regex
+    // по тексту, т.к. React создаёт несколько text-нод внутри <p>.
+    await expect(
+      page.getByRole("button", { name: /Подход 1.*невыполненный/ }),
+    ).toBeVisible();
+    // Теперь проверяем счётчик через evaluate — portal-рендер не ломает
+    // getByText для составного текста.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const ps = document.querySelectorAll("header p");
+            for (const p of ps) {
+              if (p.textContent?.includes("из") && p.textContent?.includes("подходов"))
+                return p.textContent;
+            }
+            return null;
+          }),
+        { timeout: 15_000 },
+      )
+      .toMatch(/1 из \d+ подходов/);
 
     // 4) После первого подхода появляются RPE-чипы (управление нагрузкой).
     await expect(page.getByRole("button", { name: "RPE 7" })).toBeVisible();

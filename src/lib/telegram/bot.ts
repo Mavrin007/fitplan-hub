@@ -91,6 +91,14 @@ export type ChatState =
       kind: "meal_portion";
       food: SearchFood;
       grams: number;
+    }
+  | {
+      kind: "link_confirm";
+      code: string;
+      tgUserId: number;
+      username?: string;
+      firstName?: string;
+      chatId?: number;
     };
 
 /** Доступ к данным и отправка сообщений — всё, что нужно боту. */
@@ -120,6 +128,8 @@ export interface BotDeps {
   getChatState(chatId: number): Promise<ChatState | null>;
   setChatState(chatId: number, state: ChatState): Promise<void>;
   clearChatState(chatId: number): Promise<void>;
+  /** Lookup user display name by link code (for /link confirmation). */
+  lookupUserNameByCode(code: string): Promise<string | null>;
 }
 
 /** Одна операция Bot API, которую бот просит выполнить. */
@@ -430,21 +440,31 @@ async function linkMessage(
       },
     ];
   }
-  const result = await deps.linkByCode(normalized, { ...from, chatId });
-  if (!result.ok) {
-    return [
-      { op: "sendMessage", chatId, text: result.error ?? "Не удалось привязать аккаунт." },
-    ];
-  }
+  // Security: confirmation step — show who will be linked before committing.
+  const userName = await deps.lookupUserNameByCode(normalized);
+  const displayName = userName ?? "пользователя";
+  // Save pending link state; actual linking happens on callback "link_confirm".
+  await deps.setChatState(chatId, {
+    kind: "link_confirm",
+    code: normalized,
+    tgUserId: from.id,
+    username: from.username,
+    firstName: from.first_name,
+    chatId,
+  });
   return [
     {
       op: "sendMessage",
       chatId,
       text:
-        "✅ Аккаунт привязан! Теперь можно:\n" +
-        "· писать названия еды — например: <i>курица 150</i>\n" +
-        "· или пользоваться кнопками ниже",
-      buttons: menuButtons(deps.webAppUrl),
+        `Вы привязываете Telegram к аккаунту <b>${displayName}</b>.\n\n` +
+        "Подтвердите привязку:",
+      buttons: [
+        [
+          { text: "✅ Да", callback_data: "link_confirm" },
+          { text: "❌ Отмена", callback_data: "link_cancel" },
+        ],
+      ],
     },
   ];
 }
@@ -703,7 +723,7 @@ async function handleCallback(
   const account = await deps.findUserByTelegram(from.id);
   const data = callbackData;
 
-  // Не требует аккаунта: меню, справка.
+  // Не требует аккаунта: меню, справка, подтверждение привязки.
   if (data === "menu") {
     return [
       answer(callbackQueryId),
@@ -711,6 +731,46 @@ async function handleCallback(
         op: "sendMessage",
         chatId,
         text: "Меню:",
+        buttons: menuButtons(deps.webAppUrl),
+      },
+    ];
+  }
+
+  // Link confirmation/cancel — doesn't require existing account.
+  if (data === "link_confirm" || data === "link_cancel") {
+    const state = await deps.getChatState(chatId);
+    if (!state || state.kind !== "link_confirm") {
+      return answerOnly(callbackQueryId, "Сессия привязки не найдена. Отправьте /link <код> заново.");
+    }
+    await deps.clearChatState(chatId);
+    if (data === "link_cancel") {
+      return [
+        answer(callbackQueryId),
+        { op: "sendMessage", chatId, text: "Привязка отменена." },
+      ];
+    }
+    // link_confirm: execute the actual link.
+    const result = await deps.linkByCode(state.code, {
+      id: state.tgUserId,
+      username: state.username,
+      first_name: state.firstName ?? undefined,
+      chatId: state.chatId,
+    });
+    if (!result.ok) {
+      return [
+        answer(callbackQueryId, result.error),
+        { op: "sendMessage", chatId, text: result.error ?? "Не удалось привязать аккаунт." },
+      ];
+    }
+    return [
+      answer(callbackQueryId),
+      {
+        op: "sendMessage",
+        chatId,
+        text:
+          "✅ Аккаунт привязан! Теперь можно:\n" +
+          "· писать названия еды — например: <i>курица 150</i>\n" +
+          "· или пользоваться кнопками ниже",
         buttons: menuButtons(deps.webAppUrl),
       },
     ];

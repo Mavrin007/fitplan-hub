@@ -16,7 +16,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ConfirmDelete } from "@/components/confirm-delete";
-import { WorkoutMode } from "@/components/WorkoutMode";
+import { WorkoutMode } from "./WorkoutMode";
 import { useTrack } from "@/hooks/use-track";
 import { EmptyState } from "@/components/empty-state";
 import { FitnessHero } from "@/components/illustrations";

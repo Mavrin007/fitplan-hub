@@ -77,6 +77,7 @@ function makeDeps(overrides: Partial<BotDeps> = {}): FakeDeps {
     clearChatState: vi.fn(async (chatId: number) => {
       state.delete(chatId);
     }),
+    lookupUserNameByCode: vi.fn(async () => "Тестер"),
     ...overrides,
   };
   return { ...deps, state };
@@ -203,28 +204,22 @@ describe("/start и привязка", () => {
     expect(sendText(ops)).toContain("/link ABC123");
   });
 
-  it("/link с кодом вызывает linkByCode и показывает успех", async () => {
+  it("/link с кодом показывает подтверждение", async () => {
     const linkByCode = vi.fn(async () => ({ ok: true }));
     const deps = makeDeps({ linkByCode });
     const ops = await handleUpdate(msg("/link AbC123"), deps);
-    expect(linkByCode).toHaveBeenCalledWith(
-      "ABC123",
-      expect.objectContaining({ id: 1, chatId: 1 }),
-    );
-    expect(sendText(ops)).toContain("Аккаунт привязан");
+    // Confirmation flow: linkByCode is NOT called yet.
+    expect(linkByCode).not.toHaveBeenCalled();
+    expect(sendText(ops)).toContain("Вы привязываете Telegram");
+    expect(sendText(ops)).toContain("Тестер");
+    // State saved for confirmation.
+    expect(deps.state.get(1)).toMatchObject({ kind: "link_confirm", code: "ABC123" });
   });
 
-  it("/link с неверным кодом показывает ошибку из deps", async () => {
-    const deps = makeDeps({
-      linkByCode: vi.fn(
-        async (): Promise<{ ok: boolean; error?: string }> => ({
-          ok: false,
-          error: "Код истёк",
-        }),
-      ),
-    });
-    const ops = await handleUpdate(msg("/link XXXX"), deps);
-    expect(sendText(ops)).toBe("Код истёк");
+  it("/link с пустым кодом просит ввести код", async () => {
+    const deps = makeDeps();
+    const ops = await handleUpdate(msg("/link"), deps);
+    expect(sendText(ops)).toContain("Отправьте код привязки");
   });
 });
 

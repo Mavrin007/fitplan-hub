@@ -380,12 +380,12 @@ describe("processBotUpdate (end-to-end через БД)", () => {
     };
     const first = await runProcessBotUpdate(ctxOf(db), { update });
     expect(sendTextOf(first)).toContain("Творог");
-    expect(store.telegramSeenUpdates).toHaveLength(1);
+    expect(store.telegramProcessedUpdates).toHaveLength(1);
     // Повторная доставка того же update_id (Telegram ретраит при сбоях) —
     // мутация не выполняется второй раз.
     const second = await runProcessBotUpdate(ctxOf(db), { update });
     expect(second).toEqual([]);
-    expect(store.telegramSeenUpdates).toHaveLength(1);
+    expect(store.telegramProcessedUpdates).toHaveLength(1);
   });
 
   it("/link: спрашивает подтверждение и привязывает только после него", async () => {

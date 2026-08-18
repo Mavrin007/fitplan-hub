@@ -145,7 +145,21 @@ export const myLink = query({
       username: doc.username ?? null,
       firstName: doc.firstName ?? null,
       linkedAt: doc.linkedAt,
+      lastActiveAt: (doc as { lastActiveAt?: number }).lastActiveAt ?? null,
     };
+  },
+});
+
+/** Обновить время последней активности Telegram-сессии. */
+export const touchLastActive = internalMutation({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const doc = await ctx.db
+      .query("telegramAccounts")
+      .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
+      .first();
+    if (!doc) return;
+    await ctx.db.patch(doc._id, { lastActiveAt: Date.now() });
   },
 });
 
@@ -257,6 +271,7 @@ export const linkByCode = mutation({
       firstName: args.firstName,
       chatId: args.chatId,
       linkedAt: Date.now(),
+      lastActiveAt: Date.now(),
     });
     return { linked: true, username: args.username ?? null };
   },
@@ -356,6 +371,17 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
       } catch {
         return { linked: false };
       }
+    },
+
+    async lookupUserNameByCode(code) {
+      const normalized = code.trim().toUpperCase();
+      const codeDoc = await ctx.db
+        .query("linkCodes")
+        .withIndex("by_code", (q) => q.eq("code", normalized))
+        .first();
+      if (!codeDoc) return null;
+      const user = await ctx.db.get(codeDoc.userId);
+      return (user as { name?: string })?.name ?? null;
     },
 
     async getDaySummary(userId): Promise<DaySummary | null> {
