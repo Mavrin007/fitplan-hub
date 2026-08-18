@@ -1,7 +1,7 @@
 {
   "name": "fitplan-hub",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.15.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

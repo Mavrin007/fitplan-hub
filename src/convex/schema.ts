@@ -385,6 +385,15 @@ const schema = defineSchema(
       effort: v.optional(effortValidator), // насколько тяжело было («лёгко/норм/тяжело») — влияет на следующий цикл
       createdAt: v.number(),
     }).index("by_user_date", ["userId", "date"]),
+
+    // Replay protection для Telegram-вебхука: Telegram может повторно
+    // доставить один и тот же update (таймаут вебхука, ретрай после
+    // ошибки). Одну строку на updateId — обработанные апдейты не
+    // выполняются дважды (иначе повторный /meal задваивает запись).
+    telegramProcessedUpdates: defineTable({
+      updateId: v.number(),
+      processedAt: v.number(),
+    }).index("by_update_id", ["updateId"]),
   },
   {
     schemaValidation: false,
