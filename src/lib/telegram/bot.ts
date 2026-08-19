@@ -95,10 +95,8 @@ export type ChatState =
   | {
       kind: "link_confirm";
       code: string;
+      /** Кто отправил /link — только этот telegram-пользователь может подтвердить. */
       tgUserId: number;
-      username?: string;
-      firstName?: string;
-      chatId?: number;
     };
 
 /** Доступ к данным и отправка сообщений — всё, что нужно боту. */
@@ -111,7 +109,9 @@ export interface BotDeps {
     code: string,
     meta: TgUser & { chatId?: number },
   ): Promise<{ ok: boolean; error?: string }>;
-  unlinkByTelegram(telegramUserId: number): Promise<{ linked: boolean }>;
+  /** Информация об аккаунте, которому принадлежит код (для подтверждения
+   *  привязки). Код при этом НЕ потребляется — одноразовость сохраняется. */
+  getLinkCodeInfo(code: string): Promise<{ name: string | null } | null>;
   getDaySummary(userId: string): Promise<DaySummary | null>;
   searchFoods(query: string, limit?: number): Promise<SearchFood[]>;
   getRecentFoods(userId: string, limit?: number): Promise<RecentFood[]>;
@@ -128,8 +128,6 @@ export interface BotDeps {
   getChatState(chatId: number): Promise<ChatState | null>;
   setChatState(chatId: number, state: ChatState): Promise<void>;
   clearChatState(chatId: number): Promise<void>;
-  /** Lookup user display name by link code (for /link confirmation). */
-  lookupUserNameByCode(code: string): Promise<string | null>;
 }
 
 /** Одна операция Bot API, которую бот просит выполнить. */
@@ -335,8 +333,6 @@ async function handleCommand(
       ];
     case "link":
       return linkMessage(chatId, from, arg, deps);
-    case "unlink":
-      return unlinkMessage(chatId, from, deps);
     case "day":
       return dayMessage(chatId, from, deps);
     case "water":
@@ -417,7 +413,6 @@ function helpText(): string {
     "/today — план тренировки на сегодня\n" +
     "/menu — кнопки\n" +
     "/link &lt;код&gt; — привязать аккаунт\n" +
-    "/unlink — отвязать аккаунт\n" +
     "/help — эта справка"
   );
 }
@@ -440,58 +435,38 @@ async function linkMessage(
       },
     ];
   }
-  // Security: confirmation step — show who will be linked before committing.
-  const userName = await deps.lookupUserNameByCode(normalized);
-  const displayName = userName ?? "пользователя";
-  // Save pending link state; actual linking happens on callback "link_confirm".
-  await deps.setChatState(chatId, {
-    kind: "link_confirm",
-    code: normalized,
-    tgUserId: from.id,
-    username: from.username,
-    firstName: from.first_name,
-    chatId,
-  });
-  return [
-    {
-      op: "sendMessage",
-      chatId,
-      text:
-        `Вы привязываете Telegram к аккаунту <b>${displayName}</b>.\n\n` +
-        "Подтвердите привязку:",
-      buttons: [
-        [
-          { text: "✅ Да", callback_data: "link_confirm" },
-          { text: "❌ Отмена", callback_data: "link_cancel" },
-        ],
-      ],
-    },
-  ];
-}
-
-async function unlinkMessage(
-  chatId: number,
-  from: TgUser,
-  deps: BotDeps,
-): Promise<BotOp[]> {
-  const result = await deps.unlinkByTelegram(from.id);
-  if (!result.linked) {
+  // Явное подтверждение: не привязываем сразу, а спрашиваем, к какому
+  // аккаунту пользователь хочет привязать Telegram (защита от случайной
+  // привязки к чужому аккаунту, если код кто-то подсмотрел).
+  const info = await deps.getLinkCodeInfo(normalized);
+  if (!info) {
     return [
       {
         op: "sendMessage",
         chatId,
-        text: "Аккаунт не привязан — отвязать нечего. Для привязки: приложение → Профиль → Telegram → /link &lt;код&gt;.",
+        text:
+          "Код не найден или истёк. Запросите новый код в приложении:\nприложение КИЛО → Профиль → Telegram → «Получить код».",
       },
     ];
   }
+  await deps.setChatState(chatId, {
+    kind: "link_confirm",
+    code: normalized,
+    tgUserId: from.id,
+  });
+  const tgName = from.username ? `@${escapeHtml(from.username)}` : escapeHtml(from.first_name ?? from.username ?? "аккаунт Telegram");
+  const accountName = info.name ? `«${escapeHtml(info.name)}»` : "аккаунту КИЛО";
   return [
     {
       op: "sendMessage",
       chatId,
       text:
-        "✅ Telegram отвязан от аккаунта КИЛО.\n\n" +
-        "Войдите в приложение и снова привяжите, когда захотите продолжить: " +
-        "Профиль → Telegram → «Получить код» → /link &lt;код&gt;.",
+        `🔐 Вы привязываете Telegram <b>${tgName}</b> к ${accountName}.\n\n` +
+        "Это вы? Подтвердите:",
+      buttons: [
+        [{ text: "✅ Да, привязать", callback_data: "link_confirm" }],
+        [{ text: "❌ Отмена", callback_data: "link_cancel" }],
+      ],
     },
   ];
 }
@@ -723,7 +698,7 @@ async function handleCallback(
   const account = await deps.findUserByTelegram(from.id);
   const data = callbackData;
 
-  // Не требует аккаунта: меню, справка, подтверждение привязки.
+  // Не требует аккаунта: меню, справка.
   if (data === "menu") {
     return [
       answer(callbackQueryId),
@@ -736,44 +711,9 @@ async function handleCallback(
     ];
   }
 
-  // Link confirmation/cancel — doesn't require existing account.
+  // Подтверждение привязки тоже не требует аккаунта (его ещё нет).
   if (data === "link_confirm" || data === "link_cancel") {
-    const state = await deps.getChatState(chatId);
-    if (!state || state.kind !== "link_confirm") {
-      return answerOnly(callbackQueryId, "Сессия привязки не найдена. Отправьте /link <код> заново.");
-    }
-    await deps.clearChatState(chatId);
-    if (data === "link_cancel") {
-      return [
-        answer(callbackQueryId),
-        { op: "sendMessage", chatId, text: "Привязка отменена." },
-      ];
-    }
-    // link_confirm: execute the actual link.
-    const result = await deps.linkByCode(state.code, {
-      id: state.tgUserId,
-      username: state.username,
-      first_name: state.firstName ?? undefined,
-      chatId: state.chatId,
-    });
-    if (!result.ok) {
-      return [
-        answer(callbackQueryId, result.error),
-        { op: "sendMessage", chatId, text: result.error ?? "Не удалось привязать аккаунт." },
-      ];
-    }
-    return [
-      answer(callbackQueryId),
-      {
-        op: "sendMessage",
-        chatId,
-        text:
-          "✅ Аккаунт привязан! Теперь можно:\n" +
-          "· писать названия еды — например: <i>курица 150</i>\n" +
-          "· или пользоваться кнопками ниже",
-        buttons: menuButtons(deps.webAppUrl),
-      },
-    ];
+    return handleLinkConfirm(update, deps);
   }
 
   if (!account) {
@@ -969,6 +909,59 @@ async function handleCallback(
   }
 
   return answerOnly(callbackQueryId, "Не понял 🤔");
+}
+
+/* --------------------------- Подтверждение /link --------------------------- */
+
+async function handleLinkConfirm(
+  update: NormalizedUpdate,
+  deps: BotDeps,
+): Promise<BotOp[]> {
+  const { chatId, from, callbackData, callbackQueryId } = update;
+  if (!callbackQueryId) return [];
+
+  const state = await deps.getChatState(chatId);
+  if (!state || state.kind !== "link_confirm") {
+    return answerOnly(
+      callbackQueryId,
+      "Запрос на привязку не найден — отправьте /link с кодом ещё раз.",
+    );
+  }
+  // Подтвердить может только тот, кто отправил /link (защита в групповых
+  // чатах: другой участник не сможет привязать свой Telegram).
+  if (state.tgUserId !== from.id) {
+    return answerOnly(callbackQueryId, "Это не ваш запрос на привязку.");
+  }
+
+  if (callbackData === "link_cancel") {
+    await deps.clearChatState(chatId);
+    return [
+      answer(callbackQueryId, "Отменено"),
+      { op: "sendMessage", chatId, text: "Привязка отменена. Код можно использовать повторно — отправьте /link ещё раз." },
+    ];
+  }
+
+  // link_confirm: потребляем код (одноразовый) и привязываем.
+  await deps.clearChatState(chatId);
+  const result = await deps.linkByCode(state.code, { ...from, chatId });
+  if (!result.ok) {
+    return [
+      answer(callbackQueryId, "Не удалось привязать"),
+      { op: "sendMessage", chatId, text: result.error ?? "Не удалось привязать аккаунт." },
+    ];
+  }
+  return [
+    answer(callbackQueryId, "Привязано ✅"),
+    {
+      op: "sendMessage",
+      chatId,
+      text:
+        "✅ Аккаунт привязан! Теперь можно:\n" +
+        "· писать названия еды — например: <i>курица 150</i>\n" +
+        "· или пользоваться кнопками ниже",
+      buttons: menuButtons(deps.webAppUrl),
+    },
+  ];
 }
 
 /* ------------------------------ Недавнее ------------------------------ */

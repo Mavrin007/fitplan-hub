@@ -227,9 +227,7 @@ describe("внешние вызовы ИИ-провайдеров", () => {
       messages: { role: string; content: string }[];
     };
     expect(call.messages[0].role).toBe("system");
-    // Пользовательские данные отделены от инструкций разделом USER_DATA.
-    expect(call.messages[0].content).toMatch(/USER_DATA:ПРОФИЛЬ/);
-    expect(call.messages[0].content).toMatch(/недоверенные данные/);
+    expect(call.messages[0].content).toMatch(/ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ/);
     // История диалога передана следом.
     expect(call.messages).toContainEqual({
       role: "user",
@@ -287,14 +285,13 @@ describe("внешние вызовы ИИ-провайдеров", () => {
 });
 
 describe("запись данных из JSON-блока модели", () => {
-  it("logMeal: КБЖУ считаются сервером из источника/оценки, модель их не передаёт", async () => {
+  it("logMeal: записи попадают в addEntries, reply без служебного блока", async () => {
     checkAndConsume.mockResolvedValue({ remaining: 29 });
     vi.stubEnv("VLY_INTEGRATION_KEY", "vly-key");
-    // Команда БЕЗ макросов: питательная ценность определяется приложением.
     vlyResolve([
-      "Записал: 500 г шашлыка.",
+      "Записал: 500 г шашлыка — 950 ккал.",
       "<<<LOG>>>",
-      '{"action":"logMeal","mealType":"обед","items":[{"name":"Шашлык","quantity":500}]}',
+      '{"action":"logMeal","mealType":"обед","items":[{"name":"Шашлык","quantity":500,"calories":950,"protein":60,"carbs":0,"fat":70}]}',
       "<<<END>>>",
     ].join("\n"));
 
@@ -303,47 +300,20 @@ describe("запись данных из JSON-блока модели", () => {
 
     const dataCalls = dataMutations(ctx);
     expect(dataCalls).toHaveLength(1);
-    const args = dataCalls[0] as { entries: Record<string, unknown>[] };
+    const args = dataCalls[0] as { entries: unknown[] };
     expect(args.entries).toEqual([
       expect.objectContaining({
         date: "2026-08-07",
         mealType: "lunch", // русский «обед» приведён к валидному значению
         name: "Шашлык",
-        quantity: 500,
-        // КБЖУ посчитаны сервером (детерминированная оценка: 250 ккал/100 г
-        // для шашлыка × 500 г = 1250 ккал) и помечены как оценка ИИ.
-        calories: 1250,
-        protein: 125,
-        nutritionSource: "ai_estimate",
+        calories: 950,
       }),
     ]);
     expect(res.logged).toEqual([
-      expect.objectContaining({
-        kind: "meals",
-        label: expect.stringContaining("1250 ккал"),
-      }),
+      expect.objectContaining({ kind: "meals", label: expect.stringContaining("950 ккал") }),
     ]);
     expect(res.reply).toContain("Записал: 500 г шашлыка");
     expect(res.reply).not.toContain("<<<LOG>>>");
-  });
-
-  it("logMeal: модель не может передать КБЖУ (запрещённые поля отклоняются, БД не меняется)", async () => {
-    checkAndConsume.mockResolvedValue({ remaining: 29 });
-    vi.stubEnv("VLY_INTEGRATION_KEY", "vly-key");
-    // Попытка обойти границу: модель кладёт калории/белки прямо в items.
-    vlyResolve(
-      "<<<LOG>>>\n" +
-        '{"action":"logMeal","mealType":"lunch","items":[{"name":"Курица","quantity":150,"calories":300,"protein":40}]}\n' +
-        "<<<END>>>\nЗаписал.",
-    );
-
-    const ctx = makeCtx();
-    const res = await runChat(ctx, { messages: [], date: "2026-08-07" });
-
-    // БД не тронута: addEntries не вызывался ни в первый раз, ни в ретрае
-    // (тот же невалидный ответ).
-    expect(dataMutations(ctx)).toHaveLength(0);
-    expect(res.error).toBe(false);
   });
 
   it("logWorkout: тренировка уходит в workouts.logWorkout", async () => {

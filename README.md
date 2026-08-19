@@ -5,7 +5,7 @@
 This project uses the following tech stack:
 - Vite
 - Typescript
-- React Router v8 (all imports from `react-router` instead of `react-router-dom`)
+- React Router v7 (all imports from `react-router` instead of `react-router-dom`)
 - React 19 (for frontend components)
 - Tailwind v4 (for styling)
 - Shadcn UI (for UI components library)
@@ -35,10 +35,7 @@ progress charts and CSV export.
   macros from the open barcode database (no API key; 8 s timeout, offline-safe
   — the dialog keeps working with the local library).
 - **Photo meal tracking** (`src/convex/photo.ts`) — snap a plate, Gemini Vision
-  recognizes the dishes and returns names + quantities only (**no KBJU from the
-  model**): macros are computed by the app and every result is marked
-  `ai_estimate` — an estimate, not a measurement. The user reviews the result
-  (change product/quantity, remove items) and only then confirms it into the
+  recognizes the dish and returns per-item KBJU which lands straight in the
   diary (5 analyses/hour rate limit; JPEG/PNG/WebP ≤ 2.5 MB; requires
   `GEMINI_API_KEY`, model tunable via `GEMINI_PHOTO_MODEL`).
 - **Explained goal projection** (`src/lib/projection.ts`) — linear regression on
@@ -93,47 +90,12 @@ This project is set up already and running on a cloud environment, as well as a 
   Coverage gate with thresholds: `npm run test:coverage`.
 - **E2E (Playwright):** `npm run test:e2e` — runs the full local stack
   (convex dev :3210 + vite :5173, auto-started by `playwright.config.ts`)
-  across four specs: the critical path (guest → onboarding profile →
+  across three specs: the critical path (guest → onboarding profile →
   generate workout plan → attach email via dev-OTP → sign out → sign in by
   email → data persisted), a **scoped axe accessibility audit** (0
-  critical/serious violations on /auth and all five dashboard pages), a
+  critical/serious violations on /auth and all five dashboard pages) and a
   **mobile spec** (375px viewport: no horizontal scroll on any dashboard
-  page) and a **reduced-motion spec** (headless Chromium forced into
-  `prefers-reduced-motion`, see “Accessibility” below). See
-  `.freebuff/run.md` → “E2E (Playwright)” for details.
-
-## Accessibility
-
-- **Reduced motion** — with the system setting “reduce motion” ON, all
-  decorative animation is disabled on two layers:
-  - **CSS** (`src/index.css`, `@media (prefers-reduced-motion: reduce)`):
-    infinite decorative animations (`animate-aurora`, `animate-float`,
-    `animate-shine`, `animate-pulse`) are killed, hover lift (`.card-lift`)
-    snaps, all `transition-*` utilities get `transition-duration: 0.01ms`,
-    and `html` scrolls instantly (`scroll-behavior: auto` instead of
-    `smooth`).
-  - **Framer Motion** (`src/main.tsx` → `MotionConfig reducedMotion="user"`):
-    transform/layout animations (card entrances, ring draw) jump straight to
-    their final state; opacity-only fades still run.
-  - **Unit tests** (`*.reduced-motion.test.tsx` — Landing, Dashboard,
-    Overview, Meals, Workouts, Profile, ProgressRing, RingProgress):
-    isolated jsdom files stub `matchMedia(matches=true)` and assert the first
-    rendered frame has no transform/layout animation; paired control tests in
-    the normal `*.test.tsx` files prove the animation *does* run when the
-    setting is off.
-  - **E2E** (`e2e/reduced-motion.spec.ts`): headless Chromium launched with
-    `--force-prefers-reduced-motion`, then asserts computed
-    `animation-name: none` for the decorative classes, `scroll-behavior: auto`,
-    zero running `document.getAnimations()` on the dashboard after onboarding
-    (motion cards landed at their final state), and no console errors.
-- **Contrast & semantics:** `e2e/a11y.spec.ts` runs an axe audit (via
-  `@axe-core/playwright`) on `/auth` and all five dashboard pages in **both**
-  light and dark themes, failing on any critical/serious WCAG A/AA
-  violations (color contrast, ARIA, heading structure).
-- **Keyboard:** custom interactive controls (Select, OTP input, dialogs) are
-  built on Radix UI primitives, which ship full keyboard navigation and
-  focus trapping; progress rings expose `role="progressbar"` with
-  `aria-valuenow/min/max`.
+  page). See `.freebuff/run.md` → “E2E (Playwright)” for details.
 
 ## Performance & Web Vitals
 
@@ -201,32 +163,6 @@ is required for it to answer:
 
 - `GEMINI_API_KEY` — primary provider (Google Gemini, no extra gateway needed)
 - `VLY_INTEGRATION_KEY` — fallback: routes through the VLY gateway (`gpt-4o-mini`)
-
-The **same `VLY_INTEGRATION_KEY` also powers production email OTP delivery**: the
-auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code through
-`vly.email.send` (no API keys in the source). `VLY_APP_NAME` (optional) is used as
-the sender name in the letter. A verified sender domain is required in the VLY
-dashboard (`vly.email.verifyDomain` / `listDomains`) for letters to be delivered.
-
-#### Command architecture (`src/convex/assistant/`)
-
-The model never writes to the database directly — it emits **typed commands**
-(`logMeal` / `logWorkout` / `logWeight` / `logWater`) that go through strict
-runtime validation (`commands.ts`): types, ranges, lengths, enums, array limits.
-**KBJU fields (calories/protein/carbs/fat) are forbidden in commands** — macros
-are computed server-side from verified sources (curated library, the user's own
-foods) or explicit deterministic estimation (`nutrition.ts`), so the model can
-never make nutrition values authoritative. Invalid or impossible output is
-rejected without touching the database and surfaces a safe error to the user.
-
-Prompt injection protection is built into the system prompt (`prompt.ts`):
-user-generated text (food names, notes, profile fields, chat history) is placed
-only inside `USER_DATA` sections explicitly marked as untrusted data, never as
-instructions. The model gets a compact summary (profile, day totals, plan,
-≤20 own foods) instead of the whole database. Critical logging mutations
-(meals, water, workouts, assistant commands, Telegram) are **idempotent** via
-`idempotencyKey` (`src/convex/idempotency.ts`): a retried request never creates
-a duplicate entry.
 
 The **same `VLY_INTEGRATION_KEY` also powers production email OTP delivery**: the
 auth provider (`src/convex/auth/emailOtp.ts`) sends the verification code through

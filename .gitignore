@@ -59,4 +59,3 @@ next-env.d.ts
 .vite/
 .temp/
 tmp/
-.convex/local/

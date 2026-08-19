@@ -380,12 +380,12 @@ describe("processBotUpdate (end-to-end через БД)", () => {
     };
     const first = await runProcessBotUpdate(ctxOf(db), { update });
     expect(sendTextOf(first)).toContain("Творог");
-    expect(store.telegramProcessedUpdates).toHaveLength(1);
+    expect(store.telegramSeenUpdates).toHaveLength(1);
     // Повторная доставка того же update_id (Telegram ретраит при сбоях) —
     // мутация не выполняется второй раз.
     const second = await runProcessBotUpdate(ctxOf(db), { update });
     expect(second).toEqual([]);
-    expect(store.telegramProcessedUpdates).toHaveLength(1);
+    expect(store.telegramSeenUpdates).toHaveLength(1);
   });
 
   it("/link: спрашивает подтверждение и привязывает только после него", async () => {
@@ -655,52 +655,5 @@ describe("processBotUpdate (end-to-end через БД)", () => {
       name: expect.stringContaining("Творог"),
     });
     expect(store.telegramStates).toHaveLength(0); // состояние очищено
-  });
-
-  it("replay protection: повторная доставка того же update_id не дублирует действие", async () => {
-    const { db, store } = makeConvexDb();
-    seedProfile(db);
-    seedTelegram(db);
-    db.insert("waterEntries", {
-      userId: "u1",
-      date: toDateKey(new Date()),
-      amountMl: 1000,
-      createdAt: 1,
-    });
-
-    const update = {
-      update_id: 42,
-      callback_query: {
-        id: "q-replay",
-        from: { id: 111 },
-        data: "water:250",
-        message: { message_id: 5, chat: { id: 5 } },
-      },
-    };
-
-    // Первая доставка — обрабатывается, вода обновляется.
-    const first = await runProcessBotUpdate(ctxOf(db), { update });
-    expect(first.find((o) => o.op === "editMessage")).toBeTruthy();
-    expect(store.waterEntries[0].amountMl).toBe(1250);
-
-    // Повторная доставка того же апдейта (Telegram-ретрай) — ничего не делает.
-    const second = await runProcessBotUpdate(ctxOf(db), { update });
-    expect(second).toEqual([]);
-    expect(store.waterEntries[0].amountMl).toBe(1250); // не задвоилось
-
-    // Отдельный новый update_id обрабатывается нормально.
-    const next = await runProcessBotUpdate(ctxOf(db), {
-      update: {
-        update_id: 43,
-        callback_query: {
-          id: "q-next",
-          from: { id: 111 },
-          data: "water:250",
-          message: { message_id: 5, chat: { id: 5 } },
-        },
-      },
-    });
-    expect(next.find((o) => o.op === "editMessage")).toBeTruthy();
-    expect(store.waterEntries[0].amountMl).toBe(1500);
   });
 });

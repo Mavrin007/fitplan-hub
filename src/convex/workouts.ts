@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import {
   effortValidator,
   experienceLevelValidator,
@@ -11,13 +11,6 @@ import {
 } from "./schema";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { assertDate, assertMaxItems, assertRange, assertText } from "./validation";
-import {
-  duplicateError,
-  markIdempotencyDone,
-  releaseIdempotencyKey,
-  tryConsumeIdempotencyKey,
-} from "./idempotency";
-import { ErrorCode, appError } from "./errors";
 
 const MAX_DAYS = 7;
 const MAX_WEEKS = 16;
@@ -26,25 +19,8 @@ const MAX_NAME_LEN = 120;
 const MAX_SIGNATURE_LEN = 200;
 
 /** Понятная ошибка сессии вместо «Server Error» без текста. */
-function authError(): never {
-  return appError(ErrorCode.AUTH_REQUIRED, "Сессия истекла — войдите заново.");
-}
-
-/** Канонический источник фактических подходов: setDetails, если заполнены;
- *  иначе — агрегат (sets × reps/weightKg) из legacy-логов. Агрегированные
- *  поля в логах остаются для совместимости, но «прошлый раз» и объём всегда
- *  считаются по реальным подходам (единый источник правды). */
-export function canonicalSets(ex: {
-  sets: number;
-  reps: number;
-  weightKg: number;
-  setDetails?: Array<{ weightKg: number; reps: number; rpe?: number }>;
-}): Array<{ weightKg: number; reps: number; rpe?: number }> {
-  if (ex.setDetails && ex.setDetails.length > 0) return ex.setDetails;
-  return Array.from({ length: ex.sets }, () => ({
-    weightKg: ex.weightKg,
-    reps: ex.reps,
-  }));
+function authError(): ConvexError<{ message: string }> {
+  return new ConvexError({ message: "Сессия истекла — войдите заново." });
 }
 
 export const getMyPlan = query({
@@ -140,79 +116,65 @@ export const logWorkout = mutation({
     workoutName: v.string(),
     exercises: v.array(loggedExerciseValidator),
     effort: v.optional(effortValidator),
-    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
 
-    const fresh = await tryConsumeIdempotencyKey(
-      ctx,
-      userId,
-      args.idempotencyKey,
-    );
-    if (!fresh) throw duplicateError();
-
-    try {
-      assertDate(args.date);
-      assertText(args.workoutName, MAX_NAME_LEN, "Название тренировки");
-      assertMaxItems(args.exercises, MAX_EXERCISES, "Упражнений");
-      for (const ex of args.exercises) {
-        assertText(ex.name, MAX_NAME_LEN, "Упражнение");
-        assertRange(ex.sets, 1, 50, "Подходы");
-        assertRange(ex.reps, 1, 500, "Повторения");
-        assertRange(ex.weightKg, 0, 1000, "Вес (кг)");
-        if (ex.setDetails !== undefined) {
-          assertMaxItems(ex.setDetails, ex.sets, "Подходы детализации");
-          for (const set of ex.setDetails) {
-            assertRange(set.weightKg, 0, 1000, "Вес подхода (кг)");
-            assertRange(set.reps, 1, 500, "Повторения подхода");
-            if (set.rpe !== undefined) {
-              assertRange(set.rpe, 1, 10, "RPE подхода");
-            }
+    assertDate(args.date);
+    assertText(args.workoutName, MAX_NAME_LEN, "Название тренировки");
+    assertMaxItems(args.exercises, MAX_EXERCISES, "Упражнений");
+    for (const ex of args.exercises) {
+      assertText(ex.name, MAX_NAME_LEN, "Упражнение");
+      assertRange(ex.sets, 1, 50, "Подходы");
+      assertRange(ex.reps, 1, 500, "Повторения");
+      assertRange(ex.weightKg, 0, 1000, "Вес (кг)");
+      if (ex.setDetails !== undefined) {
+        assertMaxItems(ex.setDetails, ex.sets, "Подходы детализации");
+        for (const set of ex.setDetails) {
+          assertRange(set.weightKg, 0, 1000, "Вес подхода (кг)");
+          assertRange(set.reps, 1, 500, "Повторения подхода");
+          if (set.rpe !== undefined) {
+            assertRange(set.rpe, 1, 10, "RPE подхода");
           }
         }
       }
-      await consumeRateLimit(ctx, `${userId}:workoutLog`, RATE_LIMITS.workoutLog);
-
-      // Первая тренировка пользователя? Планируем Day-1 письмо (fire-and-forget):
-      // сбой отправки/планирования не должен ломать сохранение тренировки.
-      const firstWorkout = await ctx.db
-        .query("workoutLogs")
-        .withIndex("by_user_date", (q) => q.eq("userId", userId))
-        .first();
-
-      const logId = await ctx.db.insert("workoutLogs", {
-        ...args,
-        userId,
-        createdAt: Date.now(),
-      });
-
-      if (firstWorkout === undefined) {
-        const me = await ctx.db.get(userId);
-        if (
-          me &&
-          typeof me.email === "string" &&
-          me.email.length > 0 &&
-          !me.isAnonymous
-        ) {
-          try {
-            await ctx.scheduler.runAfter(0, internal.day1Email.sendDay1, {
-              userId,
-            });
-          } catch (err) {
-            // Письмо не критично — тренировка уже сохранена.
-            console.error("[day1] не удалось запланировать письмо:", err);
-          }
-        }
-      }
-
-      await markIdempotencyDone(ctx, userId, args.idempotencyKey);
-      return logId;
-    } catch (err) {
-      await releaseIdempotencyKey(ctx, userId, args.idempotencyKey);
-      throw err;
     }
+    await consumeRateLimit(ctx, `${userId}:workoutLog`, RATE_LIMITS.workoutLog);
+
+    // Первая тренировка пользователя? Планируем Day-1 письмо (fire-and-forget):
+    // сбой отправки/планирования не должен ломать сохранение тренировки.
+    const firstWorkout = await ctx.db
+      .query("workoutLogs")
+      .withIndex("by_user_date", (q) => q.eq("userId", userId))
+      .first();
+
+    const logId = await ctx.db.insert("workoutLogs", {
+      ...args,
+      userId,
+      createdAt: Date.now(),
+    });
+
+    if (firstWorkout === undefined) {
+      const me = await ctx.db.get(userId);
+      if (
+        me &&
+        typeof me.email === "string" &&
+        me.email.length > 0 &&
+        !me.isAnonymous
+      ) {
+        try {
+          await ctx.scheduler.runAfter(0, internal.day1Email.sendDay1, {
+            userId,
+          });
+        } catch (err) {
+          // Письмо не критично — тренировка уже сохранена.
+          console.error("[day1] не удалось запланировать письмо:", err);
+        }
+      }
+    }
+
+    return logId;
   },
 });
 
@@ -248,18 +210,8 @@ export const deleteLog = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw authError();
     const log = await ctx.db.get(id);
-    if (!log) {
-      throw appError(
-        ErrorCode.RESOURCE_NOT_FOUND,
-        "Запись не найдена или уже удалена.",
-      );
-    }
-    // Чужая запись отвечает так же, как несуществующая (защита от перебора id).
-    if (log.userId !== userId) {
-      throw appError(
-        ErrorCode.RESOURCE_NOT_FOUND,
-        "Запись не найдена или уже удалена.",
-      );
+    if (!log || log.userId !== userId) {
+      throw new ConvexError({ message: "Запись не найдена или уже удалена." });
     }
     await ctx.db.delete(id);
   },

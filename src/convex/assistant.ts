@@ -5,29 +5,21 @@ import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { api, internal } from "./_generated/api";
 import { vly } from "../lib/vly-integrations";
+import { FOOD_LIBRARY } from "../lib/mealLibrary";
 import {
   AI_REQUEST_TIMEOUT_MS,
   AI_TOTAL_BUDGET_MS,
   MAX_OUTPUT_TOKENS,
+  asString,
+  clampNum,
   describeError,
   estimateTokens,
   extractLogBlock,
   stripLogBlock,
+  toMealType,
   withTimeout,
 } from "../lib/assistantCore";
 import { geminiGenerateContent, type GeminiMessage } from "../lib/geminiClient";
-import {
-  parseCommandJson,
-  type AssistantCommand,
-} from "./assistant/commands";
-import {
-  resolveOrEstimate,
-  scalePortion,
-  quantityToStore,
-  type ResolvedNutrition,
-} from "./assistant/nutrition";
-import { buildSystemPrompt } from "./assistant/prompt";
-import { ErrorCode } from "./errors";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 
@@ -251,276 +243,6 @@ export const checkConnection = action({
   },
 });
 
-/* ------------------------------------------------------------------ */
-/* Исполнение команд (доменные сервисы, а не произвольная запись)     */
-/* ------------------------------------------------------------------ */
-
-/** Минимальный ctx действия, нужный исполнителям команд. */
-interface ChatCtx {
-  runMutation(fn: unknown, args: unknown): Promise<unknown>;
-  runQuery(fn: unknown, args?: unknown): Promise<unknown>;
-}
-
-/** Детерминированный хэш (djb2) для idempotency-ключа команды ассистента. */
-function hashString(input: string): string {
-  let hash = 5381;
-  for (let i = 0; i < input.length; i++) {
-    hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(36);
-}
-
-/** Безопасное логирование ошибки ассистента (без промптов и данных). */
-function logAssistantError(kind: string, err: unknown): void {
-  const msg = err instanceof Error ? err.message : String(err ?? "unknown");
-  // Сообщение может содержать данные — обрезаем до безопасного префикса.
-  console.error(`[assistant] ${kind}: ${msg.slice(0, 300)}`);
-}
-
-/** Пытается отследить событие аналитики (никогда не ломает чат). */
-async function trackSafe(
-  ctx: ChatCtx,
-  name: string,
-  meta: Record<string, string | number | boolean>,
-): Promise<void> {
-  try {
-    await ctx.runMutation(api.analytics.track, { name, meta });
-  } catch {
-    // Аналитика best-effort: ошибка не должна влиять на ответ.
-  }
-}
-
-/** Разрешает КБЖУ одного item команды logMeal и собирает запись дневника. */
-function resolveMealItem(
-  item: { name: string; quantity: number; unit?: string },
-  customFoods: CustomFoodLike[],
-): { nutrition: ResolvedNutrition; macros: { calories: number; protein: number; carbs: number; fat: number }; quantity: number } {
-  const nutrition = resolveOrEstimate(item.name, customFoods);
-  const macros = scalePortion(
-    nutrition,
-    item.quantity,
-    (item.unit ?? undefined) as QuantityUnitArg,
-  );
-  const quantity = quantityToStore(nutrition, item.quantity, (item.unit ?? undefined) as QuantityUnitArg);
-  return { nutrition, macros, quantity };
-}
-
-type QuantityUnitArg = "г" | "g" | "шт" | "serving" | "piece" | undefined;
-
-/** Форма своего продукта, принимаемая nutrition-модулем. */
-type CustomFoodLike = {
-  name: string;
-  amount: number;
-  unit: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  _id?: string;
-};
-
-/** Исполняет команду logMeal: серверное разрешение продуктов + запись. */
-async function executeLogMeal(
-  ctx: ChatCtx,
-  command: Extract<AssistantCommand, { action: "logMeal" }>,
-  args: { date: string },
-  idemKey: string,
-  customFoods: CustomFoodLike[],
-): Promise<{ kind: string; label: string }[]> {
-  const mealType =
-    (command.mealType as "breakfast" | "lunch" | "dinner" | "snack" | undefined) ?? "snack";
-
-  const entries = command.items.map((item) => {
-    const { nutrition, macros, quantity } = resolveMealItem(item, customFoods);
-    return {
-      date: args.date,
-      mealType,
-      name: nutrition.name,
-      quantity,
-      calories: macros.calories,
-      protein: macros.protein,
-      carbs: macros.carbs,
-      fat: macros.fat,
-      nutritionSource: nutrition.source,
-      sourceId: nutrition.sourceId,
-    };
-  });
-
-  const estimates = entries.filter((e) => e.nutritionSource === "ai_estimate");
-  try {
-    await ctx.runMutation(api.mealLog.addEntries, {
-      entries,
-      idempotencyKey: idemKey,
-    });
-  } catch (err) {
-    // Повторная отправка того же сообщения (ретрай) — запись уже была.
-    const data = (err as { data?: { code?: string } }).data;
-    if (data?.code === ErrorCode.DUPLICATE_REQUEST) {
-      return [{ kind: "meals", label: "Уже записано ранее (повтор не создан)" }];
-    }
-    throw err;
-  }
-
-  const totalCal = entries.reduce((s, e) => s + e.calories, 0);
-  const estimateNote =
-    estimates.length > 0
-      ? ` · ${estimates.length} поз. оценены приблизительно`
-      : "";
-  await trackSafe(ctx, "assistant_command_success", {
-    command: "logMeal",
-    items: entries.length,
-    estimates: estimates.length,
-  });
-  return [
-    {
-      kind: "meals",
-      label: `В дневник добавлено: ${entries.length} поз. · ${totalCal} ккал${estimateNote}`,
-    },
-  ];
-}
-
-/** Исполняет команду logWorkout. */
-async function executeLogWorkout(
-  ctx: ChatCtx,
-  command: Extract<AssistantCommand, { action: "logWorkout" }>,
-  args: { date: string },
-  idemKey: string,
-): Promise<{ kind: string; label: string }[]> {
-  const mapped = command.exercises.map((ex) => ({
-    name: ex.name,
-    sets: ex.sets,
-    reps: ex.reps,
-    weightKg: ex.weightKg,
-    ...(ex.rpe !== undefined ? { rpe: ex.rpe } : {}),
-  }));
-  try {
-    await ctx.runMutation(api.workouts.logWorkout, {
-      date: args.date,
-      workoutName: command.workoutName ?? "Тренировка",
-      exercises: mapped,
-      idempotencyKey: idemKey,
-    });
-  } catch (err) {
-    const data = (err as { data?: { code?: string } }).data;
-    if (data?.code === ErrorCode.DUPLICATE_REQUEST) {
-      return [{ kind: "workout", label: "Уже записано ранее (повтор не создан)" }];
-    }
-    throw err;
-  }
-  await trackSafe(ctx, "assistant_command_success", {
-    command: "logWorkout",
-    exercises: mapped.length,
-  });
-  return [{ kind: "workout", label: `Тренировка записана: ${mapped.length} упр.` }];
-}
-
-/** Исполняет команду logWeight. */
-async function executeLogWeight(
-  ctx: ChatCtx,
-  command: Extract<AssistantCommand, { action: "logWeight" }>,
-  args: { date: string },
-  idemKey: string,
-): Promise<{ kind: string; label: string }[]> {
-  try {
-    await ctx.runMutation(api.weightEntries.addWeight, {
-      date: args.date,
-      weightKg: command.weightKg,
-      idempotencyKey: idemKey,
-    });
-  } catch (err) {
-    const data = (err as { data?: { code?: string } }).data;
-    if (data?.code === ErrorCode.DUPLICATE_REQUEST) {
-      return [{ kind: "weight", label: "Вес уже записан ранее" }];
-    }
-    throw err;
-  }
-  await trackSafe(ctx, "assistant_command_success", { command: "logWeight" });
-  return [{ kind: "weight", label: `Вес записан: ${command.weightKg} кг` }];
-}
-
-/** Исполняет команду logWater. */
-async function executeLogWater(
-  ctx: ChatCtx,
-  command: Extract<AssistantCommand, { action: "logWater" }>,
-  args: { date: string },
-  idemKey: string,
-): Promise<{ kind: string; label: string }[]> {
-  try {
-    await ctx.runMutation(api.water.addWater, {
-      date: args.date,
-      amountMl: command.amountMl,
-      idempotencyKey: idemKey,
-    });
-  } catch (err) {
-    const data = (err as { data?: { code?: string } }).data;
-    if (data?.code === ErrorCode.DUPLICATE_REQUEST) {
-      return [{ kind: "water", label: "Вода уже записана ранее" }];
-    }
-    throw err;
-  }
-  await trackSafe(ctx, "assistant_command_success", { command: "logWater" });
-  return [{ kind: "water", label: `Вода записана: ${command.amountMl} мл` }];
-}
-
-/** Разбирает команду из ответа модели и исполняет её через доменные сервисы. */
-async function handleCommandBlock(
-  ctx: ChatCtx,
-  userId: string,
-  text: string,
-  args: { date: string },
-  customFoods: CustomFoodLike[],
-): Promise<{ logged: { kind: string; label: string }[]; rejected: boolean; rejectedReason?: string }> {
-  const block = extractLogBlock(text);
-  if (!block) return { logged: [], rejected: false };
-
-  const result = parseCommandJson(block);
-  if (!result.ok) {
-    // Безопасно логируем причину (код + тип, без данных пользователя).
-    console.warn(
-      `[assistant] command rejected: ${result.code}${result.message ? ` — ${result.message.slice(0, 120)}` : ""}`,
-    );
-    await trackSafe(ctx, "assistant_command_rejected", {
-      reason: result.code,
-    });
-    return {
-      logged: [],
-      rejected: true,
-      rejectedReason: result.message,
-    };
-  }
-
-  const command = result.command;
-  // Idempotency-ключ: один запрос = один ключ. Повторная отправка того же
-  // сообщения (ретрай клиента) не создаст дубликат.
-  const idemKey = `assistant:${userId}:${args.date}:${hashString(
-    JSON.stringify(command),
-  )}`;
-
-  const logged: { kind: string; label: string }[] = [];
-  try {
-    switch (command.action) {
-      case "logMeal":
-        logged.push(...(await executeLogMeal(ctx, command, args, idemKey, customFoods)));
-        break;
-      case "logWorkout":
-        logged.push(...(await executeLogWorkout(ctx, command, args, idemKey)));
-        break;
-      case "logWeight":
-        logged.push(...(await executeLogWeight(ctx, command, args, idemKey)));
-        break;
-      case "logWater":
-        logged.push(...(await executeLogWater(ctx, command, args, idemKey)));
-        break;
-    }
-  } catch (err) {
-    logAssistantError("command execution failed", err);
-    // Ошибка исполнения (лимит, валидация сервера) — не валим чат, сообщаем.
-    throw new Error("Не удалось записать данные. Попробуйте ещё раз.");
-  }
-
-  return { logged, rejected: false };
-}
-
 export const chat = action({
   args: {
     messages: v.array(
@@ -543,13 +265,25 @@ export const chat = action({
 
     // Дневная квота (сообщения + токены) и анти-спам интервал. Проверяем ДО
     // вызова ИИ-провайдера: исчерпанный лимит не тратит кредиты Gemini/VLY.
+    // estimatedTokens — консервативная оценка «сколько мы собираемся сжечь»
+    // (вход: system + история + реплики; выход: полный бюджет ответа), чтобы
+    // дорогой разговор с длинной историей исчерпывал квоту раньше, чем 30
+    // коротких сообщений. Ошибка ConvexError приходит с кодом — превращаем
+    // в понятный ответ UI (limited: true). internalMutation доступен только
+    // через `internal` (public-фильтр `api` его скрывает — это и есть
+    // серверный барьер квоты).
     try {
       await ctx.runMutation(internal.assistantLimits.checkAndConsume, {
         userId,
-        estimatedTokens: estimateTokens(messages.map((m) => m.content)),
+        estimatedTokens: estimateTokens(
+          // Системный промпт уже учтён константой SYSTEM_PROMPT_ESTIMATE_TOKENS
+          // внутри estimateTokens — здесь только история диалога.
+          messages.map((m) => m.content),
+        ),
       });
     } catch (err) {
-      const data = (err as { data?: { code?: string; message?: string } }).data;
+      const data = (err as { data?: { code?: string; message?: string } })
+        .data;
       const code = data?.code;
       const message = data?.message;
       if (code === "assistant_limit_reached") {
@@ -578,10 +312,11 @@ export const chat = action({
           limited: true,
         };
       }
+      // Любая другая ошибка лимита — не блокируем чат, но и не списываем.
       console.error("[assistant] limit check failed:", err);
     }
 
-    // Компактный контекст: только необходимые данные (не вся БД).
+    // Собираем контекст из данных пользователя (только его собственные записи).
     const [profile, todaysMeals, customFoods, plan] = await Promise.all([
       ctx.runQuery(api.profiles.getMyProfile),
       ctx.runQuery(api.mealLog.getByDate, { date }),
@@ -599,17 +334,113 @@ export const chat = action({
       { calories: 0, protein: 0, carbs: 0, fat: 0 },
     );
 
-    const lastUserMessage =
-      [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const profileText = profile
+      ? `Возраст: ${profile.age}, пол: ${profile.gender === "male" ? "мужской" : "женский"}, рост: ${profile.heightCm} см, вес: ${profile.weightKg} кг${profile.targetWeightKg ? `, целевой вес: ${profile.targetWeightKg} кг` : ""}, активность: ${profile.activityLevel}, цель: ${profile.fitnessGoal}, опыт: ${profile.experienceLevel}.`
+      : "Профиль ещё не заполнен. Подскажи пользователю заполнить профиль на странице «Профиль», чтобы считать точные цели.";
 
-    const system = buildSystemPrompt({
-      date,
-      profile,
-      todayTotals,
-      plan,
-      customFoods: customFoods ?? [],
-      lastUserMessage,
-    });
+    const customFoodText =
+      customFoods && customFoods.length > 0
+        ? customFoods
+            .map(
+              (f) =>
+                `${f.name} — ${f.calories} ккал, Б ${f.protein} г, У ${f.carbs} г, Ж ${f.fat} г (на ${f.amount} ${f.unit})`,
+            )
+            .join("\n")
+        : "Нет своих продуктов.";
+
+    // План тренировок: антропометрическая адаптация + цикл прогрессии нагрузки.
+    const planText = plan
+      ? `${plan.name}${plan.adaptedFor ? ` · адаптация: ${plan.adaptedFor}` : ""}:\n` +
+        (plan.weeks && plan.weeks.length > 0
+          ? `Цикл прогрессии ${plan.weeks.length} недели: ` +
+            plan.weeks
+              .map(
+                (w) =>
+                  `${w.week}-я — ${w.label.replace(/^Неделя \d+ · /, "")}${w.weightNote ? ` (${w.weightNote})` : ""}`,
+              )
+              .join("; ") +
+            ".\n"
+          : "Базовый недельный план (без цикла прогрессии).\n") +
+        plan.days
+          .slice()
+          .sort((a, b) => a.day - b.day)
+          .map(
+            (d) =>
+              `День ${d.day + 1} («${d.focus}»): ${d.exercises
+                .map(
+                  (e) =>
+                    `${e.name} ${e.sets}×${e.reps}${e.priority ? " [приоритет для этого телосложения]" : ""}${e.weightNote ? ` (${e.weightNote})` : ""}`,
+                )
+                .join("; ")}` +
+              (d.notes && d.notes.length
+                ? ` — заметки: ${d.notes.join(" ")}`
+                : ""),
+          )
+          .join("\n")
+      : "План тренировок ещё не сгенерирован.";
+
+    const foodRef = FOOD_LIBRARY.map(
+      (f) =>
+        `${f.name} — ${f.calories} ккал, Б ${f.protein} г, У ${f.carbs} г, Ж ${f.fat} г (на 100 г)`,
+    ).join("\n");
+
+    const system = `Ты — «Кило», встроенный ИИ-ассистент фитнес-приложения для подсчёта калорий и тренировок.
+
+ОТВЕЧАЙ ТОЛЬКО НА РУССКОМ. Будь краток, по делу, с цифрами. НЕ размышляй вслух, не пиши промежуточных соображений и рассуждений — сразу выдавай финальный ответ пользователю. Ты видишь данные пользователя и можешь ВНОСИТЬ записи в его дневник — для этого возвращай специальный JSON-блок.
+
+ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
+${profileText}
+
+СВОИ ПРОДУКТЫ ПОЛЬЗОВАТЕЛЯ:
+${customFoodText}
+
+ПЛАН ТРЕНИРОВОК ПОЛЬЗОВАТЕЛЯ (сгенерирован с учётом его роста и телосложения, с циклом прогрессии нагрузки):
+${planText}
+
+Если пользователь спрашивает про тренировки или упражнения — объясняй, почему выбраны именно эти упражнения и какие замены сделаны под его рост/телосложение (смотри «заметки» в плане), и подсказывай прогрессию: на 2-й неделе те же веса и +1 повтор, на 3-й — +2.5 кг к рабочим весам, на 4-й — разгрузка (−20% веса). Не выдумывай упражнения, которых нет в плане.
+
+ЗАПИСАНО СЕГОДНЯ (${date}):
+- Калории: ${todayTotals.calories} ккал
+- Белки: ${todayTotals.protein} г, Углеводы: ${todayTotals.carbs} г, Жиры: ${todayTotals.fat} г
+
+СПРАВОЧНИК ПРОДУКТОВ (макросы на 100 г, используй их для расчёта КБЖУ):
+${foodRef}
+
+КАК ВНОСИТЬ ЗАПИСИ: когда пользователь сообщает, что съел или выпил, выведи JSON-блок, а после него — короткое подтверждение текстом на русском (например: «Записал: 500 г шашлыка — 950 ккал»).
+
+JSON-блок всегда начинай с <<<LOG>>> и ОБЯЗАТЕЛЬНО полностью закрывай <<<END>>> — никогда не обрывай его на середине:
+
+<<<LOG>>>
+{"action":"logMeal","mealType":"breakfast","items":[{"name":"Овсянка","quantity":50,"calories":195,"protein":8.5,"carbs":33,"fat":3.5}]}
+<<<END>>>
+
+Правила для logMeal:
+- mealType — одно из: breakfast, lunch, dinner, snack (завтрак/обед/ужин/перекус).
+- calories/protein/carbs/fat — ИТОГО за указанное количество (посчитай по справочнику, масштабируя на 100 г).
+- quantity — количество в граммах или штуках, число.
+- Если продукта нет в справочнике, возьми типичные значения из общих знаний.
+- Можно вернуть несколько items в одном блоке.
+
+Когда пользователь сообщает о тренировке (упражнения, подходы, повторы, вес):
+
+<<<LOG>>>
+{"action":"logWorkout","workoutName":"Силовая тренировка","exercises":[{"name":"Жим лёжа","sets":3,"reps":10,"weightKg":40}]}
+<<<END>>>
+
+Правила для logWorkout: name — название упражнения, sets — подходы, reps — повторения, weightKg — рабочий вес в кг (0, если только вес тела). workoutName — короткое название тренировки.
+
+Когда пользователь сообщает свой вес:
+
+<<<LOG>>>
+{"action":"logWeight","weightKg":72.5}
+<<<END>>>
+
+ВАЖНО:
+- ВСЕГДА используй сегодняшнюю дату ${date} для записей.
+- Отвечай только на русском языке, даже если пользователь пишет иначе.
+- Не выдумывай данные профиля. Если пользователь не заполнил профиль — предложи заполнить.
+- Если данных не хватает (например, неизвестно количество еды), спроси уточняющий вопрос вместо записи.
+- Никогда не выводи JSON-блок, если пользователь просто задаёт вопрос.`;
 
     const completion = await getCompletion(system, messages);
 
@@ -622,79 +453,82 @@ export const chat = action({
       };
     }
 
-    let text = completion.text;
-    let logged: { kind: string; label: string }[] = [];
+    const text = completion.text;
+    const logged: { kind: string; label: string }[] = [];
+    const logJson = extractLogBlock(text);
 
-    const customFoodsLike: CustomFoodLike[] = (customFoods ?? []).map((f) => ({
-      name: f.name,
-      amount: f.amount,
-      unit: f.unit,
-      calories: f.calories,
-      protein: f.protein,
-      carbs: f.carbs,
-      fat: f.fat,
-      _id: f._id,
-    }));
+    if (logJson) {
+      try {
+        const parsed = JSON.parse(logJson) as Record<string, unknown>;
+        const actionName = String(parsed.action ?? "");
 
-    // Исполнение команды: сбой записи (лимит, серверная валидация) не валит
-    // чат целиком — возвращаем понятный ответ с error=true.
-    let rejected: { reason: string } | null = null;
-    try {
-      const result = await handleCommandBlock(ctx, userId, text, { date }, customFoodsLike);
-      logged = result.logged;
-      if (result.rejected && result.rejectedReason) {
-        rejected = { reason: result.rejectedReason };
-      }
-    } catch (err) {
-      logAssistantError("command execution failed", err);
-      return {
-        reply: "Не удалось записать данные — попробуйте ещё раз.",
-        logged: [],
-        error: true,
-        limited: false,
-      };
-    }
-
-    // Один повтор запроса с уточнением, если модель вернула невалидную команду:
-    // дешёвый способ «починить» формат, не сжигая квоту повторно.
-    if (rejected) {
-      const retrySystem =
-        system +
-        "\n\nВАЖНО: предыдущий JSON-блок был отклонён строгой валидацией (" +
-        rejected.reason.slice(0, 200) +
-        "). Верни ТОЛЬКО валидную команду по схеме выше. Не добавляй КБЖУ в items. Если не уверен — не выводи блок вообще.";
-      const retry = await getCompletion(retrySystem, messages);
-      if (retry.success) {
-        try {
-          const retryResult = await handleCommandBlock(
-            ctx,
-            userId,
-            retry.text,
-            { date },
-            customFoodsLike,
-          );
-          if (!retryResult.rejected) {
-            logged = retryResult.logged;
-            text = retry.text;
-            await trackSafe(ctx, "assistant_command_corrected", {
-              reason: rejected.reason.slice(0, 100),
+        if (actionName === "logMeal") {
+          const items = Array.isArray(parsed.items) ? parsed.items : [];
+          if (items.length > 0) {
+            const mealType = toMealType(parsed.mealType);
+            const entries = items.map((item) => {
+              const obj = (item ?? {}) as Record<string, unknown>;
+              return {
+                date,
+                mealType: mealType as "breakfast" | "lunch" | "dinner" | "snack",
+                name: asString(obj.name, "Продукт"),
+                quantity: clampNum(obj.quantity, 1, 5000, 1),
+                calories: clampNum(obj.calories, 0, 5000, 0),
+                protein: clampNum(obj.protein, 0, 500, 0),
+                carbs: clampNum(obj.carbs, 0, 500, 0),
+                fat: clampNum(obj.fat, 0, 500, 0),
+              };
+            });
+            await ctx.runMutation(api.mealLog.addEntries, { entries });
+            const totalCal = entries.reduce((s, e) => s + e.calories, 0);
+            logged.push({
+              kind: "meals",
+              label: `В дневник добавлено: ${entries.length} поз. · ${totalCal} ккал`,
             });
           }
-        } catch (err) {
-          logAssistantError("retry execution failed", err);
         }
+
+        if (actionName === "logWorkout") {
+          const exercises = Array.isArray(parsed.exercises)
+            ? parsed.exercises
+            : [];
+          if (exercises.length > 0) {
+            const mapped = exercises.map((ex) => {
+              const obj = (ex ?? {}) as Record<string, unknown>;
+              return {
+                name: asString(obj.name, "Упражнение"),
+                sets: clampNum(obj.sets, 1, 50, 3),
+                reps: clampNum(obj.reps, 1, 500, 10),
+                weightKg: clampNum(obj.weightKg, 0, 1000, 0),
+              };
+            });
+            await ctx.runMutation(api.workouts.logWorkout, {
+              date,
+              workoutName: asString(parsed.workoutName, "Тренировка"),
+              exercises: mapped,
+            });
+            logged.push({
+              kind: "workout",
+              label: `Тренировка записана: ${mapped.length} упр.`,
+            });
+          }
+        }
+
+        if (actionName === "logWeight") {
+          const weightKg = clampNum(parsed.weightKg, 20, 500, 0);
+          if (weightKg > 0) {
+            await ctx.runMutation(api.weightEntries.addWeight, {
+              date,
+              weightKg,
+            });
+            logged.push({ kind: "weight", label: `Вес записан: ${weightKg} кг` });
+          }
+        }
+      } catch {
+        // Невалидный JSON от модели — просто показываем текст ответа.
       }
     }
 
-    await trackSafe(ctx, "assistant_message", {
-      hasCommand: logged.length > 0,
-    });
-
-    return {
-      reply: stripLogBlock(text),
-      logged,
-      error: false,
-      limited: false,
-    };
+    return { reply: stripLogBlock(text), logged, error: false, limited: false };
   },
 });

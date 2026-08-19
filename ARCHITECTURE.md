@@ -21,33 +21,45 @@ src/
 
 ## Feature folders (`src/features/`)
 
-**Конвенция:** новая фича, у которой есть и UI, и логика, и данные, кладётся
-в `src/features/<name>/`, а не размазывается по `components/` + `lib/`.
+**Конвенция:** фича, у которой есть и UI, и логика, и данные, живёт в
+`src/features/<name>/`, а не размазывается по `components/` + `lib/`.
 
-**Эталонный пример — `src/features/onboarding/`:**
-- `OnboardingWizard.tsx` — компонент-визард;
-- `onboarding.ts` — чистая логика (ключ localStorage, `shouldShowOnboarding`);
-- `OnboardingWizard.test.tsx` — тесты рядом.
+**Эталонные примеры (страницы, вынесенные из монолитов, v2.16):**
 
-Страницы (`pages/`) импортируют фичу как модуль:
-`import { OnboardingWizard } from "@/features/onboarding/OnboardingWizard"`.
+- `src/features/meals/` — «Питание» (бывший `pages/Meals`, ~2300 строк):
+  - `MealsPage.tsx` — тонкая страница-композиция (~120 строк);
+  - `hooks/useMealDiary.ts` — состояние: запросы Convex, диалоги, поиск,
+    перенос, фото, план; все обработчики;
+  - `components/` — по одному экрану/блоку на файл: MealDayHeader,
+    MealSummary, MacroProgress, WaterCard, RecentFoodsChips, CopyDayCard,
+    WeeklyMenu, MealList + MealEntry, CustomFoodsCard, FoodSearch,
+    PhotoMealDialog, AddMealDialog, PlanPreviewDialog;
+  - `lib/` — чистая математика/форматтеры без React: mealCalculations,
+    mealFormatting, portionScaling (покрыты юнит-тестами);
+  - `types.ts` — общие типы фичи.
+- `src/features/workouts/` — «Тренировки» (бывший `pages/Workouts`, ~1000 строк):
+  - `WorkoutPage.tsx` + `WorkoutMode.tsx` (полноэкранный режим тренировки);
+  - `hooks/useWorkoutPlan.ts` (генерация/пересборка плана, недели цикла,
+    режим тренировки) и `hooks/useWorkoutStats.ts` (тоннаж/рекорды);
+  - `components/` — WorkoutPlanCard, WorkoutDayCard, WorkoutStats,
+    WorkoutHistory, LogDetailsDialog;
+  - `lib/` — workoutFormatting (арт, weekStart, сводка изменений) и
+    workoutStats (агрегаты тоннажа/рекордов, покрыты юнит-тестами).
+
+**Правило композиции:** страницы в `pages/` — тонкие заглушки-реэкспорты
+(`export { default } from "@/features/meals/MealsPage"`): роутер и тесты
+импортируют их как раньше, а код живёт в фиче.
 
 **Что остаётся вне features:** по-настоящему общий код — доменные библиотеки
 в `lib/` (их используют несколько фич сразу) и переиспользуемые UI-примитивы
 в `components/`.
 
 **Правило роста:** как только у новой фичи появляется 2+ файла, заводите
-`src/features/<name>/`.
-
-**Уже мигрировали:**
-- `src/features/meals/` — `MealsPage.tsx` + `lib/` (mealUtils, photo-review);
-  страница `pages/Meals.tsx` — тонкая обёртка;
-- `src/features/workouts/` — `WorkoutsPage.tsx` + `lib/workoutUtils.ts`;
-- `src/features/assistant/` (бэкенд-модули, живут в `src/convex/assistant/`,
-  см. ниже).
-
-Бизнес-логика живёт в `lib/` фичи (чистые функции, покрытые тестами),
-страница остаётся тонкой.
+`src/features/<name>/`. Крупные страницы разбивайте при доработке связанной
+функциональности: каждый JSX-блок — в свой компонент, чистые вычисления —
+в `lib/` с тестами, состояние — в хуки. Оставшиеся монолиты (`pages/Overview`,
+`pages/Progress`, `pages/Profile`) мигрируют по мере необходимости — приоритет
+у фич, которые растут быстрее всего.
 
 ## Ролевая модель (SaaS-ready)
 
@@ -89,37 +101,6 @@ src/
   + мокнутый `getAuthUserId` — без Convex-рантайма.
 - Компонентные тесты страниц — через `@/test/convex-react-mock`.
 - Пороги покрытия: строки ≥ 80 %, ветви ≥ 75 % (`npm run test:coverage`).
-
-## AI-ассистент: команды, а не запись из «сырого» ответа
-
-`src/convex/assistant/` — модули без UI, тестируются без Convex-рантайма:
-
-- `commands.ts` — typed command model (`logMeal`/`logWorkout`/`logWeight`/
-  `logWater`) + строгая runtime-валидация: типы, диапазоны, длины, enums,
-  границы массивов, неизвестные поля. Поля КБЖУ в команде ЗАПРЕЩЕНЫ
-  (`forbidden_field`) — модель не может сделать макросы authoritative.
-- `nutrition.ts` — серверное разрешение продуктов (кураторская библиотека →
-  свои продукты → детерминированная оценка) и расчёт КБЖУ: `verified` /
-  `open_food_facts` / `internal` / `ai_estimate` + `isEstimate` для UI.
-- `prompt.ts` — сборка системного промпта: SYSTEM INSTRUCTIONS и USER_DATA
-  разделены; пользовательский текст всегда внутри `USER_DATA` с пометкой
-  «недоверенные данные» (защита от prompt injection). Модель получает
-  компактную сводку, а не всю БД.
-- `types.ts` — структурные типы документов (совместимы с `Doc<...>`).
-
-Путь записи: `USER → LLM → INTENT/COMMAND → STRICT VALIDATION → DOMAIN
-SERVICE → BUSINESS RULES → DATABASE MUTATION`. Невалидный ответ модели не
-изменяет БД и возвращает пользователю понятную ошибку.
-
-## Идемпотентность и ошибки
-
-- `src/convex/idempotency.ts` — `idempotencyKey` (userId+key, TTL 7 дней) для
-  критических мутаций записи (еда/вода/вес/тренировки, фото, Telegram):
-  повтор запроса не создаёт дубликат; при сбое тела ключ откатывается, чтобы
-  честный ретрай прошёл. Таблица `idempotencyKeys` в схеме.
-- `src/convex/errors.ts` — единая таксономия ошибок (`AUTH_REQUIRED`,
-  `RATE_LIMITED`, `VALIDATION_FAILED`, `FOOD_NOT_FOUND`, `AI_INVALID_OUTPUT`,
-  `DUPLICATE_REQUEST`, …) — ConvexError с кодом вместо произвольных строк.
 
 ## Безопасность
 

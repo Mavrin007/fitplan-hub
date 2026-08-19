@@ -104,47 +104,4 @@ describe("Overview · prefers-reduced-motion", () => {
     expect(header).not.toBeNull();
     expect(header!.style.transform).toBe("none");
   });
-
-  it("при matches=true CountUp-числа появляются сразу финальными (без докрутки)", async () => {
-    stubPrefersReducedMotion();
-    setQuery(api.profiles.getMyProfile, undefined, profile);
-    setQuery(
-      api.mealLog.getByDate,
-      { date: todayKey() },
-      [
-        {
-          _id: "e1",
-          userId: "u1",
-          createdAt: 0,
-          date: todayKey(),
-          mealType: "lunch",
-          name: "Обед",
-          quantity: 1,
-          calories: 1245,
-          protein: 100,
-          carbs: 150,
-          fat: 30,
-        },
-      ],
-    );
-    setQuery(api.weightEntries.listMyWeights, { limit: 90 }, []);
-    setQuery(api.workouts.listLogs, { limit: 200 }, []);
-    setQuery(api.water.getByDate, { date: todayKey() }, waterEntry(500));
-    setQuery(api.activity.getActivityDays, activityRange(), []);
-
-    render(
-      <MemoryRouter>
-        <MotionConfig reducedMotion="user">
-          <Overview />
-        </MotionConfig>
-      </MemoryRouter>,
-    );
-
-    // KILO v1.2: CountUp в «Оценке дня» показывает todayScore.score (0–100),
-    // а не калории. При фикстуре (обед 1245 ккал, вода 500 мл из 2750,
-    // белок 100 из 152, без тренировок) score = 31. Сразу после рендера
-    // (без ожидания 800 мс докрутки) значение уже финальное: при reduced
-    // motion CountUp ставит итог синхронно, а не анимирует от 0.
-    expect(screen.getByText("31")).toBeInTheDocument();
-  });
 });

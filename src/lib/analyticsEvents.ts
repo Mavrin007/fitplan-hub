@@ -13,14 +13,11 @@
  * реальными платежами.
  */
 export const EVENT_NAMES = [
-  // AUTH / LANDING
-  "landing_view",
+  // AUTH
   "signup_started",
   "signup_completed",
   "guest_started",
-  "guest_created",
   "account_linked",
-  "email_attached",
   // ONBOARDING
   "onboarding_started",
   "onboarding_completed",
@@ -31,26 +28,15 @@ export const EVENT_NAMES = [
   // WORKOUT
   "workout_started",
   "workout_completed",
-  "workout_plan_generated",
   // NUTRITION
   "meal_added",
   "food_search",
-  "first_meal_logged",
-  "first_workout_completed",
   "photo_analysis_started",
-  "photo_analysis",
   "photo_analysis_completed",
-  "photo_analysis_confirmed",
-  "photo_analysis_edited",
-  "photo_analysis_rejected",
   // AI
   "ai_opened",
   "ai_message_sent",
   "ai_quick_action_used",
-  "assistant_message",
-  "assistant_command_success",
-  "assistant_command_rejected",
-  "assistant_command_corrected",
   // WEEKLY
   "weekly_review_opened",
   "next_week_plan_viewed",

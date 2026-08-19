@@ -54,6 +54,7 @@ export interface ConvexQueryChain {
   eq: (f: string, val: unknown) => ConvexQueryChain;
   gte: (f: string, val: unknown) => ConvexQueryChain;
   lte: (f: string, val: unknown) => ConvexQueryChain;
+  lt: (f: string, val: unknown) => ConvexQueryChain;
   order: (dir: "asc" | "desc") => ConvexQueryChain;
   filter: (fn: (q: ConvexFilterQ) => boolean) => ConvexQueryChain;
   first: () => ConvexDoc | undefined;
@@ -67,7 +68,7 @@ export interface ConvexDbMock {
   query: (table: string) => ConvexQueryChain;
   get: (id: string) => ConvexDoc | null;
   patch: (id: string, patch: Record<string, unknown>) => void;
-  insert: (table: string, doc: Record<string, unknown>) => string;
+  insert: (table: string, doc: Record<string, unknown>, id?: string) => string;
   delete: (id: string) => void;
 }
 
@@ -100,8 +101,7 @@ const DEFAULT_TABLES = [
   "telegramAccounts", // привязки Telegram (telegram.ts)
   "linkCodes", // одноразовые коды привязки Telegram
   "telegramStates", // состояние диалога бота
-  "telegramProcessedUpdates", // replay protection вебхука (telegram.ts)
-  "idempotencyKeys", // идемпотентность записи (idempotency.ts)
+  "telegramSeenUpdates", // дедупликация вебхук-апдейтов (update_id)
 ];
 
 export function makeConvexDb(
@@ -118,7 +118,7 @@ export function makeConvexDb(
   const db: ConvexDbMock = {
     query(table: string) {
       const filters: {
-        op: "eq" | "gte" | "lte";
+        op: "eq" | "gte" | "lte" | "lt";
         f: string;
         val: unknown;
       }[] = [];
@@ -129,7 +129,9 @@ export function makeConvexDb(
             ? d[f] === val
             : op === "gte"
               ? String(d[f]) >= String(val)
-              : String(d[f]) <= String(val),
+              : op === "lt"
+                ? String(d[f]) < String(val)
+                : String(d[f]) <= String(val),
         );
 
       let filterFn: ((q: ConvexFilterQ) => boolean) | null = null;
@@ -157,6 +159,10 @@ export function makeConvexDb(
         },
         lte(f, val) {
           filters.push({ op: "lte", f, val });
+          return q;
+        },
+        lt(f, val) {
+          filters.push({ op: "lt", f, val });
           return q;
         },
         order(dir) {
@@ -228,10 +234,20 @@ export function makeConvexDb(
       }
       throw new Error(`patch: нет документа ${id}`);
     },
-    insert(table, doc) {
-      const id = `${table}:${++seq}`;
-      store[table].push({ _id: id, _creationTime: 0, ...doc } as ConvexDoc);
-      return id;
+    insert(table, doc, id) {
+      if (id) {
+        const existing = store[table].find((d) => d._id === id);
+        if (existing) {
+          // Реальный Convex бросает ошибку при вставке с существующим id —
+          // повторяем (используется для дедупликации webhook-апдейтов).
+          throw new Error(`insert: документ с id ${id} уже существует`);
+        }
+        store[table].push({ _id: id, _creationTime: 0, ...doc } as ConvexDoc);
+        return id;
+      }
+      const id2 = `${table}:${++seq}`;
+      store[table].push({ _id: id2, _creationTime: 0, ...doc } as ConvexDoc);
+      return id2;
     },
     delete(id) {
       for (const t of Object.keys(store)) {

@@ -1,6 +1,6 @@
 /**
- * Тонкая страница-обёртка: реализация в src/features/workouts/WorkoutsPage.tsx.
- * Оставлена для совместимости роутера (main.tsx) и тестов, импортирующих
- * страницу из src/pages.
+ * Страница «Тренировки» — тонкая заглушка: реализация переехала в
+ * src/features/workouts (WorkoutPage.tsx). Импорты (роутер, тесты) не меняются.
  */
-export { default } from "@/features/workouts/WorkoutsPage";
+
+export { default } from "@/features/workouts/WorkoutPage";

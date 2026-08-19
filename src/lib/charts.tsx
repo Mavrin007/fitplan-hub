@@ -162,36 +162,14 @@ function useChartWidth(
   return { ref, width };
 }
 
-/**
- * Мягкое появление графика (opacity) — соответствует lineAnim/barAnim.
- * При prefers-reduced-motion график рендерится сразу видимым: появление
- * «из ниоткуда» — неинформативное движение, его отключаем наравне с
- * декоративными анимациями (см. index.css и MotionConfig).
- */
+/** Мягкое появление графика (opacity) — соответствует lineAnim/barAnim. */
 function useFadeIn(beginMs: number): number {
   const [visible, setVisible] = useState(false);
-  const reduced = usePrefersReducedMotion();
   useEffect(() => {
-    if (reduced) return;
     const t = window.setTimeout(() => setVisible(true), beginMs);
     return () => window.clearTimeout(t);
-  }, [beginMs, reduced]);
-  return reduced || visible ? 1 : 0;
-}
-
-/** Системная настройка «уменьшить движение» (без framer-motion). */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(
-    () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mq) return;
-    const onChange = () => setReduced(mq.matches);
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
-  }, []);
-  return reduced;
+  }, [beginMs]);
+  return visible ? 1 : 0;
 }
 
 const AXIS_FONT = axisProps.tick.fontSize;

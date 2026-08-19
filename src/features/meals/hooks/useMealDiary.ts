@@ -21,7 +21,6 @@ import {
   generateWeeklyMealPlan,
   type MealType,
 } from "@/lib/mealLibrary";
-import { resolveOrEstimate } from "@/convex/assistant/nutrition";
 import { MEAL_TYPE_LABELS } from "@/lib/i18n";
 import {
   computeTargets,
@@ -399,9 +398,9 @@ export function useMealDiary(): MealDiary {
     reader.readAsDataURL(file);
   };
 
-  /** Распознать блюдо на фото: результат добавляется в дневник
-   *  выбранного приёма. КБЖУ вычисляются приложением через resolveOrEstimate,
-   *  а не берутся от модели. Распознавание и сохранение — отдельные try. */
+  /** Распознать блюдо на фото: результат сразу добавляется в дневник
+   *  выбранного приёма. Распознавание и сохранение — отдельные try, чтобы
+   *  ошибка дневника не маскировалась под «не распознал фото». */
   const handleAnalyzePhoto = async () => {
     if (!dialogMeal || !photoDataUrl) return;
     track("photo_analysis_started");
@@ -432,23 +431,19 @@ export function useMealDiary(): MealDiary {
       return;
     }
     try {
-      // КБЖУ пересчитываются приложением (resolveOrEstimate),
-      // а не копируются из AI-ответа — это защита от authoritative nutrition bypass.
-      const resolved = items.map((i) => {
-        const macros = resolveOrEstimate(i.name, []);
-        return {
+      await addEntries({
+        entries: items.map((i) => ({
           date: todayKey(),
           mealType: dialogMeal,
           name: i.name,
           quantity: i.quantity,
-          calories: macros.calories,
-          protein: macros.protein,
-          carbs: macros.carbs,
-          fat: macros.fat,
-        };
+          calories: i.calories,
+          protein: i.protein,
+          carbs: i.carbs,
+          fat: i.fat,
+        })),
       });
-      await addEntries({ entries: resolved });
-      toast.success(`Распознано: ${items.length} ${pluralRecords(items.length)} — добавлено в дневник (оценка)`);
+      toast.success(`Распознано: ${items.length} ${pluralRecords(items.length)} — добавлено в дневник`);
       track("photo_analysis_completed", { items: items.length });
       track("meal_added", { count: items.length, source: "photo" });
       closeDialog();

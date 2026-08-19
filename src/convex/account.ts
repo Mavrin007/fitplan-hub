@@ -93,21 +93,11 @@ export const deleteMyAccount = mutation({
           name: string,
           fn: (q: { eq(f: string, v: unknown): unknown }) => void,
         ): {
-          collect(): Promise<Array<{ _id: string; chatId?: number }>>;
+          collect(): Promise<Array<{ _id: string }>>;
         };
       };
       delete(id: unknown): void;
     };
-
-    // chatId из Telegram-привязок нужны ДО удаления привязок — по ним
-    // чистим состояния диалога бота.
-    const tgAccounts = await db
-      .query("telegramAccounts")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
-    const tgChatIds = tgAccounts
-      .map((acc) => acc.chatId)
-      .filter((c): c is number => typeof c === "number");
 
     // Прикладные таблицы (у всех есть userId + индекс по нему): читаем по
     // индексу, а не фильтром-сканом, чтобы удаление аккаунта с большим
@@ -121,9 +111,6 @@ export const deleteMyAccount = mutation({
       ["workoutPlans", "by_user"],
       ["assistantLimits", "by_user_day"],
       ["profiles", "by_user"],
-      ["telegramAccounts", "by_user"], // привязка Telegram (GDPR: удаляем)
-      ["linkCodes", "by_user"], // одноразовые коды привязки
-      ["idempotencyKeys", "by_user_key"], // идемпотентность записи
     ] as const;
     for (const [table, index] of appTables) {
       const rows = await db
@@ -134,29 +121,6 @@ export const deleteMyAccount = mutation({
         await db.delete(row._id);
       }
     }
-
-    // Состояния диалога бота (ключ — chatId, а не userId): удаляем по
-    // chatId из привязок, собранных ДО удаления.
-    for (const chatId of tgChatIds) {
-      const states = await db
-        .query("telegramStates")
-        .withIndex("by_chat", (q) => q.eq("chatId", chatId))
-        .collect();
-      for (const st of states) await db.delete(st._id);
-    }
-
-    // Продуктовые события аналитики: персональные данные пользователя —
-    // удаляем полностью (GDPR «право на забвение»). Агрегированные метрики
-    // retention считаются по оставшимся событиям других пользователей.
-    const events = await db
-      .query("events")
-      .withIndex("by_user_ts", (q) => q.eq("userId", userId))
-      .collect();
-    for (const row of events) await db.delete(row._id);
-
-    // Telegram replay-таблица хранит updateId без userId — её строки не
-    // привязаны к аккаунту и протухают сами (30-дневная чистка), отдельное
-    // удаление не требуется.
 
     // Auth-таблицы (имена из authTables @convex-dev/auth): сессии и
     // привязанные аккаунты провайдеров — оба с индексом по userId.

@@ -7,16 +7,12 @@ import { internal } from "./_generated/api";
 import { geminiGenerateContent } from "../lib/geminiClient";
 import {
   MAX_OUTPUT_TOKENS,
+  asString,
+  clampNum,
   describeError,
   extractLogBlock,
-  stripLogBlock,
 } from "../lib/assistantCore";
 import { RATE_LIMITS } from "./rateLimit";
-import {
-  FORBIDDEN_NUTRITION_FIELDS,
-  LIMITS,
-  parseCommandJson,
-} from "./assistant/commands";
 
 /** Модель с поддержкой Vision (фото тарелки). */
 const PHOTO_MODEL = process.env.GEMINI_PHOTO_MODEL ?? "gemini-flash-latest";
@@ -25,32 +21,30 @@ const PHOTO_MODEL = process.env.GEMINI_PHOTO_MODEL ?? "gemini-flash-latest";
  *  бюджет токенов и долго едут — обрезаем до разумного. */
 const MAX_IMAGE_BASE64 = 2_500_000;
 
-/**
- * Системный промпт распознавания: команда logMeal БЕЗ КБЖУ — питательная
- * ценность вычисляется приложением (assistant/nutrition.ts) и помечается
- * как ai_estimate. Модель не должна передавать калории/БЖУ: валидатор
- * отклонит такие поля.
- */
+/** Системный промпт распознавания: JSON-блок logMeal, как у чат-ассистента,
+ *  чтобы результат ложился в тот же парсер (extractLogBlock/clampNum). */
 const VISION_SYSTEM = `Ты — «Кило», помощник по трекингу питания. Посмотри на фото тарелки с едой и определи, что на ней.
 
 Верни ТОЛЬКО JSON-блок (без лишнего текста):
 
 <<<LOG>>>
-{"action":"logMeal","mealType":"breakfast","items":[{"name":"Овсянка","quantity":250}]}
+{"action":"logMeal","mealType":"breakfast","items":[{"name":"Овсянка","quantity":250,"calories":340,"protein":12,"carbs":50,"fat":7}]}
 <<<END>>>
 
 Правила:
 - items — одно или несколько блюд/продуктов, которые реально видно на фото.
-- quantity — количество в граммах (или штуках для целых продуктов: яйцо = 1 шт, банан = 1 шт).
-- НЕ добавляй поля calories/protein/carbs/fat в items — КБЖУ вычислит приложение.
+- quantity — количество в граммах (или штуках для целых продуктов: яйцо = 1 шт).
+- calories/protein/carbs/fat — ИТОГО за указанное количество, а не на 100 г.
 - Не выдумывай ингредиенты, которых не видно. Если еды на фото не видно или неясно — верни пустой блок: {"action":"logMeal","items":[]}.
 - mealType — одно из: breakfast, lunch, dinner, snack (догадайся по составу).`;
 
 export interface RecognizedItem {
   name: string;
   quantity: number;
-  /** Всегда ai_estimate для фото-распознавания — показывается UI как оценка. */
-  source: "ai_estimate";
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
 }
 
 /** Разбирает «data:image/png;base64,....» на mime и base64. */
@@ -64,15 +58,8 @@ function parseDataUrl(dataUrl: string): { mimeType: string; data: string } | nul
   return { mimeType, data };
 }
 
-/**
- * Распознавание еды по фото (Gemini Vision). Лимит: RATE_LIMITS.photo —
- * дорогой внешний вызов, не должен дёргаться без ограничений.
- *
- * Результат — ВСЕГДА оценка (ai_estimate): КБЖУ пересчитываются приложением
- * по названию продукта (assistant/nutrition.ts) и помечаются как
- * приблизительные. UI не добавляет распознанное в дневник автоматически
- * без подтверждения пользователя.
- */
+/** Распознавание еды по фото (Gemini Vision). Лимит: RATE_LIMITS.photo —
+ *  дорогой внешний вызов, не должен дёргаться без ограничений. */
 export const analyzeMealPhoto = action({
   args: { imageDataUrl: v.string() },
   handler: async (
@@ -127,33 +114,32 @@ export const analyzeMealPhoto = action({
       throw new Error(describeError(result.error ?? "unknown error"));
     }
 
-    const raw = stripLogBlock(result.text);
-    const block = extractLogBlock(result.text);
+    const raw = result.text;
+    const block = extractLogBlock(raw);
     const items: RecognizedItem[] = [];
     if (block) {
-      const parsed = parseCommandJson(block);
-      if (parsed.ok && parsed.command.action === "logMeal") {
-        for (const item of parsed.command.items) {
-          // Санитарные пределы уже применены валидатором; здесь только
-          // собираем результат (КБЖУ не передаём — их вычислит приложение).
+      try {
+        const parsed = JSON.parse(block) as Record<string, unknown>;
+        const list = Array.isArray(parsed.items) ? parsed.items : [];
+        for (const item of list) {
+          const obj = (item ?? {}) as Record<string, unknown>;
+          const name = asString(obj.name, "");
+          if (!name) continue;
           items.push({
-            name: item.name.slice(0, LIMITS.maxNameLen),
-            quantity: item.quantity,
-            source: "ai_estimate",
+            name,
+            quantity: clampNum(obj.quantity, 1, 5000, 1),
+            calories: clampNum(obj.calories, 0, 5000, 0),
+            protein: clampNum(obj.protein, 0, 500, 0),
+            carbs: clampNum(obj.carbs, 0, 500, 0),
+            fat: clampNum(obj.fat, 0, 500, 0),
           });
         }
-      } else if (!parsed.ok && parsed.code === "forbidden_field") {
-        // Модель попыталась передать КБЖУ — это нарушение границы.
-        throw new Error(
-          "Распознавание вернуло запрещённые поля — попробуйте ещё раз.",
-        );
+      } catch {
+        // Битый JSON от модели — возвращаем пустой список, UI покажет
+        // «не удалось распознать» вместо падения.
       }
-      // Пустой блок {"action":"logMeal","items":[]} валиден — items остаётся [].
     }
 
     return { items, raw };
   },
 });
-
-/** Экспорт для тестов: какие поля модель не может передавать. */
-export { FORBIDDEN_NUTRITION_FIELDS };
