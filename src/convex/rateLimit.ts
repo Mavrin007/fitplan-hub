@@ -39,6 +39,9 @@ export const RATE_LIMITS = {
   photo: { limit: 5, windowMs: 3_600_000 },
   /** Запрос кода привязки Telegram: 5 кодов в минуту — перебор. */
   telegramLink: { limit: 5, windowMs: 60_000 },
+  /** Попытка ввода кода привязки: 10 в минуту (код одноразовый, но
+   *  защита от массированного перебора по Telegram id). */
+  telegramLinkAttempt: { limit: 10, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitSpec>;
 
 /** Строка события лимита: только поля, нужные для подсчёта. */

@@ -81,11 +81,20 @@ function mealTypeForHour(
 /** Без неоднозначных символов: 0/O, 1/I/L. */
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_TTL_MS = 10 * 60_000;
+const CODE_LENGTH = 8;
 
+/**
+ * Генерация криптографически стойкого кода привязки.
+ * Использует crypto.getRandomValues (доступен в Node ≥ 19, Cloudflare Workers,
+ * Convex runtime). Math.random() НЕ используется — он не защищает от
+ * перебора (predictable PRNG).
+ */
 function generateLinkCode(): string {
+  const bytes = new Uint8Array(CODE_LENGTH);
+  crypto.getRandomValues(bytes);
   let out = "";
-  for (let i = 0; i < 6; i++) {
-    out += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  for (let i = 0; i < CODE_LENGTH; i++) {
+    out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
   }
   return out;
 }
@@ -187,6 +196,12 @@ export const linkByCode = mutation({
     chatId: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Rate-limit: 10 попыток кода в минуту на Telegram id.
+    await consumeRateLimit(
+      ctx,
+      `linkAttempt:${args.telegramUserId}`,
+      RATE_LIMITS.telegramLinkAttempt,
+    );
     const code = args.code.trim().toUpperCase();
     const codeDoc = await ctx.db
       .query("linkCodes")
@@ -706,6 +721,15 @@ export const handleUpdate = httpAction(async (ctx, request) => {
     return new Response("TELEGRAM_BOT_TOKEN не задан", { status: 500 });
   }
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  // Production: отсутствие секрета — ошибка конфигурации, не молчаливый
+  // пропуск. Без этого любой может слать фальшивые апдейты на /telegram-webhook.
+  // Определяем production по hostname URL запроса (*.convex.site ≠ localhost).
+  const host = new URL(request.url).hostname;
+  const isProduction = host.endsWith(".convex.site");
+  if (isProduction && !secret) {
+    console.error("TELEGRAM_WEBHOOK_SECRET не задан — вебхук отклоняет запросы в production.");
+    return new Response("Webhook secret not configured", { status: 500 });
+  }
   if (
     secret &&
     request.headers.get("x-telegram-bot-api-secret-token") !== secret

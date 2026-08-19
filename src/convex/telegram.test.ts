@@ -211,10 +211,10 @@ describe("requestLinkCode", () => {
     await expect(runRequestLinkCode({ db }, {})).rejects.toThrow();
   });
 
-  it("генерирует код из 6 символов и сохраняет его", async () => {
+  it("генерирует код из 8 символов (crypto-secure) и сохраняет его", async () => {
     const { db, store } = makeConvexDb();
     const res = await runRequestLinkCode({ db }, {});
-    expect(res.code).toMatch(/^[A-Z2-9]{6}$/);
+    expect(res.code).toMatch(/^[A-Z2-9]{8}$/);
     expect(store.linkCodes).toHaveLength(1);
     expect(store.linkCodes[0]).toMatchObject({
       userId: "user-1",

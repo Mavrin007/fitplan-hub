@@ -34,6 +34,9 @@ export interface TelegramWebAppApi {
   ready(): void;
   expand(): void;
   disableVerticalSwipes(): void;
+  enableVerticalSwipes(): void;
+  /** Доступен с Bot API 6.1+. */
+  isVersionAtLeast(version: string): boolean;
   setHeaderColor(color: string): void;
   colorScheme: "light" | "dark";
   isExpanded: boolean;
@@ -85,6 +88,42 @@ export function isTelegramWebApp(): boolean {
   );
 }
 
+/** Минимальная версия Telegram WebApp API, поддерживающая
+ *  enableVerticalSwipes / disableVerticalSwipes.
+ *  Источник: https://core.telegram.org/bots/webapps — Bot API 7.7 (July 7, 2024). */
+const VERTICAL_SWIPES_MIN_VERSION = "7.7";
+
+/** Безопасно включает или отключает вертикальные свайпы в Telegram Mini App.
+ *
+ *  Feature detection без try/catch:
+ *  1. Telegram.WebApp существует?
+ *  2. isVersionAtLeast доступен? (Bot API 6.1+)
+ *  3. Версия >= 7.7?
+ *  4. disableVerticalSwipes / enableVerticalSwipes существует как функция?
+ *
+ *  Если хотя бы один пункт не пройден — ничего не делаем (старые
+ *  клиенты просто сохраняют стандартное поведение свайпов).
+ *
+ *  Вызывается из initTelegramWebApp() и может вызываться из任何
+ *  компонента, которому нужно временно заблокировать/разблокировать
+ *  свайпы (например, при открытии диалога). */
+export function setTelegramVerticalSwipes(enabled: boolean): void {
+  const app = telegramWebApp();
+  if (!app) return;
+
+  // isVersionAtLeast появился в Bot API 6.1 — без него проверка версии
+  // невозможна, и безопаснее не вызывать метод (старый клиент).
+  if (typeof app.isVersionAtLeast !== "function") return;
+  if (!app.isVersionAtLeast(VERTICAL_SWIPES_MIN_VERSION)) return;
+
+  const method = enabled
+    ? app.enableVerticalSwipes
+    : app.disableVerticalSwipes;
+  if (typeof method === "function") {
+    method.call(app);
+  }
+}
+
 /** Инициализация: подтвердить показ, развернуть на весь экран, запретить
  *  вертикальный свайп (выход из приложения случайным жестом). Вызывается
  *  один раз при старте приложения (src/main.tsx). */
@@ -93,11 +132,7 @@ export function initTelegramWebApp(): void {
   if (!app) return;
   app.ready();
   app.expand();
-  try {
-    app.disableVerticalSwipes();
-  } catch {
-    // disableVerticalSwipes появился в поздних версиях — не критично.
-  }
+  setTelegramVerticalSwipes(false);
 }
 
 /** Telegram id текущего пользователя (null вне Telegram или без авторизации). */
