@@ -96,11 +96,24 @@ function widgetDataCheckString(fields: Record<string, unknown>): string {
     .join("\n");
 }
 
-/** initData без параметра hash (он всегда последний): сохраняем порядок. */
+/** data_check_string для Mini App initData по official Telegram Bot API.
+ *
+ * Алгоритм (идентичен Login Widget, за исключением секрета):
+ * 1. Парсим initData как URL query string (URLSearchParams декодирует
+ *    значения автоматически);
+ * 2. Удаляем параметр hash;
+ * 3. Сортируем оставшиеся параметры по имени ключа;
+ * 4. Собираем «key=value» через "\n".
+ *
+ * Источник: https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
+ * Эталонная реализация: aiogram.utils.web_app.check_webapp_signature */
 function webappDataCheckString(initData: string): string {
-  return initData
-    .replace(/(^|&)hash=[^&]*/, "")
-    .replace(/^&/, "");
+  const params = new URLSearchParams(initData);
+  params.delete("hash");
+  return Array.from(params.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
 }
 
 function asString(value: unknown): string | null {

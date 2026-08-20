@@ -76,17 +76,27 @@ async function webappFixture(
     username: "anya_test",
     ...overrides,
   });
-  // Порядок параметров важен: initData без hash — это ровно data_check_string.
+  // data_check_string для Mini App: отсортированные key=value через "\n",
+  // как в aiogram.utils.web_app.check_webapp_signature.
   const params = new URLSearchParams();
   params.set("auth_date", String(authDate));
   params.set("query_id", "AAHdF6IQAAAAAN3rph8vVc8k");
   params.set("user", user);
-  const dataCheckString = params.toString();
+  const dataCheckString = Array.from(params.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
   // Секрет Mini App — HMAC(key="WebAppData", message=bot_token),
   // по official Telegram Bot API docs. НЕ перепутать порядок аргументов!
   const secretKey = await hmacRaw(encoder.encode("WebAppData"), BOT_TOKEN);
   const hash = await hmacHex(secretKey, dataCheckString);
-  return { initData: `${dataCheckString}&hash=${hash}`, authDate };
+  // initData — URL-encoded query string (от Telegram), hash附加ляется в конце.
+  const initData = new URLSearchParams();
+  initData.set("auth_date", String(authDate));
+  initData.set("query_id", "AAHdF6IQAAAAAN3rph8vVc8k");
+  initData.set("user", user);
+  initData.set("hash", hash);
+  return { initData: initData.toString(), authDate };
 }
 
 describe("verifyTelegramAuth — Login Widget (oauth.telegram.org)", () => {
