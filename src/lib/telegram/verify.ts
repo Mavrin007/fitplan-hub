@@ -198,8 +198,11 @@ export async function verifyTelegramAuth(
   // Сравнение без учёта регистра: Telegram отдаёт hex в нижнем регистре, но
   // не полагаемся на это.
   if (expected.toLowerCase() !== hash.toLowerCase()) {
+    const keys = dataCheckString
+      .split("\n")
+      .map((l) => l.split("=")[0]);
     throw new Error(
-      `TG_AUTH_INVALID_SIGNATURE: dataCheckString.length=${dataCheckString.length}, source=${source}.`,
+      `TG_AUTH_INVALID_SIGNATURE: v2 keys=[${keys.join(",")}] dcsLen=${dataCheckString.length} tokenLen=${botToken.length} source=${source}.`,
     );
   }
 

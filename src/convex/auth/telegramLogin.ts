@@ -12,6 +12,8 @@
  *     Telegram (полноценный «вход через Telegram» для новых пользователей);
  *   - не привязан и create === false (автовход Mini App) → ошибка с понятным
  *     текстом, аккаунт не создаётся молча.
+ *
+ * v2 — HMAC verification with diagnostic error codes.
  */
 
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
