@@ -51,7 +51,7 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { RATE_LIMITS, consumeRateLimit } from "./rateLimit";
 import { ROLES } from "./schema";
 import { assertRange } from "./validation";
@@ -186,8 +186,16 @@ export const unlink = mutation({
   },
 });
 
-/** Привязка по коду: вызывается ботом (без пользовательской сессии). */
-export const linkByCode = mutation({
+/** Привязка по коду: вызывается ботом (без пользовательской сессии).
+ * internalMutation — не доступна клиенту (защита от IDOR).
+ *
+ * OCC-гарантия: read by_telegram(telegramUserId) входит в read set.
+ * Если две мутации параллельно привязывают один telegramUserId,
+ * вторая получает CONFLICT и RETRY; при retry read увидит запись
+ * первой мутации. Код одноразовый: его удаление тоже в read set —
+ * повторный read кода после consumption → "Код не найден".
+ * Источник: https://docs.convex.dev/database/advanced/occ */
+export const linkByCode = internalMutation({
   args: {
     code: v.string(),
     telegramUserId: v.number(),
@@ -274,8 +282,25 @@ export const findByTelegram = internalQuery({
 
 /**
  * Internal: создание аккаунта КИЛО по Telegram (первый вход). Подпись уже
- * проверена в authorize провайдера; здесь — только запись. Повторная проверка
- * by_telegram защищает от гонки двух одновременных входов одного telegram id.
+ * проверена в authorize провайдера; здесь — только запись.
+ *
+ * Гарантия уникальности (OCC): Convex использует Optimistic Concurrency
+ * Control с полной сериализуемостью (serializability). Каждая мутация
+ * записывает «read set» — все прочитанные документы и индексные диапазоны.
+ * При commit проверяется, что ни один элемент read set не был изменён
+ * другой мутацией. Если два входа для одного telegramUserId выполняются
+ * параллельно:
+ *
+ *   Mutation A: read by_telegram(123) → null → insert → commit ✅
+ *   Mutation B: read by_telegram(123) → null → insert → CONFLICT → RETRY
+ *   Mutation B (retry): read by_telegram(123) → видит запись A → existing ✅
+ *
+ * Источник: https://docs.convex.dev/database/advanced/occ
+ * "The implementation of optimistic concurrency control in Convex instead
+ *  provides true serializability."
+ *
+ * Код без try-catch: OCC обрабатывает гонки через retry, а реальные
+ * ошибки (валидация схемы, диск) должны всплыть наружу, а не маскироваться.
  */
 export const createAccountFromTelegram = internalMutation({
   args: {
@@ -284,6 +309,7 @@ export const createAccountFromTelegram = internalMutation({
     username: v.optional(v.string()),
   },
   handler: async (ctx, { telegramUserId, firstName, username }) => {
+    // Первый read входит в read set этой мутации → OCC отследит конфликт.
     const existing = await ctx.db
       .query("telegramAccounts")
       .withIndex("by_telegram", (q) => q.eq("telegramUserId", telegramUserId))
@@ -341,7 +367,7 @@ function makeBotDeps(ctx: MutationCtx): BotDeps {
 
     async linkByCode(code, meta: TgUser & { chatId?: number }) {
       try {
-        await ctx.runMutation(api.telegram.linkByCode, {
+        await ctx.runMutation(internal.telegram.linkByCode, {
           code,
           telegramUserId: meta.id,
           username: meta.username,
@@ -692,6 +718,21 @@ function extractChatId(raw: unknown): number | null {
   return typeof chat?.id === "number" ? (chat.id as number) : null;
 }
 
+/** Constant-time string comparison — timing-attack mitigation.
+ *  В Convex runtime (не Node.js) нет crypto.timingSafeEqual, поэтому
+ *  реализуем вручную: XOR каждого байта без раннего выхода. */
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.length !== bufB.length) return false;
+  let diff = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    diff |= bufA[i] ^ bufB[i];
+  }
+  return diff === 0;
+}
+
 /**
  * GET /telegram-status — диагностика интеграции без секретов:
  * задан ли токен (только префикс), принимает ли его Bot API (getMe),
@@ -702,7 +743,36 @@ function extractChatId(raw: unknown): number | null {
  * который можно открыть в браузере или curl'ом.
  */
 export const telegramStatus = httpAction(async (_ctx, request) => {
-  const requestedOrigin = new URL(request.url).searchParams.get("origin");
+  const url = new URL(request.url);
+  const requestedOrigin = url.searchParams.get("origin");
+  const host = url.hostname;
+  const isProduction = host.endsWith(".convex.site");
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+  // Production: секрет передаётся через Authorization header (не query param —
+  // URL логируется, кэшируется, виден в Analytics). Формат:
+  //   Authorization: Bearer <TELEGRAM_WEBHOOK_SECRET>
+  const authHeader = request.headers.get("authorization");
+  const bearerToken = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : null;
+  // Constant-time comparison: timing attack mitigation.
+  // Нужен, потому что первый false не прерывает цикл — attacker не может
+  // измерить время посимвольного сравнения.
+  const isAuthorized =
+    secret !== undefined &&
+    bearerToken !== null &&
+    timingSafeEqual(secret, bearerToken);
+
+  if (isProduction && !isAuthorized) {
+    // Минимальный ответ без секретов: только boolean «токен задан».
+    return new Response(
+      JSON.stringify({ ok: Boolean(process.env.TELEGRAM_BOT_TOKEN) }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // Dev / production с авторизацией — полная диагностика.
   const status = await buildTelegramStatus({
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,

@@ -140,11 +140,38 @@ function Auth({
   // create: true — открытие Mini App из бота это явное действие пользователя,
   // поэтому аккаунт КИЛО создаётся и привязывается к Telegram.
   const telegramAutoLoginDone = useRef(false);
+  const telegramAutoLoginInProgress = useRef(false);
   useEffect(() => {
-    if (authLoading || isAuthenticated || telegramAutoLoginDone.current) return;
-    const initData = telegramWebApp()?.initData;
-    if (!initData) return;
+    if (
+      authLoading ||
+      isAuthenticated ||
+      telegramAutoLoginDone.current ||
+      telegramAutoLoginInProgress.current
+    )
+      return;
+    const app = telegramWebApp();
+    const initData = app?.initData;
+    if (!initData) {
+      // Mini App SDK ещё не инициализировал initData — ждём следующего
+      // рендера (initData появляется после Telegram.WebApp.ready()).
+      console.debug(
+        "[TG-AUTO] initData не доступен, platform=",
+        app?.platform,
+        "version=",
+        app?.version,
+      );
+      return;
+    }
+    telegramAutoLoginInProgress.current = true;
     telegramAutoLoginDone.current = true;
+    console.debug(
+      "[TG-AUTO] initData.length=",
+      initData.length,
+      "platform=",
+      app?.platform,
+      "version=",
+      app?.version,
+    );
     let cancelled = false;
     (async () => {
       try {
@@ -156,8 +183,11 @@ function Auth({
         // Успех: useEffect(isAuthenticated) сам переведёт на redirect.
         setIsLoading(false);
       } catch (error) {
-        console.error("Telegram auto sign-in error:", error);
+        // Безопасно: не содержит initData/token.
+        console.error("[TG-AUTO] sign-in error:", error);
         if (!cancelled) {
+          telegramAutoLoginDone.current = false;
+          telegramAutoLoginInProgress.current = false;
           setError(readableError(error));
           setIsLoading(false);
         }

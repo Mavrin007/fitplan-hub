@@ -134,10 +134,19 @@ async function getCompletion(
   };
 }
 
-/** Диагностика интеграции: какой провайдер настроен и отвечает ли он. */
+/** Диагностика интеграции: какой провайдер настроен и отвечает ли он.
+ * Только для администраторов — раньше эндпоинт был публичным и утечка
+ * envNames + keyPrefix позволяла злоумышленнику составить полную картину
+ * инфраструктуры. Теперь: admin-only, без keyPrefix/envNames. */
 export const envStatus = action({
   args: {},
-  handler: async () => {
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Не авторизован");
+    const me = await ctx.runQuery(api.users.currentUser);
+    if (me?.role !== "admin") {
+      throw new Error("Доступно только администраторам.");
+    }
     const gemini = process.env.GEMINI_API_KEY;
     const vlyKey = process.env.VLY_INTEGRATION_KEY;
 
@@ -160,13 +169,9 @@ export const envStatus = action({
     return {
       provider: gemini ? "gemini" : vlyKey ? "vly" : "none",
       gemini: !!gemini,
-      geminiKeyPrefix: gemini ? gemini.slice(0, 6) : null,
       geminiModels: GEMINI_MODELS,
       geminiPing,
       vly: !!vlyKey,
-      vlyKeyPrefix: vlyKey ? vlyKey.slice(0, 4) : null,
-      // Имена ВСЕХ переменных окружения бэкенда (без значений!) — для диагностики.
-      envNames: Object.keys(process.env).sort(),
     };
   },
 });

@@ -82,8 +82,9 @@ async function webappFixture(
   params.set("query_id", "AAHdF6IQAAAAAN3rph8vVc8k");
   params.set("user", user);
   const dataCheckString = params.toString();
-  // Секрет Mini App — это СЫРЫЕ байты HMAC(токен, "WebAppData"), не hex.
-  const secretKey = await hmacRaw(encoder.encode(BOT_TOKEN), "WebAppData");
+  // Секрет Mini App — HMAC(key="WebAppData", message=bot_token),
+  // по official Telegram Bot API docs. НЕ перепутать порядок аргументов!
+  const secretKey = await hmacRaw(encoder.encode("WebAppData"), BOT_TOKEN);
   const hash = await hmacHex(secretKey, dataCheckString);
   return { initData: `${dataCheckString}&hash=${hash}`, authDate };
 }
@@ -112,7 +113,7 @@ describe("verifyTelegramAuth — Login Widget (oauth.telegram.org)", () => {
 
     await expect(
       verifyTelegramAuth({ source: "widget", botToken: BOT_TOKEN, fields: tampered }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_INVALID_SIGNATURE/);
   });
 
   it("отклоняет устаревшую подпись (auth_date старше 5 минут)", async () => {
@@ -127,7 +128,7 @@ describe("verifyTelegramAuth — Login Widget (oauth.telegram.org)", () => {
         fields,
         now: Date.now(),
       }),
-    ).rejects.toThrow("Вход через Telegram устарел. Попробуйте ещё раз.");
+    ).rejects.toThrow(/TG_AUTH_EXPIRED/);
   });
 
   it("отклоняет payload без hash или auth_date", async () => {
@@ -141,7 +142,7 @@ describe("verifyTelegramAuth — Login Widget (oauth.telegram.org)", () => {
         botToken: BOT_TOKEN,
         fields: withoutHash,
       }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_NO_SIGNATURE/);
   });
 });
 
@@ -169,7 +170,7 @@ describe("verifyTelegramAuth — Mini App initData", () => {
 
     await expect(
       verifyTelegramAuth({ source: "webapp", botToken: BOT_TOKEN, initData: forged }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_INVALID_SIGNATURE/);
   });
 
   it("отклоняет initData без hash", async () => {
@@ -178,7 +179,7 @@ describe("verifyTelegramAuth — Mini App initData", () => {
 
     await expect(
       verifyTelegramAuth({ source: "webapp", botToken: BOT_TOKEN, initData: withoutHash }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_NO_SIGNATURE/);
   });
 
   it("отклоняет подпись, посчитанную с чужим токеном", async () => {
@@ -190,7 +191,7 @@ describe("verifyTelegramAuth — Mini App initData", () => {
         botToken: "999999999:OTHER_BOT_TOKEN",
         initData,
       }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_INVALID_SIGNATURE/);
   });
 });
 
@@ -199,14 +200,14 @@ describe("verifyTelegramAuth — общие проверки", () => {
     const { fields } = await widgetFixture();
     await expect(
       verifyTelegramAuth({ source: "widget", botToken: "", fields }),
-    ).rejects.toThrow("Вход через Telegram не настроен на сервере.");
+    ).rejects.toThrow(/TG_AUTH_NO_BOT_TOKEN/);
   });
 
   it("отклоняет нечисловой id пользователя", async () => {
     const { fields } = await widgetFixture({ id: "not-a-number" });
     await expect(
       verifyTelegramAuth({ source: "widget", botToken: BOT_TOKEN, fields }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_INVALID_USER/);
   });
 
   it("не использует initData, когда source = widget (и наоборот)", async () => {
@@ -214,6 +215,6 @@ describe("verifyTelegramAuth — общие проверки", () => {
     // Виджет-путь игнорирует initData → нет полей → ошибка.
     await expect(
       verifyTelegramAuth({ source: "widget", botToken: BOT_TOKEN, initData }),
-    ).rejects.toThrow("Не удалось подтвердить вход через Telegram.");
+    ).rejects.toThrow(/TG_AUTH_NO_SIGNATURE/);
   });
 });
