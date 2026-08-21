@@ -14,7 +14,7 @@
  * мгновенную загрузку оболочки, шрифтов и иконок (быстрый повторный вход),
  * а не полный офлайн-доступ к записям.
  */
-const CACHE_NAME = "kilo-shell-v1";
+const CACHE_NAME = "kilo-shell-v2";
 const PRECACHE_URLS = [
   "/",
   "/index.html",
