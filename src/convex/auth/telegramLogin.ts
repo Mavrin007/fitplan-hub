@@ -51,7 +51,6 @@ export const telegramLogin = ConvexCredentials({
     credentials,
     ctx: GenericActionCtxWithAuthConfig<GenericDataModel>,
   ): Promise<{ userId: GenericId<"users"> } | null> => {
-    // eslint-disable-next-line no-console
     console.warn(`[TG-AUTH] ${DEPLOY_VERSION} authorize called`);
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;

@@ -20,6 +20,10 @@ const state = vi.hoisted(() => ({
   mutationImpls: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
   mutationCalls: [] as { path: string; args: unknown[] }[],
   actionImpls: new Map<string, (...args: unknown[]) => Promise<unknown>>(),
+  convexAuthState: { isLoading: false, isAuthenticated: false } as {
+    isLoading: boolean;
+    isAuthenticated: boolean;
+  },
 }));
 
 /** Общее состояние мока — живёт между рендерами в пределах одного теста. */
@@ -170,6 +174,11 @@ export function useQuery(ref: unknown, args?: unknown): unknown {
   return structuredClone(convexMock.queryResults.get(keyOf(pathOf(ref), args)));
 }
 
+/** useConvexAuth из convex/react — { isLoading, isAuthenticated }. */
+export function useConvexAuth() {
+  return convexMock.convexAuthState;
+}
+
 /** useConvex из convex/react — клиент для разовых вызовов convex.query()
  *  (используется в Auth для пред-проверки rate-limit перед signIn). Возвращает
  *  результат из того же стора, что и useQuery, поэтому setQuery() управляет и
@@ -225,10 +234,19 @@ export function setMutation(
   convexMock.mutationImpls.set(pathOf(ref), impl);
 }
 
+/** Управление состоянием useConvexAuth в тестах. */
+export function setConvexAuthState(state: {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+}): void {
+  convexMock.convexAuthState = state;
+}
+
 /** Очистить состояние мока между тестами. */
 export function resetConvexMock(): void {
   convexMock.queryResults.clear();
   convexMock.mutationImpls.clear();
   convexMock.actionImpls.clear();
   convexMock.mutationCalls = [];
+  convexMock.convexAuthState = { isLoading: false, isAuthenticated: false };
 }

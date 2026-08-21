@@ -16,7 +16,7 @@ import {
 import { telegramWebApp } from "@/lib/telegram/webApp";
 import { ArrowRight, Loader2, Mail, ShieldAlert } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useConvex, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -103,7 +103,8 @@ function Auth({
   resendCooldownSec = RESEND_COOLDOWN_SEC,
   otpMaxAgeSec = OTP_MAX_AGE_SEC,
 }: AuthProps = {}) {
-  const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  const { signIn } = useAuth();
+  const { isLoading: isConvexAuthLoading, isAuthenticated: isConvexAuthenticated } = useConvexAuth();
   const convex = useConvex();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -130,25 +131,27 @@ function Auth({
   );
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
+    if (!isConvexAuthLoading && isConvexAuthenticated) {
       navigate(redirect);
     }
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+  }, [isConvexAuthLoading, isConvexAuthenticated, navigate, redirect]);
 
   // Автовход из Telegram Mini App: приложение открыто внутри Telegram, и
   // Telegram уже выдал подписанные данные (initData). Входим без формы.
   // create: true — открытие Mini App из бота это явное действие пользователя,
   // поэтому аккаунт КИЛО создаётся и привязывается к Telegram.
+  //
+  // ВАЖНО: автовход не зависит от authLoading (который включает
+  // useQuery(users:currentUser)). Если этот query не загружается,
+  // authLoading остаётся true навсегда и автовход никогда не сработает.
+  // Поэтому используем useConvexAuth() напрямую для определения готовности.
   const telegramAutoLoginDone = useRef(false);
   const telegramAutoLoginInProgress = useRef(false);
   useEffect(() => {
-    if (
-      authLoading ||
-      isAuthenticated ||
-      telegramAutoLoginDone.current ||
-      telegramAutoLoginInProgress.current
-    )
-      return;
+    // Ждём пока Convex Auth определит состояние (не зависит от user query).
+    if (isConvexAuthLoading) return;
+    if (isConvexAuthenticated || telegramAutoLoginDone.current || telegramAutoLoginInProgress.current) return;
+
     const app = telegramWebApp();
     const initData = app?.initData;
     if (!initData) {
@@ -196,7 +199,7 @@ function Auth({
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, signIn]);
+  }, [isConvexAuthLoading, isConvexAuthenticated, signIn]);
 
   // Тикающий отсчёт кнопки «Отправить ещё раз»: раз в секунду до нуля.
   useEffect(() => {
