@@ -63,8 +63,10 @@ if (sentryEnabled) {
 // не должен падать: new ConvexReactClient(undefined) бросает при создании и
 // страница остаётся пустой. Показываем публичные страницы без бэкенда
 // вместо белого экрана; всё остальное дерево — только при настроенном URL.
-const convexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
-const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
+const convexUrl =
+  (import.meta.env.VITE_CONVEX_URL as string | undefined) ??
+  "https://nautical-butterfly-851.eu-west-1.convex.cloud";
+const convex = new ConvexReactClient(convexUrl);
 
 // Telegram Mini App: как можно раньше подтверждаем показ и разворачиваем
 // WebView на весь экран. Вне Telegram — no-op (см. lib/telegram/webApp.ts).
