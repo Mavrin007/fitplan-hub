@@ -14,7 +14,7 @@
  *
  * 2. Mini App initData (window.Telegram.WebApp.initData) — вход из приложения
  *    внутри Telegram.
- *    secret_key = HMAC_SHA256(bot_token, "WebAppData");
+ *    secret_key = HMAC_SHA256(key="WebAppData", message=bot_token);
  *    data_check_string = исходная query-строка без параметра hash (порядок
  *    параметров сохраняется); подпись — та же HMAC-SHA256.
  *
