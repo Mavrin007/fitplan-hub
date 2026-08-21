@@ -99,10 +99,7 @@ export const workoutDayValidator = v.object({
   approxMinutes: v.optional(v.number()), // примерная длительность сессии (мин)
 });
 
-/** Один подход упражнения: фактический вес × повторы (+RPE, если заполнен).
- *  Собирается в WorkoutMode по каждому подходу и хранится в `setDetails`
- *  лога — «прошлый раз» показывает полную прошлую сессию, а объём считается
- *  по реальным подходам, а не по агрегату. */
+/** Один подход упражнения: фактический вес × повторы (+RPE, если заполнен). */
 export const loggedSetValidator = v.object({
   weightKg: v.number(),
   reps: v.number(),
@@ -114,19 +111,9 @@ export const loggedExerciseValidator = v.object({
   sets: v.number(),
   reps: v.number(),
   weightKg: v.number(),
-  // Субъективная оценка подхода (1–10) — мягкая миграция: старые логи без
-  // поля читаются нормально (schemaValidation: false), а «Рекомендация KILO»
-  // использует RPE, когда он есть, иначе — усилие тренировки.
   rpe: v.optional(v.number()),
-  // Фактические подходы (вес × повторы × RPE) — мягкая миграция: старые
-  // логи без детализации читаются через агрегаты sets/reps/weightKg.
   setDetails: v.optional(v.array(loggedSetValidator)),
 });
-
-// Поля таблиц вынесены в отдельные валидаторы: единый источник правды для
-// defineTable и для тестовых фикстур (fixtures.ts типизируется через
-// Infer<typeof ...>, чтобы расхождение фикстур со схемой ловилось
-// на этапе компиляции).
 
 // User profile with the inputs for the calorie / macro calculator.
 export const profileFieldsValidator = v.object({
@@ -135,14 +122,14 @@ export const profileFieldsValidator = v.object({
   gender: genderValidator,
   heightCm: v.number(),
   weightKg: v.number(),
-  targetWeightKg: v.optional(v.number()), // goal weight shown as a dashed line on the progress chart
+  targetWeightKg: v.optional(v.number()),
   activityLevel: activityLevelValidator,
   fitnessGoal: fitnessGoalValidator,
   experienceLevel: experienceLevelValidator,
-  equipment: v.optional(v.array(equipmentValidator)), // доступный инвентарь для плана тренировок
-  limitations: v.optional(v.array(limitationValidator)), // ограничения/травмы (поясница, колени, плечи)
-  preferredTrainingDays: v.optional(v.number()), // сколько тренировок в неделю хочет пользователь (1–6)
-  trainingStyle: v.optional(trainingStyleValidator), // предпочтение стиля тренировок
+  equipment: v.optional(v.array(equipmentValidator)),
+  limitations: v.optional(v.array(limitationValidator)),
+  preferredTrainingDays: v.optional(v.number()),
+  trainingStyle: v.optional(trainingStyleValidator),
   updatedAt: v.number(),
 });
 export type ProfileFields = Infer<typeof profileFieldsValidator>;
@@ -161,9 +148,9 @@ export const mealLogEntryFieldsValidator = v.object({
   userId: v.id("users"),
   date: v.string(), // YYYY-MM-DD (local)
   mealType: mealTypeValidator,
-  foodId: v.optional(v.id("foods")), // set when logged from a custom food
+  foodId: v.optional(v.id("foods")),
   name: v.string(),
-  quantity: v.number(), // multiplier of the recorded serving
+  quantity: v.number(),
   calories: v.number(),
   protein: v.number(),
   carbs: v.number(),
@@ -176,12 +163,12 @@ export type MealLogEntryFields = Infer<typeof mealLogEntryFieldsValidator>;
 export const foodsFieldsValidator = v.object({
   userId: v.id("users"),
   name: v.string(),
-  amount: v.number(), // serving size in `unit`
-  unit: v.string(), // "g", "ml", "serving", "piece", ...
-  calories: v.number(), // per `amount`
-  protein: v.number(), // per `amount`
-  carbs: v.number(), // per `amount`
-  fat: v.number(), // per `amount`
+  amount: v.number(),
+  unit: v.string(),
+  calories: v.number(),
+  protein: v.number(),
+  carbs: v.number(),
+  fat: v.number(),
   createdAt: v.number(),
 });
 export type FoodFields = Infer<typeof foodsFieldsValidator>;
@@ -189,7 +176,7 @@ export type FoodFields = Infer<typeof foodsFieldsValidator>;
 // Daily water intake, one row per user per day (total ml).
 export const waterEntryFieldsValidator = v.object({
   userId: v.id("users"),
-  date: v.string(), // YYYY-MM-DD (local)
+  date: v.string(),
   amountMl: v.number(),
   createdAt: v.number(),
 });
@@ -202,14 +189,24 @@ const schema = defineSchema(
 
     // the users table is the default users table that is brought in by the authTables
     users: defineTable({
-      name: v.optional(v.string()), // name of the user. do not remove
-      image: v.optional(v.string()), // image of the user. do not remove
-      email: v.optional(v.string()), // email of the user. do not remove
-      emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
-      isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
+      name: v.optional(v.string()),
+      image: v.optional(v.string()),
+      email: v.optional(v.string()),
+      emailVerificationTime: v.optional(v.number()),
+      isAnonymous: v.optional(v.boolean()),
+      role: v.optional(roleValidator),
+    }).index("email", ["email"]),
 
-      role: v.optional(roleValidator), // role of the user. do not remove
-    }).index("email", ["email"]), // index for the email. do not remove or modify
+    // ── FitPlan Account ──────────────────────────────────────────────
+    // Wraps the Convex Auth identity. All user data is linked via this
+    // account's _id. This allows future multi-workspace/team features.
+    accounts: defineTable({
+      userId: v.id("users"),        // links to auth identity
+      email: v.string(),
+      onboardingCompleted: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_userId", ["userId"]),
 
     // ---- Fitness & nutrition app tables ---- //
 
@@ -232,22 +229,20 @@ const schema = defineSchema(
     workoutPlans: defineTable({
       userId: v.id("users"),
       name: v.string(),
-      adaptedFor: v.optional(v.string()), // сводка адаптации под профиль
-      profileSignature: v.optional(v.string()), // слепок профиля, по которому собран план
+      adaptedFor: v.optional(v.string()),
+      profileSignature: v.optional(v.string()),
       goal: fitnessGoalValidator,
       experienceLevel: experienceLevelValidator,
-      // Метаданные персонального плана (для сводной карточки на странице).
-      splitType: v.optional(v.string()), // «Фулбоди», «Жим/Тяга/Ноги» и т.п.
-      sessionsPerWeek: v.optional(v.number()), // 1–6 тренировок в неделю
-      durationWeeks: v.optional(v.number()), // длина цикла (4)
-      howCalculated: v.optional(v.array(v.string())), // пункты «как считается этот план»
+      splitType: v.optional(v.string()),
+      sessionsPerWeek: v.optional(v.number()),
+      durationWeeks: v.optional(v.number()),
+      howCalculated: v.optional(v.array(v.string())),
       days: v.array(workoutDayValidator),
-      // Цикл прогрессии нагрузки по неделям (опционально — старые планы без него).
       weeks: v.optional(
         v.array(
           v.object({
-            week: v.number(), // 1-based
-            label: v.string(), // «Неделя 2 · Прогресс»
+            week: v.number(),
+            label: v.string(),
             weightNote: v.optional(v.string()),
             days: v.array(workoutDayValidator),
           }),
@@ -256,8 +251,7 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
 
-    // Dev-only: перехваченные OTP-коды для локальной разработки без внешнего
-    // SMTP. Заполняется из emailOtp.ts только при VLY_EMAIL_DEV_CAPTURE=1.
+    // Dev-only: перехваченные OTP-коды для локальной разработки без внешнего SMTP.
     devOtpCodes: defineTable({
       email: v.string(),
       code: v.string(),
@@ -265,31 +259,19 @@ const schema = defineSchema(
     }).index("by_email_created", ["email", "createdAt"]),
 
     // Привязка Telegram-аккаунта к пользователю приложения (бот + Mini App):
-    // одна строка = один telegram-аккаунт. Создаётся только через linkByCode
-    // (код из приложения), поэтому чужой telegram id не может «приклеиться»
-    // к чужому аккаунту.
     telegramAccounts: defineTable({
       telegramUserId: v.number(),
       userId: v.id("users"),
       username: v.optional(v.string()),
       firstName: v.optional(v.string()),
-      chatId: v.optional(v.number()), // последний чат с ботом (для будущей рассылки)
+      chatId: v.optional(v.number()),
       linkedAt: v.number(),
-      // Последняя активность (бот / вход через Telegram) — для раздела
-      // «Активные сессии» в профиле. Мягкая миграция: старые строки без
-      // поля читаются нормально (schemaValidation: false).
       lastActiveAt: v.optional(v.number()),
     })
       .index("by_telegram", ["telegramUserId"])
       .index("by_user", ["userId"]),
 
-    // Защита от повторной доставки апдейтов Telegram (webhook replay): одна
-    // строка на update_id. Telegram гарантирует доставку, но не «ровно один
-    // раз» — при сетевых сбоях он может переслать тот же апдейт. Мутация
-    // processBotUpdate проверяет update_id по индексу до обработки и,
-    // если уже встречала, пропускает апдейт: повторный вебхук не выполнит
-    // мутацию дважды. Строки старше суток подчищаются при обработке новых
-    // апдейтов (by_processedAt).
+    // Защита от повторной доставки апдейтов Telegram (webhook replay):
     telegramSeenUpdates: defineTable({
       updateId: v.number(),
       processedAt: v.number(),
@@ -297,9 +279,7 @@ const schema = defineSchema(
       .index("by_updateId", ["updateId"])
       .index("by_processedAt", ["processedAt"]),
 
-    // Одноразовые коды привязки Telegram: пользователь получает код в
-    // приложении (Профиль → Telegram) и отправляет его боту (/link <код>).
-    // Строка живёт 10 минут и удаляется при первом использовании.
+    // Одноразовые коды привязки Telegram:
     linkCodes: defineTable({
       userId: v.id("users"),
       code: v.string(),
@@ -309,62 +289,35 @@ const schema = defineSchema(
       .index("by_code", ["code"])
       .index("by_user", ["userId"]),
 
-    // Состояние диалога пользователя с ботом (одна строка на чат): текущий
-    // шаг флоу «поиск продукта → порция». Хранится на сервере, потому что
-    // callback_data инлайн-кнопок Telegram ограничен 64 байтами — кодировать
-    // в него и поисковый запрос, и выбранный продукт нельзя. Протухшие
-    // состояния удаляются при следующем обращении к чату.
+    // Состояние диалога пользователя с ботом:
     telegramStates: defineTable({
       chatId: v.number(),
-      state: v.any(), // JSON-стейт флоу; валидируется кодом бота (src/lib/telegram/bot.ts)
+      state: v.any(),
       updatedAt: v.number(),
     }).index("by_chat", ["chatId"]),
 
-    // Rate-limit отправки OTP: одна строка на email, lastSentAt — время
-    // последней отправки кода. Серверная защита прод-пути: интервал повторной
-    // отправки 60с, чтобы не дёргать VLY-шлюз вхолостую (лимит попыток
-    // ввода кода реализован в самом @convex-dev/auth через authRateLimits
-    // и signIn.maxFailedAttempsPerHour).
+    // Rate-limit отправки OTP:
     otpRateLimits: defineTable({
       email: v.string(),
       lastSentAt: v.number(),
     }).index("by_email", ["email"]),
 
-    // Глобальный throttle записей (анти-флуд): одна строка = одно событие
-    // consumeRateLimit (rateLimit.ts). События считаются по ключу в скользящем
-    // окне; протухшие удаляются при следующем обращении, поэтому размер
-    // таблицы ограничен лимитом на ключ в окне. Ассистент лимитируется
-    // отдельно (assistantLimits — дневная квота), здесь — обычные мутации.
+    // Глобальный throttle записей (анти-флуд):
     rateLimitEvents: defineTable({
-      key: v.string(), // "<userId>:<операция>" — ключ лимита
-      timestamp: v.number(), // когда произошло событие (Date.now())
+      key: v.string(),
+      timestamp: v.number(),
     }).index("by_key_timestamp", ["key", "timestamp"]),
 
-    // Daily AI-assistant usage limits: одна строка на пользователя на день.
-    // Дневная квота сообщений + минимальный интервал между сообщениями
-    // (анти-спам) + накопленный расход токенов (приблизительно).
-    // Проверяется в assistant.ts chat action перед вызовом ИИ.
-    //
-    // totalTokens — optional, а не required: это «мягкая миграция». Старые
-    // документы (созданные до введения учёта токенов) не имеют этого поля, и
-    // schemaValidation: false не даст им упасть при чтении; код читает его
-    // через `?? 0` (см. assistantLimits.ts). При следующем же обращении
-    // checkAndConsume патчит строку с totalTokens — поля постепенно
-    // подтягиваются сами, без backfill-джобы. Это осознанный компромисс:
-    // жёсткая миграция не нужна при размере данных проекта.
+    // Daily AI-assistant usage limits:
     assistantLimits: defineTable({
       userId: v.id("users"),
-      day: v.string(), // YYYY-MM-DD (локальная дата пользователя)
-      count: v.number(), // сколько сообщений отправлено за день
-      totalTokens: v.optional(v.number()), // накопленный расход токенов за день (мягкая миграция: ?? 0)
-      lastMessageAt: v.number(), // время последнего сообщения (для интервала)
+      day: v.string(),
+      count: v.number(),
+      totalTokens: v.optional(v.number()),
+      lastMessageAt: v.number(),
     }).index("by_user_day", ["userId", "day"]),
 
-    // Product analytics events (минимальная event-модель без внешней
-    // платформы): одно событие = одна строка. Имена — из allowlist в
-    // analytics.ts (track), метаданные — только простые значения без
-    // персональных данных (email/JWT не пишем). Retention-метрики считаются
-    // из этой таблицы чистыми функциями в lib/retention.ts.
+    // Product analytics events:
     events: defineTable({
       userId: v.id("users"),
       name: v.string(),
@@ -379,10 +332,10 @@ const schema = defineSchema(
     // Completed workout sessions.
     workoutLogs: defineTable({
       userId: v.id("users"),
-      date: v.string(), // YYYY-MM-DD (local)
+      date: v.string(),
       workoutName: v.string(),
       exercises: v.array(loggedExerciseValidator),
-      effort: v.optional(effortValidator), // насколько тяжело было («лёгко/норм/тяжело») — влияет на следующий цикл
+      effort: v.optional(effortValidator),
       createdAt: v.number(),
     }).index("by_user_date", ["userId", "date"]),
   },
