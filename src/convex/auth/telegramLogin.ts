@@ -13,7 +13,11 @@
  *   - не привязан и create === false (автовход Mini App) → ошибка с понятным
  *     текстом, аккаунт не создаётся молча.
  *
- * v2 — HMAC verification with diagnostic error codes.
+ * v3 — HMAC verification with diagnostic error codes.
+ * 
+ * IMPORTANT: verifyTelegramAuth() lives in src/lib/telegram/verify.ts (bundled
+ * by Convex at deploy time). Any changes to verify.ts require a Convex
+ * redeployment to take effect on the server.
  */
 
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
@@ -22,6 +26,9 @@ import { ConvexError, type GenericId } from "convex/values";
 import type { GenericDataModel } from "convex/server";
 import { internal } from "../_generated/api";
 import { verifyTelegramAuth } from "../../lib/telegram/verify";
+
+/** Deploy marker — visible in Convex function logs after redeployment. */
+const DEPLOY_VERSION = "v3-hmac-fix-2026-08-21";
 
 /** Приводит произвольное значение к строке (или null). */
 function asString(value: unknown): string | null {
@@ -46,6 +53,9 @@ export const telegramLogin = ConvexCredentials({
     credentials,
     ctx: GenericActionCtxWithAuthConfig<GenericDataModel>,
   ): Promise<{ userId: GenericId<"users"> } | null> => {
+    // eslint-disable-next-line no-console
+    console.warn(`[TG-AUTH] ${DEPLOY_VERSION} authorize called`);
+
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken) {
       throw new ConvexError({
