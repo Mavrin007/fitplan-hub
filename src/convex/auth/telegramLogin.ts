@@ -83,10 +83,9 @@ export const telegramLogin = ConvexCredentials({
           source === "webapp" ? asString(credentials.initData) ?? "" : undefined,
       });
     } catch (e) {
-      const message =
-        e instanceof Error
-          ? e.message
-          : "Не удалось подтвердить вход через Telegram.";
+      const raw = e instanceof Error ? e.message : String(e);
+      // v4: add deploy marker to confirm which code is running on the server
+      const message = `[v4] ${raw}`;
       throw new ConvexError({ message });
     }
 
